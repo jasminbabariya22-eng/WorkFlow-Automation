@@ -258,12 +258,15 @@ def _db_read_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Di
                     mapping_dict[src] = tgt
         result_mapping = mapping_dict
 
+    conn_id = config.get("connection_id") or context_vars.get("connection_id")
+
     mapped_data = ClientDatabaseAdapter.read_entity_record(
         table_name=table_name,
         fields=fields,
         filters=filters,
         variables=context_vars,
-        result_mapping=result_mapping
+        result_mapping=result_mapping,
+        connection_id=conn_id
     )
 
     context_vars.update(mapped_data)
@@ -290,7 +293,13 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
     if not table_name:
         raise ValueError("Database UPDATE action requires 'table' or 'entity' to be configured.")
 
-    updates = config.get("updates") or config.get("values") or config.get("fields")
+    updates = (
+        config.get("updates") or 
+        config.get("values") or 
+        config.get("fields") or 
+        config.get("fieldMappings") or 
+        config.get("field_mappings")
+    )
     if isinstance(updates, list):
         update_dict = {}
         for item in updates:
@@ -305,15 +314,22 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
             "operator": config.get("filterOperator", "="),
             "value": config.get("filterValue", "{{entity.id}}")
         }]
-    elif not filters and config.get("recordId"):
+    elif not filters and (config.get("recordId") or config.get("record_id")):
         filters = [{
             "field": "id",
             "operator": "=",
-            "value": config.get("recordId")
+            "value": config.get("recordId") or config.get("record_id")
+        }]
+    elif not filters:
+        filters = [{
+            "field": "id",
+            "operator": "=",
+            "value": "{{entity.id}}"
         }]
 
     allow_full = bool(config.get("allowFullTableUpdate") or config.get("allow_full_table_update"))
     result_mapping = config.get("resultMapping") or config.get("result_mapping")
+    conn_id = config.get("connection_id") or context_vars.get("connection_id")
 
     mapped_data = ClientDatabaseAdapter.update_entity_record_generic(
         table_name=table_name,
@@ -321,7 +337,8 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
         filters=filters,
         variables=context_vars,
         allow_full_table_update=allow_full,
-        result_mapping=result_mapping
+        result_mapping=result_mapping,
+        connection_id=conn_id
     )
 
     context_vars.update(mapped_data)
@@ -347,12 +364,14 @@ def _db_create_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
         values = val_dict
 
     result_mapping = config.get("resultMapping") or config.get("result_mapping")
+    conn_id = config.get("connection_id") or context_vars.get("connection_id")
 
     mapped_data = ClientDatabaseAdapter.create_entity_record_generic(
         table_name=table_name,
         values=values,
         variables=context_vars,
-        result_mapping=result_mapping
+        result_mapping=result_mapping,
+        connection_id=conn_id
     )
 
     context_vars.update(mapped_data)
@@ -368,6 +387,186 @@ ActionRegistry.register("DB_CREATE", _db_create_handler)
 ActionRegistry.register("DATABASE_CREATE", _db_create_handler)
 ActionRegistry.register("CREATE_RECORD", _db_create_handler)
 ActionRegistry.register("RECORD_CREATE", _db_create_handler)
+
+
+def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Creates an outgoing email job in Client DB (ers.mst_email_job) for the ERM notification queue:
+    - Resolves recipient email from context / ers.mst_users
+    - Renders subject and formatted HTML body
+    - Inserts into ers.mst_email_job with send_status = 'New'
+    """
+    import datetime
+    from sqlalchemy import text
+    from app.core.database import engine as client_engine
+
+    entity_id = context_vars.get("entity_id") or context_vars.get("record_id") or context_vars.get("risk_register_id")
+    now_dt = datetime.datetime.now()
+    user_id = context_vars.get("user_id", 1)
+
+    # 1. Inspect risk record if entity_id is available
+    risk_info = {}
+    owner_email = None
+    owner_name = "Risk Owner"
+
+    if entity_id:
+        try:
+            with client_engine.connect() as conn:
+                r_row = conn.execute(
+                    text("SELECT risk_register_id, risk_id, risk_name, risk_owner_id, financial_year FROM ers.risk_register WHERE risk_register_id = :id"),
+                    {"id": int(entity_id)}
+                ).mappings().first()
+                if r_row:
+                    risk_info = dict(r_row)
+                    owner_id = risk_info.get("risk_owner_id")
+                    if owner_id:
+                        u_row = conn.execute(
+                            text("SELECT first_name, last_name, email FROM ers.mst_users WHERE id = :uid"),
+                            {"uid": int(owner_id)}
+                        ).mappings().first()
+                        if u_row:
+                            owner_email = u_row.get("email")
+                            owner_name = f"{u_row.get('first_name', '')} {u_row.get('last_name', '')}".strip() or "Risk Owner"
+        except Exception as e:
+            logger.warning(f"Error fetching risk owner for email job: {e}")
+
+    # 2. Resolve recipient email
+    raw_to = config.get("to") or config.get("recipient") or "{{risk_owner_email}}"
+    to_email = owner_email or "risk_owner@example.com"
+    if raw_to and raw_to != "{{risk_owner_email}}" and "@" in raw_to:
+        to_email = raw_to
+
+    # 3. Resolve Subject
+    risk_display_id = risk_info.get("risk_id") or f"#{entity_id}" if entity_id else "Risk Record"
+    risk_title = risk_info.get("risk_name") or "Operational Risk"
+    
+    raw_subject = config.get("subject") or f"Risk {risk_display_id} Approved by Function Head"
+    subject = raw_subject.replace("{{workflow.entity_id}}", str(risk_display_id)).replace("{{risk_id}}", str(risk_display_id))
+
+    # 4. Construct formatted ERM HTML Body
+    custom_body = config.get("body") or "Your risk record has been successfully approved by the Function Head."
+    if "{{workflow.entity_id}}" in custom_body:
+        custom_body = custom_body.replace("{{workflow.entity_id}}", str(risk_display_id))
+
+    html_body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:20px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td align="center">
+                    <table width="600px" style="background:#ffffff; border-radius:8px; padding:20px; border:1px solid #e2e8f0;">
+                        <tr>
+                            <td style="background:#0d6efd; color:white; padding:15px; border-radius:6px;">
+                                <h2 style="margin:0; font-size:18px;">Function Head Approval Notification</h2>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding:20px; color:#333; line-height: 1.6;">
+                                <p>Dear <b>{owner_name}</b>,</p>
+                                <p>{custom_body}</p>
+                                <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width:100%; margin:15px 0; border-color:#e2e8f0;">
+                                    <tr><td style="width:35%; background:#f8fafc;"><b>Risk Code</b></td><td>{risk_display_id}</td></tr>
+                                    <tr><td style="background:#f8fafc;"><b>Risk Title</b></td><td>{risk_title}</td></tr>
+                                    <tr><td style="background:#f8fafc;"><b>Approval Status</b></td><td><span style="color:#16a34a; font-weight:bold;">Approved (10)</span></td></tr>
+                                </table>
+                                <p>Regards,<br><b>Enterprise Risk Management System</b></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding:12px; font-size:11px; color:#94a3b8; border-top:1px solid #eee; text-align:center;">
+                                This is an automated notification generated by Workflow Automation Studio.
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    # 5. Insert into ers.mst_email_job
+    email_job_id = None
+    try:
+        with client_engine.begin() as conn:
+            res = conn.execute(
+                text("""
+                    INSERT INTO ers.mst_email_job (
+                        email_server_id,
+                        email_module,
+                        email_to,
+                        email_subject,
+                        email_type,
+                        email_body,
+                        send_status,
+                        total_attempts,
+                        send_attempts,
+                        attempt_delay,
+                        next_attempt_at,
+                        created_on,
+                        created_by,
+                        is_deleted
+                    ) VALUES (
+                        1,
+                        'RISK_MANAGEMENT',
+                        :email_to,
+                        :email_subject,
+                        'HTML',
+                        :email_body,
+                        'New',
+                        3,
+                        0,
+                        5000,
+                        :now_dt,
+                        :now_dt,
+                        :uid,
+                        0
+                    ) RETURNING email_job_id
+                """),
+                {
+                    "email_to": to_email,
+                    "email_subject": subject,
+                    "email_body": html_body,
+                    "now_dt": now_dt,
+                    "uid": user_id
+                }
+            )
+            email_job_id = res.scalar()
+            logger.info(f"Created email job #{email_job_id} in ers.mst_email_job for {to_email}")
+    except Exception as e:
+        logger.error(f"Failed to insert into ers.mst_email_job: {e}")
+        raise RuntimeError(f"Email job insertion failed: {str(e)}")
+
+    context_vars["email_job_id"] = email_job_id
+    context_vars["email_to"] = to_email
+    return {
+        "status": "SUCCESS",
+        "email_job_id": email_job_id,
+        "email_to": to_email,
+        "email_subject": subject,
+        "send_status": "New"
+    }
+
+
+ActionRegistry.register("NOTIFICATION", _email_notification_handler)
+ActionRegistry.register("EMAIL", _email_notification_handler)
+ActionRegistry.register("COMMUNICATION", _email_notification_handler)
+ActionRegistry.register("SEND_EMAIL", _email_notification_handler)
+ActionRegistry.register("EMAIL_JOB", _email_notification_handler)
+ActionRegistry.register("EMAIL_NOTIFICATION", _email_notification_handler)
+
+ActionRegistry.register("DB_UPDATE", _db_update_handler)
+ActionRegistry.register("DATABASE_UPDATE", _db_update_handler)
+ActionRegistry.register("UPDATE_RECORD", _db_update_handler)
+ActionRegistry.register("RECORD_UPDATE", _db_update_handler)
+ActionRegistry.register("RECORD", _db_update_handler)
+
+ActionRegistry.register("DB_CREATE", _db_create_handler)
+ActionRegistry.register("DATABASE_CREATE", _db_create_handler)
+ActionRegistry.register("CREATE_RECORD", _db_create_handler)
+ActionRegistry.register("INSERT_RECORD", _db_create_handler)
+
+
 
 
 

@@ -1,4 +1,8 @@
+import threading
+import time
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from typing import Optional, Dict, Any, List
@@ -27,9 +31,204 @@ SessionLocal = ClientSessionLocal
 Base = ClientBase
 
 
-def get_client_db():
+class DynamicEnginePool:
+    """
+    Thread-safe dynamic connection pool manager for Client Database connections.
+    Supports caching, live connection testing, and runtime database switching driven from the UI.
+    """
+    _lock = threading.Lock()
+    _cached_engines: Dict[int, Engine] = {}
+
+    @classmethod
+    def build_connection_url(
+        cls,
+        db_type: str,
+        host: str,
+        port: int,
+        database_name: str,
+        username: str,
+        password: str,
+        ssl_mode: str = "disable"
+    ) -> str:
+        db_type = (db_type or "postgresql").lower().strip()
+        encoded_pwd = quote_plus(password) if password else ""
+        encoded_user = quote_plus(username) if username else ""
+        
+        if db_type in ("postgresql", "postgres"):
+            url = f"postgresql+psycopg2://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+            if ssl_mode and ssl_mode != "disable":
+                url += f"?sslmode={ssl_mode}"
+            return url
+        elif db_type in ("mysql", "mariadb"):
+            return f"mysql+pymysql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+        elif db_type in ("mssql", "sqlserver"):
+            return f"mssql+pymssql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+        elif db_type in ("sqlite",):
+            return f"sqlite:///{database_name}"
+        else:
+            return f"{db_type}://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+
+    @classmethod
+    def parse_connection_error(
+        cls,
+        err: Exception,
+        db_type: str,
+        host: str,
+        port: int,
+        database_name: str,
+        username: str,
+        ssl_mode: str = "disable"
+    ) -> str:
+        import re
+        err_str = str(err)
+        err_lower = err_str.lower()
+
+        # 1. Password or Login Authentication Failure
+        if any(k in err_lower for k in [
+            "password authentication failed", "access denied for user", 
+            "login failed for user", "fe_sendauth", "1045", "18456"
+        ]):
+            return f"Authentication failed: Incorrect password or invalid user '{username}'."
+
+        # 2. User / Role does not exist
+        if ("role" in err_lower and "does not exist" in err_lower) or ("unknown user" in err_lower):
+            return f"User not found: Username/Role '{username}' does not exist on this database server."
+
+        # 3. Database does not exist
+        if (("database" in err_lower and "does not exist" in err_lower) or 
+            "unknown database" in err_lower or "cannot open database" in err_lower or "1049" in err_lower):
+            return f"Database not found: Database '{database_name}' does not exist on server '{host}:{port}'."
+
+        # 4. Host unreachable / Connection Refused / Wrong Port
+        if any(k in err_lower for k in [
+            "connection refused", "10061", "could not connect to server", 
+            "is the server running", "getaddrinfo failed", "name or service not known",
+            "cant connect to mysql", "can't connect to", "adaptive server is unavailable"
+        ]):
+            return f"Server unreachable: Could not connect to host '{host}' on port {port}. Please verify the host IP/name and check if the database server is running."
+
+        # 5. Connection Timeout
+        if "timed out" in err_lower or "timeout" in err_lower:
+            return f"Connection timed out: Server at '{host}:{port}' took too long to respond. Check network/firewall settings."
+
+        # 6. SSL Error
+        if "ssl" in err_lower or "certificate" in err_lower or "handshake failure" in err_lower:
+            return f"SSL error: SSL negotiation failed with mode '{ssl_mode}'. Please verify SSL settings."
+
+        # 7. Clean fallback
+        clean = re.sub(r"\(Background on this error at:.*?\)", "", err_str, flags=re.DOTALL).strip()
+        clean = re.sub(r"\(psycopg2\.[a-zA-Z]+\)", "", clean).strip()
+        return clean or f"Connection failed: {err_str}"
+
+    @classmethod
+    def test_connection_params(
+        cls,
+        db_type: str,
+        host: str,
+        port: int,
+        database_name: str,
+        username: str,
+        password: str,
+        default_schema: Optional[str] = None,
+        ssl_mode: str = "disable"
+    ) -> Dict[str, Any]:
+        url = cls.build_connection_url(db_type, host, port, database_name, username, password, ssl_mode)
+        start_time = time.time()
+        temp_engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+        try:
+            with temp_engine.connect() as conn:
+                res = conn.execute(text("SELECT version()")).scalar()
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                return {
+                    "success": True,
+                    "latency_ms": elapsed_ms,
+                    "version": str(res)[:120],
+                    "message": f"Successfully connected to {db_type.upper()} in {elapsed_ms}ms"
+                }
+        except Exception as e:
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            friendly_msg = cls.parse_connection_error(e, db_type, host, port, database_name, username, ssl_mode)
+            return {
+                "success": False,
+                "latency_ms": elapsed_ms,
+                "error": friendly_msg,
+                "message": friendly_msg
+            }
+        finally:
+            temp_engine.dispose()
+
+    @classmethod
+    def get_engine(cls, connection_id: Optional[int] = None) -> Engine:
+        """
+        Returns an active SQLAlchemy engine for the given connection_id or default active connection.
+        """
+        with cls._lock:
+            if connection_id and connection_id in cls._cached_engines:
+                return cls._cached_engines[connection_id]
+
+            from app.core.security import decrypt_text
+            from app.workflow.database import WorkflowSessionLocal
+            from app.workflow.persistence.models import DatabaseConnection
+
+            db = WorkflowSessionLocal()
+            try:
+                conn_rec = None
+                if connection_id:
+                    conn_rec = db.query(DatabaseConnection).filter(
+                        DatabaseConnection.connection_id == connection_id,
+                        DatabaseConnection.is_active == True
+                    ).first()
+
+                if not conn_rec:
+                    conn_rec = db.query(DatabaseConnection).filter(
+                        DatabaseConnection.is_default == True,
+                        DatabaseConnection.is_active == True
+                    ).first()
+
+                if not conn_rec:
+                    return client_engine
+
+                pwd = decrypt_text(conn_rec.password_encrypted) if conn_rec.password_encrypted else ""
+                url = cls.build_connection_url(
+                    db_type=conn_rec.db_type,
+                    host=conn_rec.host or "localhost",
+                    port=conn_rec.port or 5432,
+                    database_name=conn_rec.database_name or "postgres",
+                    username=conn_rec.username or "postgres",
+                    password=pwd,
+                    ssl_mode=conn_rec.ssl_mode or "disable"
+                )
+                new_engine = create_engine(
+                    url,
+                    pool_size=conn_rec.pool_size or 10,
+                    max_overflow=20,
+                    pool_pre_ping=True,
+                    pool_recycle=3600
+                )
+                cls._cached_engines[conn_rec.connection_id] = new_engine
+                return new_engine
+            except Exception as ex:
+                logger.warning(f"DynamicEnginePool: Error resolving connection {connection_id}: {ex}. Falling back to default client_engine.")
+                return client_engine
+            finally:
+                db.close()
+
+    @classmethod
+    def invalidate_engine(cls, connection_id: int):
+        with cls._lock:
+            engine = cls._cached_engines.pop(connection_id, None)
+            if engine:
+                try:
+                    engine.dispose()
+                except Exception:
+                    pass
+
+
+def get_client_db(connection_id: Optional[int] = None):
     """FastAPI dependency yielding a session to the Client / Domain Database."""
-    db = ClientSessionLocal()
+    eng = DynamicEnginePool.get_engine(connection_id)
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=eng)
+    db = session_factory()
     try:
         yield db
     finally:
@@ -94,77 +293,113 @@ class ClientDatabaseAdapter:
             return []
 
     @staticmethod
-    def get_roles(schema: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Retrieves user roles from the Client Database dynamically."""
+    def get_roles(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Retrieves user roles from the Client Database dynamically. Returns [] gracefully if table does not exist."""
         target_schema = schema or settings.DB_SCHEMA or "ers"
-        for table in ["mst_user_role", "user_role", "roles"]:
-            try:
-                full_table = f"{target_schema}.{table}" if target_schema else table
-                with client_engine.connect() as conn:
-                    rows = conn.execute(
-                        text(f"SELECT id, name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
-                    ).mappings().all()
-                    return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
-            except Exception:
-                continue
-        raise ValueError(f"Could not discover role table in schema '{target_schema}' of Client Database.")
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            for table in ["mst_user_role", "user_role", "roles", "user_roles", "tbl_roles"]:
+                try:
+                    full_table = f"{target_schema}.{table}" if target_schema else table
+                    with eng.connect() as conn:
+                        rows = conn.execute(
+                            text(f"SELECT id, name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
+                        ).mappings().all()
+                        return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
+                except Exception:
+                    # Try without schema prefix or without is_deleted
+                    try:
+                        with eng.connect() as conn:
+                            rows = conn.execute(
+                                text(f"SELECT id, name FROM {table} ORDER BY id")
+                            ).mappings().all()
+                            return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
+                    except Exception:
+                        continue
+        except Exception as ex:
+            logger.info(f"ClientDatabaseAdapter: Note: No role tables in connection {connection_id}: {ex}")
+        return []
 
     @staticmethod
-    def get_users(schema: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Retrieves users from the Client Database dynamically."""
+    def get_users(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Retrieves users from the Client Database dynamically. Returns [] gracefully if table does not exist."""
         target_schema = schema or settings.DB_SCHEMA or "ers"
-        for table in ["mst_users", "users"]:
-            try:
-                full_table = f"{target_schema}.{table}" if target_schema else table
-                with client_engine.connect() as conn:
-                    rows = conn.execute(
-                        text(f"SELECT id, first_name, last_name, email, role_id, user_type_id, dept_id FROM {full_table} WHERE is_deleted = 0 ORDER BY id LIMIT 100")
-                    ).mappings().all()
-                    return [
-                        {
-                            "id": str(u["id"]),
-                            "name": f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or str(u["id"]),
-                            "email": u.get("email"),
-                            "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
-                            "user_type_id": str(u.get("user_type_id")) if u.get("user_type_id") is not None else None,
-                            "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None,
-                        }
-                        for u in rows
-                    ]
-            except Exception:
-                continue
-        raise ValueError(f"Could not discover user table in schema '{target_schema}' of Client Database.")
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            for table in ["mst_users", "users", "tbl_users", "user_master"]:
+                try:
+                    full_table = f"{target_schema}.{table}" if target_schema else table
+                    with eng.connect() as conn:
+                        rows = conn.execute(
+                            text(f"SELECT id, first_name, last_name, email, role_id, user_type_id, dept_id FROM {full_table} WHERE is_deleted = 0 ORDER BY id LIMIT 100")
+                        ).mappings().all()
+                        return [
+                            {
+                                "id": str(u["id"]),
+                                "name": f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or str(u["id"]),
+                                "email": u.get("email"),
+                                "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
+                                "user_type_id": str(u.get("user_type_id")) if u.get("user_type_id") is not None else None,
+                                "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None,
+                            }
+                            for u in rows
+                        ]
+                except Exception:
+                    # Try generic columns
+                    try:
+                        with eng.connect() as conn:
+                            rows = conn.execute(
+                                text(f"SELECT id, username FROM {table} LIMIT 100")
+                            ).mappings().all()
+                            return [{"id": str(u["id"]), "name": str(u.get("username") or u["id"]), "email": None} for u in rows]
+                    except Exception:
+                        continue
+        except Exception as ex:
+            logger.info(f"ClientDatabaseAdapter: Note: No user tables in connection {connection_id}: {ex}")
+        return []
 
     @staticmethod
-    def get_departments(schema: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Retrieves departments from the Client Database dynamically."""
+    def get_departments(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Retrieves departments from the Client Database dynamically. Returns [] gracefully if table does not exist."""
         target_schema = schema or settings.DB_SCHEMA or "ers"
-        for table in ["mst_department", "department", "departments"]:
-            try:
-                full_table = f"{target_schema}.{table}" if target_schema else table
-                with client_engine.connect() as conn:
-                    rows = conn.execute(
-                        text(f"SELECT id, dept_name, dept_short_name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
-                    ).mappings().all()
-                    return [
-                        {
-                            "id": str(d["id"]),
-                            "name": d.get("dept_name") or d.get("name") or str(d["id"]),
-                            "short_name": d.get("dept_short_name")
-                        }
-                        for d in rows
-                    ]
-            except Exception:
-                continue
-        raise ValueError(f"Could not discover department table in schema '{target_schema}' of Client Database.")
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            for table in ["mst_department", "department", "departments", "tbl_department"]:
+                try:
+                    full_table = f"{target_schema}.{table}" if target_schema else table
+                    with eng.connect() as conn:
+                        rows = conn.execute(
+                            text(f"SELECT id, dept_name, dept_short_name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
+                        ).mappings().all()
+                        return [
+                            {
+                                "id": str(d["id"]),
+                                "name": d.get("dept_name") or d.get("name") or str(d["id"]),
+                                "short_name": d.get("dept_short_name")
+                            }
+                            for d in rows
+                        ]
+                except Exception:
+                    try:
+                        with eng.connect() as conn:
+                            rows = conn.execute(
+                                text(f"SELECT id, name FROM {table} ORDER BY id")
+                            ).mappings().all()
+                            return [{"id": str(d["id"]), "name": str(d.get("name") or d["id"])} for d in rows]
+                    except Exception:
+                        continue
+        except Exception as ex:
+            logger.info(f"ClientDatabaseAdapter: Note: No department tables in connection {connection_id}: {ex}")
+        return []
 
     @staticmethod
-    def get_tables(schema: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_tables(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Introspects all available tables in the Client Database dynamically."""
         from sqlalchemy import inspect
         target_schema = schema or settings.DB_SCHEMA or "ers"
         try:
-            inspector = inspect(client_engine)
+            eng = DynamicEnginePool.get_engine(connection_id)
+            inspector = inspect(eng)
             tables = inspector.get_table_names(schema=target_schema)
             if not tables:
                 tables = inspector.get_table_names()
@@ -174,25 +409,32 @@ class ClientDatabaseAdapter:
             raise
 
     @staticmethod
-    def get_table_columns(table_name: str, schema: Optional[str] = None) -> Dict[str, Any]:
+    def get_table_columns(table_name: str, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Dict[str, Any]:
         """Introspects columns, data types, primary keys, and foreign keys for a Client DB table."""
         from sqlalchemy import inspect
         target_schema = schema or settings.DB_SCHEMA or "ers"
+        clean_table = table_name
+        if "." in table_name:
+            parts = table_name.split(".", 1)
+            target_schema = parts[0]
+            clean_table = parts[1]
+
         try:
-            inspector = inspect(client_engine)
+            target_eng = DynamicEnginePool.get_engine(connection_id)
+            inspector = inspect(target_eng)
             
             all_tables = inspector.get_table_names(schema=target_schema)
             schema_to_use = target_schema
-            if table_name not in all_tables:
+            if clean_table not in all_tables:
                 all_tables_default = inspector.get_table_names()
-                if table_name in all_tables_default:
+                if clean_table in all_tables_default:
                     schema_to_use = None
                 else:
                     raise ValueError(f"Table '{table_name}' does not exist in Client Database.")
 
-            cols = inspector.get_columns(table_name, schema=schema_to_use)
+            cols = inspector.get_columns(clean_table, schema=schema_to_use)
             if not cols:
-                raise ValueError(f"Table '{table_name}' has no columns or does not exist.")
+                raise ValueError(f"Table '{clean_table}' has no columns or does not exist.")
 
             pk_constraint = inspector.get_pk_constraint(table_name, schema=schema_to_use) or {}
             pk_cols = set(pk_constraint.get("constrained_columns") or [])
@@ -239,7 +481,8 @@ class ClientDatabaseAdapter:
         filters: Optional[List[Dict[str, Any]]] = None,
         variables: Optional[Dict[str, Any]] = None,
         result_mapping: Optional[Dict[str, str]] = None,
-        schema: Optional[str] = None
+        schema: Optional[str] = None,
+        connection_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Executes a secure, parameterized generic SELECT against the Client Database
@@ -247,11 +490,19 @@ class ClientDatabaseAdapter:
         Maps result fields to workflow variables.
         """
         target_schema = schema or settings.DB_SCHEMA or "ers"
+        clean_table = table_name
+        if "." in table_name:
+            parts = table_name.split(".", 1)
+            target_schema = parts[0]
+            clean_table = parts[1]
+
         context_vars = variables or {}
 
         # 1. Validate table & inspect columns
-        table_info = cls.get_table_columns(table_name, schema=target_schema)
+        table_info = cls.get_table_columns(clean_table, schema=target_schema, connection_id=connection_id)
         valid_cols = {c["name"]: c for c in table_info["columns"]}
+        pk_cols = table_info.get("primary_keys") or []
+        primary_key = pk_cols[0] if pk_cols else "id"
 
         # 2. Validate requested fields
         selected_fields = fields or list(valid_cols.keys())
@@ -285,6 +536,9 @@ class ClientDatabaseAdapter:
 
         for idx, flt in enumerate(filter_list):
             flt_field = flt.get("field")
+            if flt_field == "id" and "id" not in valid_cols:
+                flt_field = primary_key
+
             if not flt_field or flt_field not in valid_cols:
                 raise ValueError(f"Filter references invalid field '{flt_field}' for table '{table_name}'.")
 
@@ -313,10 +567,11 @@ class ClientDatabaseAdapter:
         escaped_fields = ", ".join(selected_fields)
         schema_prefix = f"{target_schema}." if target_schema else ""
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        query_str = f"SELECT {escaped_fields} FROM {schema_prefix}{table_name}{where_sql} LIMIT 1"
+        query_str = f"SELECT {escaped_fields} FROM {schema_prefix}{clean_table}{where_sql} LIMIT 1"
 
         try:
-            with client_engine.connect() as conn:
+            target_eng = DynamicEnginePool.get_engine(connection_id)
+            with target_eng.connect() as conn:
                 result_row = conn.execute(text(query_str), bind_params).mappings().first()
         except Exception as e:
             # If type mismatch / invalid input syntax occurs (e.g. string passed to integer parameter), treat safely as no match or raise sanitized error
@@ -353,7 +608,8 @@ class ClientDatabaseAdapter:
         variables: Optional[Dict[str, Any]] = None,
         allow_full_table_update: bool = False,
         result_mapping: Optional[Dict[str, str]] = None,
-        schema: Optional[str] = None
+        schema: Optional[str] = None,
+        connection_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Executes a secure, parameterized generic UPDATE against the Client Database
@@ -361,11 +617,19 @@ class ClientDatabaseAdapter:
         Returns execution metadata (e.g. affectedRows).
         """
         target_schema = schema or settings.DB_SCHEMA or "ers"
+        clean_table = table_name
+        if "." in table_name:
+            parts = table_name.split(".", 1)
+            target_schema = parts[0]
+            clean_table = parts[1]
+
         context_vars = variables or {}
 
         # 1. Validate table & inspect columns
-        table_info = cls.get_table_columns(table_name, schema=target_schema)
+        table_info = cls.get_table_columns(clean_table, schema=target_schema, connection_id=connection_id)
         valid_cols = {c["name"]: c for c in table_info["columns"]}
+        pk_cols = table_info.get("primary_keys") or []
+        primary_key = pk_cols[0] if pk_cols else "id"
 
         # 2. Validate update fields
         if not updates or not isinstance(updates, dict):
@@ -404,6 +668,9 @@ class ClientDatabaseAdapter:
         where_clauses = []
         for idx, flt in enumerate(filter_list):
             flt_field = flt.get("field")
+            if flt_field == "id" and "id" not in valid_cols:
+                flt_field = primary_key
+
             if not flt_field or flt_field not in valid_cols:
                 raise ValueError(f"Filter references invalid field '{flt_field}' for table '{table_name}'.")
 
@@ -428,10 +695,11 @@ class ClientDatabaseAdapter:
 
         schema_prefix = f"{target_schema}." if target_schema else ""
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        query_str = f"UPDATE {schema_prefix}{table_name} SET {', '.join(set_clauses)}{where_sql}"
+        query_str = f"UPDATE {schema_prefix}{clean_table} SET {', '.join(set_clauses)}{where_sql}"
 
         try:
-            with client_engine.begin() as conn:
+            target_eng = DynamicEnginePool.get_engine(connection_id)
+            with target_eng.begin() as conn:
                 res = conn.execute(text(query_str), bind_params)
                 affected_count = res.rowcount if res.rowcount is not None else 0
         except Exception as e:
@@ -464,7 +732,8 @@ class ClientDatabaseAdapter:
         values: Dict[str, Any],
         variables: Optional[Dict[str, Any]] = None,
         result_mapping: Optional[Dict[str, str]] = None,
-        schema: Optional[str] = None
+        schema: Optional[str] = None,
+        connection_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Executes a secure, parameterized generic INSERT against the Client Database
@@ -475,7 +744,7 @@ class ClientDatabaseAdapter:
         context_vars = variables or {}
 
         # 1. Validate table & inspect columns
-        table_info = cls.get_table_columns(table_name, schema=target_schema)
+        table_info = cls.get_table_columns(table_name, schema=target_schema, connection_id=connection_id)
         valid_cols = {c["name"]: c for c in table_info["columns"]}
         pk_cols = table_info.get("primary_keys") or []
 
@@ -511,7 +780,8 @@ class ClientDatabaseAdapter:
 
         created_id = None
         try:
-            with client_engine.begin() as conn:
+            target_eng = DynamicEnginePool.get_engine(connection_id)
+            with target_eng.begin() as conn:
                 res = conn.execute(text(query_str), bind_params)
                 if returning_clause and res.returns_rows:
                     row = res.mappings().first()

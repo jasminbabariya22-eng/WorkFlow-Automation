@@ -9,6 +9,7 @@ from app.core.dependencies import get_current_user
 from app.core.response import success_response, error_response
 
 from app.workflow.persistence.models import BPMNDefinition, WorkflowEntityConfig
+from app.workflow_definition.models import GenericWorkflow, WorkflowVersion
 from SpiffWorkflow.bpmn.parser import BpmnParser, BpmnValidator
 
 router = APIRouter(prefix="/workflow/definitions", tags=["Workflow Definitions"])
@@ -135,6 +136,17 @@ def activate_workflow_version(
         definition.is_active = True
         definition.status = "Active"
 
+        # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.status = "ACTIVE"
+            wf.updated_at = datetime.now()
+            db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == wf.workflow_id
+            ).update({"status": "PUBLISHED", "published_at": datetime.now()})
+
         # Update active entity mapping for 'Risk' entity
         entity_config = db.query(WorkflowEntityConfig).filter(
             WorkflowEntityConfig.entity_type == "Risk"
@@ -176,7 +188,27 @@ def deactivate_workflow_version(
             raise HTTPException(status_code=404, detail="Workflow version not found")
 
         definition.is_active = False
-        definition.status = "Published"
+        definition.status = "Inactive"
+
+        # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.status = "INACTIVE"
+            wf.updated_at = datetime.now()
+            db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == wf.workflow_id
+            ).update({"status": "ARCHIVED"})
+
+        # Also deactivate entity config if linked
+        entity_config = db.query(WorkflowEntityConfig).filter(
+            WorkflowEntityConfig.specification_id == definition.spec_id
+        ).first()
+        if entity_config:
+            entity_config.is_active = False
+            entity_config.modified_on = datetime.now()
+
         db.commit()
 
         return success_response(message=f"Workflow version {definition.version} deactivated successfully")

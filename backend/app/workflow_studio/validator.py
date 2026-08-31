@@ -10,7 +10,7 @@ SUPPORTED_STUDIO_NODE_TYPES = {
     "ACTION",
     "EMAIL",
     "USER_TASK",
-    "DELAY",
+    "DELAY",    
     "WAIT",
     "SUB_WORKFLOW",
     "WEBHOOK"
@@ -67,32 +67,20 @@ class WorkflowStudioValidator:
             elif node_type == "END":
                 end_nodes.append(node)
 
-            # Rule: USER_TASK node validation
-            if node_type == "USER_TASK":
-                assignment = node.config.get("assignment", {}) if isinstance(node.config.get("assignment"), dict) else {}
-                role = (
-                    assignment.get("roleName") or 
-                    assignment.get("role") or 
-                    assignment.get("userName") or 
-                    assignment.get("departmentName") or
-                    node.config.get("role") or 
-                    node.config.get("candidate_group") or 
-                    node.config.get("role_code")
-                )
-                if not role:
-                    errors.append(StudioValidationError(
-                        code="USER_TASK_MISSING_ASSIGNMENT",
-                        message=f"User Task '{node.name}' ({node_id}) has no assigned role or target configured.",
-                        node_id=node_id
-                    ))
-
-            # Rule: APPROVAL node validation
-            elif node_type == "APPROVAL":
+            # Rule: APPROVAL node must have role and at least one action
+            if node_type in ("APPROVAL", "USER_TASK"):
                 role = node.config.get("role") or node.config.get("candidate_group") or node.config.get("role_code")
+                actions = node.config.get("actions") or node.config.get("allowed_actions") or []
                 if not role:
                     errors.append(StudioValidationError(
                         code="APPROVAL_MISSING_ROLE",
                         message=f"Approval node '{node.name}' ({node_id}) has no assigned role configured.",
+                        node_id=node_id
+                    ))
+                if not actions or (isinstance(actions, list) and len(actions) == 0):
+                    errors.append(StudioValidationError(
+                        code="APPROVAL_MISSING_ACTIONS",
+                        message=f"Approval node '{node.name}' ({node_id}) must have at least one allowed action configured (e.g. APPROVE, REJECT).",
                         node_id=node_id
                     ))
 

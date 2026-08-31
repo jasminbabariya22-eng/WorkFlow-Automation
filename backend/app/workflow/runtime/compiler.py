@@ -22,19 +22,7 @@ class WorkflowGraphCompiler:
     @classmethod
     def compile_graph_to_bpmn(cls, spec_id: str, graph_data: Dict[str, Any]) -> str:
         nodes = graph_data.get("nodes", [])
-        edges = graph_data.get("edges", [])
-
-        # Default fallback if graph empty
-        if not nodes:
-            nodes = [
-                {"id": "StartEvent_1", "type": "start", "name": "Start", "position": {"x": 180, "y": 160}, "config": {}},
-                {"id": "UserTask_FH", "type": "approval", "name": "Functional Head Approval", "position": {"x": 320, "y": 160}, "config": {"role_code": "FUNCTION_HEAD", "actions": ["APPROVE", "REJECT"]}},
-                {"id": "EndEvent_Approved", "type": "end_approved", "name": "Approved", "position": {"x": 520, "y": 160}, "config": {}}
-            ]
-            edges = [
-                {"id": "Flow_1", "source": "StartEvent_1", "target": "UserTask_FH", "label": ""},
-                {"id": "Flow_2", "source": "UserTask_FH", "target": "EndEvent_Approved", "label": "Approve"}
-            ]
+        edges = graph_data.get("edges", []) or graph_data.get("connections", [])
 
         # Namespaces
         bpmn_ns = "http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -64,27 +52,59 @@ class WorkflowGraphCompiler:
 
         # Map node elements
         node_map = {}
+        gateway_default_flows = {}
+
+        # Pre-scan edges to identify gateway default outgoing flows (e.g. FALSE branch)
         for node in nodes:
             node_id = node.get("id")
             raw_type = str(node.get("type", "userTask")).strip().lower()
-            node_name = node.get("name", node_id)
+            if raw_type in ["gateway", "condition", "exclusivegateway", "exclusive_gateway"]:
+                outgoing_from_gw = [e for e in edges if e.get("source") == node_id]
+                for e in outgoing_from_gw:
+                    sh = str(e.get("sourceHandle") or e.get("label") or e.get("data", {}).get("action") or "").upper()
+                    if "FALSE" in sh or "REJECT" in sh or "DEFAULT" in sh:
+                        flow_id = e.get("id")
+                        if flow_id:
+                            gateway_default_flows[node_id] = flow_id
+                # Fallback to last outgoing flow as default if not explicitly marked
+                if node_id not in gateway_default_flows and len(outgoing_from_gw) > 1:
+                    gateway_default_flows[node_id] = outgoing_from_gw[-1].get("id")
+
+        for node in nodes:
+            node_id = node.get("id")
+            raw_type = str(node.get("type", "userTask")).strip().lower()
+            data = node.get("data", {})
             config = node.get("config", {})
+            node_name = data.get("label") or data.get("name") or node.get("name") or node_id
 
             if raw_type in ["start", "startevent", "start_event"]:
                 elem = ET.SubElement(process, f"{{{bpmn_ns}}}startEvent", {"id": node_id, "name": node_name})
             elif raw_type in ["approval", "usertask", "user_task", "human_task", "form"]:
-                role_code = config.get("role") or config.get("role_code") or "FUNCTION_HEAD"
+                role_code = data.get("role") or data.get("roleId") or config.get("role") or config.get("role_code") or "FUNCTION_HEAD"
                 elem = ET.SubElement(process, f"{{{bpmn_ns}}}userTask", {
                     "id": node_id,
                     "name": node_name,
-                    f"{{{camunda_ns}}}candidateGroups": role_code
+                    f"{{{camunda_ns}}}candidateGroups": str(role_code)
                 })
-            elif raw_type in ["email", "mail"]:
-                elem = ET.SubElement(process, f"{{{bpmn_ns}}}serviceTask", {"id": node_id, "name": node_name})
-            elif raw_type in ["action", "servicetask", "service_task", "webhook"]:
-                elem = ET.SubElement(process, f"{{{bpmn_ns}}}serviceTask", {"id": node_id, "name": node_name})
+            elif raw_type in ["email", "mail", "communication", "notification"]:
+                elem = ET.SubElement(process, f"{{{bpmn_ns}}}serviceTask", {
+                    "id": node_id,
+                    "name": node_name,
+                    f"{{{camunda_ns}}}class": "SendEmailActivity",
+                    f"{{{camunda_ns}}}topic": "SendEmail"
+                })
+            elif raw_type in ["action", "servicetask", "service_task", "webhook", "record", "dbupdate"]:
+                elem = ET.SubElement(process, f"{{{bpmn_ns}}}serviceTask", {
+                    "id": node_id,
+                    "name": node_name,
+                    f"{{{camunda_ns}}}class": "UpdateDatabaseActivity",
+                    f"{{{camunda_ns}}}topic": "UpdateDatabase"
+                })
             elif raw_type in ["gateway", "condition", "exclusivegateway", "exclusive_gateway"]:
-                elem = ET.SubElement(process, f"{{{bpmn_ns}}}exclusiveGateway", {"id": node_id, "name": node_name})
+                gw_attrs = {"id": node_id, "name": node_name}
+                if node_id in gateway_default_flows:
+                    gw_attrs["default"] = gateway_default_flows[node_id]
+                elem = ET.SubElement(process, f"{{{bpmn_ns}}}exclusiveGateway", gw_attrs)
             elif raw_type in ["wait", "delay"]:
                 elem = ET.SubElement(process, f"{{{bpmn_ns}}}intermediateCatchEvent", {"id": node_id, "name": node_name})
             elif raw_type in ["end", "endevent", "end_event", "end_approved", "end_rejected"]:
@@ -101,7 +121,7 @@ class WorkflowGraphCompiler:
             target_id = edge.get("target")
             flow_id = edge.get("id") or f"Flow_{flow_counter}"
             flow_counter += 1
-            label = edge.get("label") or edge.get("action") or ""
+            label = edge.get("label") or edge.get("data", {}).get("label") or edge.get("action") or ""
 
             flow_attr = {
                 "id": flow_id,
@@ -113,12 +133,27 @@ class WorkflowGraphCompiler:
 
             flow_elem = ET.SubElement(process, f"{{{bpmn_ns}}}sequenceFlow", flow_attr)
 
-            condition = edge.get("condition") or edge.get("action")
-            if condition:
+            # Check if source node is a condition / exclusiveGateway
+            source_node = node_map.get(source_id, {})
+            source_type = str(source_node.get("type", "")).strip().lower()
+            
+            condition_expr = edge.get("condition") or edge.get("conditionExpression")
+            
+            if not condition_expr and source_type in ["gateway", "condition", "exclusivegateway", "exclusive_gateway"]:
+                sh = str(edge.get("sourceHandle") or label or "").upper()
+                gw_data = source_node.get("data", {})
+                gw_field = gw_data.get("field") or "action"
+                gw_val = gw_data.get("value") or "APPROVE"
+                
+                # If this flow is the TRUE branch or non-default branch
+                if "TRUE" in sh or "APPROVE" in sh or (flow_id != gateway_default_flows.get(source_id)):
+                    condition_expr = f"{gw_field} == '{gw_val}'"
+
+            if condition_expr:
                 cond_elem = ET.SubElement(flow_elem, f"{{{bpmn_ns}}}conditionExpression", {
                     "{http://www.w3.org/2001/XMLSchema-instance}type": "bpmn:tFormalExpression"
                 })
-                cond_elem.text = condition
+                cond_elem.text = condition_expr
 
         # Build BPMNDiagram layout
         diagram = ET.SubElement(definitions, f"{{{bpmndi_ns}}}BPMNDiagram", {"id": "BPMNDiagram_1"})
@@ -156,48 +191,10 @@ class WorkflowGraphCompiler:
     @classmethod
     def get_default_starter_graph(cls, spec_id: str, name: str) -> Dict[str, Any]:
         """
-        Provides default starter visual graph for new definitions.
+        Provides default starter visual graph for new definitions (empty blank canvas).
         """
         return {
-            "nodes": [
-                {
-                    "id": "StartEvent_1",
-                    "type": "start",
-                    "name": "Start Process",
-                    "position": { "x": 100, "y": 220 },
-                    "config": {}
-                },
-                {
-                    "id": "UserTask_1",
-                    "type": "approval",
-                    "name": "Reviewer Approval",
-                    "position": { "x": 300, "y": 220 },
-                    "config": {
-                        "role_code": "REVIEWER",
-                        "actions": ["APPROVE", "REJECT"]
-                    }
-                },
-                {
-                    "id": "UserTask_2",
-                    "type": "approval",
-                    "name": "Manager Approval",
-                    "position": { "x": 550, "y": 220 },
-                    "config": {
-                        "role_code": "MANAGER",
-                        "actions": ["APPROVE", "REJECT", "FORCE_APPROVE"]
-                    }
-                },
-                {
-                    "id": "EndEvent_Approved",
-                    "type": "end_approved",
-                    "name": "Process Completed",
-                    "position": { "x": 800, "y": 220 },
-                    "config": {}
-                }
-            ],
-            "connections": [
-                { "id": "conn_1", "source": "StartEvent_1", "target": "UserTask_1", "action": None },
-                { "id": "conn_2", "source": "UserTask_1", "target": "UserTask_2", "action": "APPROVE" },
-                { "id": "conn_3", "source": "UserTask_2", "target": "EndEvent_Approved", "action": "APPROVE" }
-            ]
+            "nodes": [],
+            "edges": [],
+            "connections": []
         }

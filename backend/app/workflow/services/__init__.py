@@ -1,2 +1,3 @@
-from .engine import WorkflowEngine
 from .workflow_service import WorkflowService
+
+__all__ = ["WorkflowService"]

@@ -90,6 +90,7 @@ class WorkflowStudioService:
             name=workflow.name,
             description=workflow.description,
             entity_type=workflow.entity_type,
+            connection_id=workflow.connection_id,
             status=workflow.status,
             version_id=version.workflow_version_id,
             version_number=version.version_number,
@@ -178,6 +179,7 @@ class WorkflowStudioService:
             name=data.name,
             description=data.description,
             entity_type=data.entity_type,
+            connection_id=data.connection_id,
             status="DRAFT",
             created_by=user_id,
             updated_by=user_id,
@@ -267,6 +269,8 @@ class WorkflowStudioService:
             workflow.description = data.description
         if data.entity_type is not None:
             workflow.entity_type = data.entity_type
+        if data.connection_id is not None:
+            workflow.connection_id = data.connection_id
         if data.metadata is not None:
             latest_version.definition_metadata = json.dumps(data.metadata)
 
@@ -375,7 +379,7 @@ class WorkflowStudioService:
                     version=version.version_number,
                     xml_content=bpmn_xml,
                     is_active=True,
-                    created_at=datetime.now()
+                    created_on=datetime.now()
                 )
                 db.add(bpmn_def)
             else:
@@ -394,15 +398,17 @@ class WorkflowStudioService:
         cls,
         db: Session,
         entity_type: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        limit: int = 200
     ) -> List[StudioWorkflowListItem]:
-        query = db.query(GenericWorkflow)
+        from sqlalchemy.orm import selectinload
+        query = db.query(GenericWorkflow).options(selectinload(GenericWorkflow.versions))
         if entity_type:
             query = query.filter(GenericWorkflow.entity_type == entity_type)
         if status:
             query = query.filter(GenericWorkflow.status == status)
 
-        workflows = query.order_by(GenericWorkflow.updated_at.desc()).all()
+        workflows = query.order_by(GenericWorkflow.updated_at.desc(), GenericWorkflow.workflow_id.desc()).limit(limit).all()
         results: List[StudioWorkflowListItem] = []
 
         for wf in workflows:
@@ -416,6 +422,7 @@ class WorkflowStudioService:
                 name=wf.name,
                 description=wf.description,
                 entity_type=wf.entity_type,
+                connection_id=wf.connection_id,
                 status=wf.status,
                 latest_version=latest_v,
                 published_version=pub_v,

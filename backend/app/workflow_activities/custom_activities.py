@@ -2,7 +2,7 @@
 Custom & Extensible Workflow Activities Registry.
 
 Enterprise developers can define domain tasks here or in dynamic modules.
-Activities registered with @registry.register("Name") will automatically be discoverable
+Activities registered with @registry.register("Name") will automatically be adiscoverable
 in Workflow Studio and executed by SpiffWorkflow Engine.
 """
 

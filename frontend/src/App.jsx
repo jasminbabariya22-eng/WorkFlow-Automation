@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense, lazy } from 'react'
 import { 
   LayoutDashboard, 
   GitBranch, 
@@ -6,11 +6,20 @@ import {
   User, 
   CheckCircle2, 
   AlertTriangle,
-  X 
+  X,
+  Loader
 } from 'lucide-react'
-import Dashboard from './components/Dashboard'
-import Designer from './components/Designer'
-import Monitoring from './components/Monitoring'
+
+const Dashboard = lazy(() => import('./components/Dashboard'))
+const Designer = lazy(() => import('./components/Designer'))
+const Monitoring = lazy(() => import('./components/Monitoring'))
+
+const ViewLoader = () => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '300px', color: '#818cf8', gap: '8px' }}>
+    <Loader size={20} className="wf-spin" />
+    <span style={{ fontSize: '13px', color: '#94a3b8' }}>Loading workspace...</span>
+  </div>
+)
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -101,40 +110,46 @@ function App() {
   }, [toast])
 
   const renderActiveView = () => {
-    switch (currentView) {
-      case 'dashboard':
-        return (
-          <Dashboard 
-            onOpenDesigner={(id) => {
-              navigateTo('designer', id)
-            }} 
-            showToast={showToast}
-          />
-        )
-      case 'designer':
-        return (
-          <ErrorBoundary>
-            <Designer 
-              workflowId={selectedWorkflowId} 
-              onClose={() => {
-                navigateTo('dashboard', null)
-              }} 
-              showToast={showToast}
-            />
-          </ErrorBoundary>
-        )
-      case 'monitoring':
-        return <Monitoring showToast={showToast} />
-      default:
-        return (
-          <Dashboard 
-            onOpenDesigner={(id) => {
-              navigateTo('designer', id)
-            }} 
-            showToast={showToast}
-          />
-        )
-    }
+    return (
+      <Suspense fallback={<ViewLoader />}>
+        {(() => {
+          switch (currentView) {
+            case 'dashboard':
+              return (
+                <Dashboard 
+                  onOpenDesigner={(id) => {
+                    navigateTo('designer', id)
+                  }} 
+                  showToast={showToast}
+                />
+              )
+            case 'designer':
+              return (
+                <ErrorBoundary>
+                  <Designer 
+                    workflowId={selectedWorkflowId} 
+                    onClose={() => {
+                      navigateTo('dashboard', null)
+                    }} 
+                    showToast={showToast}
+                  />
+                </ErrorBoundary>
+              )
+            case 'monitoring':
+              return <Monitoring showToast={showToast} />
+            default:
+              return (
+                <Dashboard 
+                  onOpenDesigner={(id) => {
+                    navigateTo('designer', id)
+                  }} 
+                  showToast={showToast}
+                />
+              )
+          }
+        })()}
+      </Suspense>
+    )
   }
 
 
@@ -153,13 +168,15 @@ function App() {
     const activeWfId = selectedWorkflowId || 1
     return (
       <div className="app-container-fullscreen">
-        <ErrorBoundary>
-          <Designer 
-            workflowId={activeWfId} 
-            onClose={() => navigateTo('dashboard', null)} 
-            showToast={showToast}
-          />
-        </ErrorBoundary>
+        <Suspense fallback={<ViewLoader />}>
+          <ErrorBoundary>
+            <Designer 
+              workflowId={activeWfId} 
+              onClose={() => navigateTo('dashboard', null)} 
+              showToast={showToast}
+            />
+          </ErrorBoundary>
+        </Suspense>
         {toast && (
           <div className={`toast ${toast.type}`}>
             {toast.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}

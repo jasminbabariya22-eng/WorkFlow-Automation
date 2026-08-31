@@ -30,6 +30,7 @@ from app.workflow_studio.api import (
     router as workflow_studio_router,
     catalog_router as workflow_studio_catalog_router
 )
+from app.workflow_studio.connections_api import router as workflow_connections_router
 
 # Trigger dynamic registration of custom & generic workflow service tasks
 import app.workflow.activities.generic_activities
@@ -71,6 +72,7 @@ app.include_router(workflow_management_router)
 app.include_router(workflow_definition_router)
 app.include_router(workflow_studio_router)
 app.include_router(workflow_studio_catalog_router)
+app.include_router(workflow_connections_router)
 
 # --- Global Exception Handlers ---
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)

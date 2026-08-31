@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   ReactFlow,
@@ -33,24 +34,36 @@ import {
   Upload,
   RotateCcw,
   CheckCircle2,
-  Loader
+  Loader,
+  RefreshCw,
+  Database,
+  Clock,
+  ChevronRight,
+  Activity,
+  FileText,
+  CheckCircle,
+  XCircle,
+  GitFork
 } from 'lucide-react'
 
 import NodeLibrary from './NodeLibrary'
 import PropertiesPanel from './PropertiesPanel'
+import DesignerHeader from './designer/DesignerHeader'
+import DesignerValidationModal from './designer/DesignerValidationModal'
+import DesignerTestRunnerModal from './designer/DesignerTestRunnerModal'
 import { workflowStorage } from '../services/workflowStorage'
-import { 
-  StartNode, 
+import {
+  StartNode,
   EndNode,
   UserTaskNode,
-  ApprovalNode, 
+  ApprovalNode,
   ConditionNode,
   SwitchNode,
   ParallelNode,
   CommunicationNode,
   RecordNode,
   ActionNode,
-  WorkflowEdge 
+  WorkflowEdge
 } from './nodes/CustomNodes'
 
 // Register all generic Node Types
@@ -285,6 +298,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
   const [workflowName, setWorkflowName] = useState('New Workflow')
   const [versionNumber, setVersionNumber] = useState(1)
   const [workflowStatus, setWorkflowStatus] = useState('Draft')
+  const [workflowConnectionId, setWorkflowConnectionId] = useState(null)
 
   // Loading & Save State
   const [isLoading, setIsLoading] = useState(false)
@@ -302,6 +316,276 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
   const [showTestModal, setShowTestModal] = useState(false)
   const [validationErrors, setValidationErrors] = useState([])
   const [isValidationOpen, setIsValidationOpen] = useState(false)
+
+  // ==========================================
+  // Generic Live Test Runner & DB Inspector State
+  // ==========================================
+  const [testRecordId, setTestRecordId] = useState(273)
+  const [testRecordData, setTestRecordData] = useState(null)
+  const [testLoading, setTestLoading] = useState(false)
+  const [testSubTab, setTestSubTab] = useState('interactive') // 'interactive' | 'transactions'
+  const [testTxLogs, setTestTxLogs] = useState([])
+
+  // Generic Workflow Graph Traversal Engine
+  const [simActiveNodeId, setSimActiveNodeId] = useState(null)
+  const [simHistory, setSimHistory] = useState([])
+  const [simStatus, setSimStatus] = useState('IDLE') // 'IDLE' | 'RUNNING' | 'COMPLETED' | 'REJECTED'
+  const [simVars, setSimVars] = useState({})
+
+  const fetchRecordState = useCallback(async (recId) => {
+    const idToFetch = recId !== undefined ? recId : testRecordId
+    if (!idToFetch) return
+    setTestLoading(true)
+    try {
+      const foundNode = nodes.find(n => n.data?.table || n.data?.table_name || n.data?.target_entity || n.data?.entity)
+      const rawTbl = foundNode ? (foundNode.data?.table || foundNode.data?.table_name || foundNode.data?.target_entity || foundNode.data?.entity) : ''
+      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'ers.risk_register'
+      const res = await fetch(`/workflow-studio/test/record-state?record_id=${idToFetch}&table_name=${encodeURIComponent(canvasTable)}`)
+      const data = await res.json()
+      if (res.ok && data.success) {
+        setTestRecordData(data)
+        if (data.primary_key_val && Number(data.primary_key_val) !== Number(idToFetch)) {
+          setTestRecordId(data.primary_key_val)
+        }
+      } else {
+        showToast(data.detail || 'Failed to load record state', 'error')
+      }
+    } catch (err) {
+      showToast('Error connecting to Client Database: ' + err.message, 'error')
+    } finally {
+      setTestLoading(false)
+    }
+  }, [testRecordId, nodes])
+
+  const handleResetTestRecord = useCallback(async () => {
+    if (!testRecordId) return
+    setTestLoading(true)
+    try {
+      const foundNode = nodes.find(n => n.data?.table || n.data?.table_name || n.data?.target_entity || n.data?.entity)
+      const rawTbl = foundNode ? (foundNode.data?.table || foundNode.data?.table_name || foundNode.data?.target_entity || foundNode.data?.entity) : ''
+      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'ers.risk_register'
+      const res = await fetch('/workflow-studio/test/reset-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          record_id: Number(testRecordId),
+          table_name: canvasTable
+        })
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        showToast(`Record #${testRecordId} in '${canvasTable}' successfully reset`, 'success')
+        await fetchRecordState(testRecordId)
+        setTestTxLogs(prev => [
+          {
+            timestamp: new Date().toLocaleTimeString(),
+            action: 'RESET_RECORD',
+            sql: `UPDATE ${canvasTable} SET all_statuses=0/initial WHERE primary_key=${testRecordId}`,
+            status: 'COMMITTED',
+            duration: '7.2ms',
+            message: `Record #${testRecordId} in '${canvasTable}' reset to initial state`
+          },
+          ...prev
+        ])
+        // Re-initialize generic simulation
+        startGenericSimulation()
+      } else {
+        showToast(data.detail || 'Reset failed', 'error')
+      }
+    } catch (err) {
+      showToast('Error resetting record: ' + err.message, 'error')
+    } finally {
+      setTestLoading(false)
+    }
+  }, [testRecordId, nodes, fetchRecordState])
+
+  // Initialize Generic Workflow Simulation from Start Node
+  const startGenericSimulation = useCallback(() => {
+    const startNode = nodes.find(n => n.type === 'start' || n.type === 'startevent' || n.id.startsWith('start')) || nodes[0]
+    if (!startNode) {
+      showToast('No start node found in workflow diagram', 'error')
+      return
+    }
+
+    const outgoing = edges.filter(e => e.source === startNode.id)
+    const firstTarget = outgoing.length > 0 ? nodes.find(n => n.id === outgoing[0].target) : null
+
+    setSimVars({ entity_id: testRecordId, user_id: 1 })
+    setSimStatus('RUNNING')
+    setSimHistory([
+      {
+        nodeId: startNode.id,
+        nodeName: startNode.data?.label || startNode.data?.name || 'Start Process',
+        nodeType: 'start',
+        timestamp: new Date().toLocaleTimeString(),
+        message: 'Process execution started'
+      }
+    ])
+
+    if (firstTarget) {
+      setSimActiveNodeId(firstTarget.id)
+    } else {
+      setSimActiveNodeId(startNode.id)
+    }
+  }, [nodes, edges, testRecordId, showToast])
+
+  // Execute an action on the currently active node and advance dynamically
+  const handleGenericNodeAction = useCallback(async (currentNode, actionChosen) => {
+    if (!currentNode) return
+    setTestLoading(true)
+
+    const updatedVars = { ...simVars }
+    if (actionChosen) {
+      updatedVars.action = actionChosen
+    }
+    const currentType = currentNode.type
+    const nodeLabel = currentNode.data?.label || currentNode.data?.name || currentType
+
+    let stepLog = {
+      nodeId: currentNode.id,
+      nodeName: nodeLabel,
+      nodeType: currentType,
+      action: actionChosen || 'EXECUTE',
+      timestamp: new Date().toLocaleTimeString()
+    }
+
+    try {
+      // 1. Database Update Node
+      if (currentType === 'record' || currentType === 'dbUpdate') {
+        const mappings = currentNode.data?.fieldMappings || []
+        const table = currentNode.data?.table || currentNode.data?.table_name || 'ers.risk_register'
+
+        const res = await fetch('/workflow-studio/test/execute-generic-node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            record_id: Number(testRecordId),
+            table_name: table,
+            field_mappings: mappings,
+            node_id: currentNode.id,
+            node_name: nodeLabel,
+            node_type: currentType,
+            action: actionChosen || 'UPDATE'
+          })
+        })
+        const data = await res.json()
+        if (res.ok && data.success) {
+          stepLog.sql = data.sql_executed ? data.sql_executed.join('; ') : ''
+          stepLog.diff = data.diff_fields
+          stepLog.status = 'COMMITTED'
+          stepLog.duration = `${data.duration_ms}ms`
+          stepLog.message = data.message
+          await fetchRecordState(testRecordId)
+        }
+      }
+      // 2. Notification / Email Node
+      else if (currentType === 'communication' || currentType === 'notification' || currentType === 'email') {
+        const to = currentNode.data?.to || currentNode.data?.recipient || '{{risk_owner_email}}'
+        const subject = currentNode.data?.subject || `Risk #{{workflow.entity_id}} Approved by Function Head`
+        const body = currentNode.data?.body || 'Your risk record has been successfully approved by the Function Head.'
+
+        const res = await fetch('/workflow-studio/test/execute-generic-node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            record_id: Number(testRecordId),
+            node_id: currentNode.id,
+            node_name: nodeLabel,
+            node_type: 'communication',
+            to: to,
+            subject: subject,
+            body: body,
+            action: actionChosen || 'SEND'
+          })
+        })
+        const data = await res.json()
+        if (res.ok && data.success) {
+          stepLog.sql = data.sql_executed ? data.sql_executed.join('; ') : ''
+          stepLog.status = 'NEW_JOB_CREATED'
+          stepLog.duration = `${data.duration_ms}ms`
+          stepLog.message = `📧 Created Email Job #${data.email_job?.email_job_id} in ers.mst_email_job (To: ${data.email_job?.email_to})`
+          await fetchRecordState(testRecordId)
+        } else {
+          stepLog.message = `📧 Notification to: ${to} (Subject: "${subject}")`
+          stepLog.status = 'SENT'
+        }
+      }
+      // 3. User Task or Approval Node
+      else if (currentType === 'userTask' || currentType === 'approval') {
+        stepLog.message = `User Task '${nodeLabel}' submitted by ${currentNode.data?.role || 'Reviewer'} with action: [${actionChosen}]`
+        stepLog.status = 'SUBMITTED'
+      }
+      // 4. Condition / Decision Gateway Node
+      else if (currentType === 'condition') {
+        const field = currentNode.data?.field || 'action'
+        const expected = currentNode.data?.value || 'APPROVE'
+        const actual = updatedVars[field]
+        const isMatch = String(actual || '').toUpperCase() === String(expected || '').toUpperCase()
+        stepLog.message = `Evaluated condition (${field} == '${expected}'): Result = ${isMatch ? 'TRUE' : 'FALSE'}`
+        stepLog.result = isMatch ? 'TRUE' : 'FALSE'
+      }
+
+      setTestTxLogs(prev => [stepLog, ...prev])
+      setSimHistory(prev => [...prev, stepLog])
+      setSimVars(updatedVars)
+
+      // Determine Next Connected Node dynamically based on outgoing edges
+      const outgoingEdges = edges.filter(e => e.source === currentNode.id)
+      let nextEdge = null
+
+      if (currentType === 'condition') {
+        const field = currentNode.data?.field || 'action'
+        const expected = currentNode.data?.value || 'APPROVE'
+        const actual = updatedVars[field]
+        const isMatch = String(actual || '').toUpperCase() === String(expected || '').toUpperCase()
+
+        nextEdge = outgoingEdges.find(e => {
+          const sh = (e.sourceHandle || '').toUpperCase()
+          const lbl = (e.label || e.data?.label || '').toUpperCase()
+          if (isMatch) {
+            return sh === 'TRUE' || lbl.includes('TRUE') || lbl.includes('APPROVE')
+          } else {
+            return sh === 'FALSE' || lbl.includes('FALSE') || lbl.includes('REJECT')
+          }
+        }) || outgoingEdges[0]
+      } else if (actionChosen) {
+        nextEdge = outgoingEdges.find(e => {
+          const sh = (e.sourceHandle || '').toUpperCase()
+          const lbl = (e.label || e.data?.label || '').toUpperCase()
+          const act = (actionChosen || '').toUpperCase()
+          return sh === act || lbl.includes(act)
+        }) || outgoingEdges[0]
+      } else {
+        nextEdge = outgoingEdges[0]
+      }
+
+      if (nextEdge) {
+        const nextNode = nodes.find(n => n.id === nextEdge.target)
+        if (nextNode) {
+          setSimActiveNodeId(nextNode.id)
+          if (nextNode.type === 'end') {
+            const endLabel = (nextNode.data?.label || nextNode.data?.name || '').toLowerCase()
+            setSimStatus(endLabel.includes('reject') || endLabel.includes('terminate') ? 'REJECTED' : 'COMPLETED')
+          }
+        } else {
+          setSimStatus('COMPLETED')
+        }
+      } else {
+        setSimStatus('COMPLETED')
+      }
+    } catch (err) {
+      showToast('Simulation step error: ' + err.message, 'error')
+    } finally {
+      setTestLoading(false)
+    }
+  }, [simVars, edges, nodes, testRecordId, fetchRecordState, showToast])
+
+  useEffect(() => {
+    if (showTestModal) {
+      fetchRecordState(testRecordId)
+      startGenericSimulation()
+    }
+  }, [showTestModal])
 
   // Undo / Redo History Stack
   const historyRef = useRef([{ nodes: [], edges: [] }])
@@ -361,6 +645,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           setWorkflowName(data.name || data.spec_id || 'Untitled Workflow')
           setVersionNumber(data.version || 1)
           setWorkflowStatus(data.status || 'Draft')
+          setWorkflowConnectionId(data.connection_id || null)
 
           let loadedNodes = []
           let loadedEdges = []
@@ -373,16 +658,6 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
               console.error('Failed to parse json_content:', e)
             }
           }
-          if (loadedNodes.length === 0) {
-            loadedNodes = [
-              { id: 'node-start', type: 'start', position: { x: 250, y: 100 }, data: { label: 'Start', description: 'Process Start' } },
-              { id: 'node-end', type: 'end', position: { x: 250, y: 350 }, data: { label: 'End', description: 'Process Complete' } }
-            ]
-            loadedEdges = [
-              { id: 'edge-start-end', source: 'node-start', target: 'node-end', type: 'workflow', data: { label: 'Complete' } }
-            ]
-          }
-
           setNodes(loadedNodes)
           setEdges(loadedEdges)
           setSaveStatus('saved')
@@ -390,29 +665,19 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           historyIndexRef.current = 0
           setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 200)
         } else {
-          const initialNodes = [
-            { id: 'node-start', type: 'start', position: { x: 250, y: 100 }, data: { label: 'Start', description: 'Process Start' } },
-            { id: 'node-end', type: 'end', position: { x: 250, y: 350 }, data: { label: 'End', description: 'Process Complete' } }
-          ]
-          const initialEdges = [
-            { id: 'edge-start-end', source: 'node-start', target: 'node-end', type: 'workflow', data: { label: 'Complete' } }
-          ]
-          setNodes(initialNodes)
-          setEdges(initialEdges)
+          setNodes([])
+          setEdges([])
           setWorkflowName('New Workflow')
+          setWorkflowConnectionId(null)
           setSaveStatus('saved')
-          historyRef.current = [{ nodes: initialNodes, edges: initialEdges }]
+          historyRef.current = [{ nodes: [], edges: [] }]
           historyIndexRef.current = 0
           setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 200)
         }
       } catch (err) {
         console.error('Error loading workflow:', err)
         if (!isCancelled) {
-          const fallbackNodes = [
-            { id: 'node-start', type: 'start', position: { x: 250, y: 100 }, data: { label: 'Start', description: 'Process Start' } },
-            { id: 'node-end', type: 'end', position: { x: 250, y: 350 }, data: { label: 'End', description: 'Process Complete' } }
-          ]
-          setNodes(fallbackNodes)
+          setNodes([])
           setEdges([])
           setSaveStatus('saved')
         }
@@ -438,6 +703,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     try {
       await workflowStorage.saveWorkflow(workflowId, {
         name: workflowName,
+        connection_id: workflowConnectionId,
         json_content: JSON.stringify({ nodes, edges })
       })
       setSaveStatus('saved')
@@ -445,7 +711,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       setSaveStatus('error')
       showToast('Error while saving workflow', 'error')
     }
-  }, [workflowId, workflowName, nodes, edges, showToast])
+  }, [workflowId, workflowName, workflowConnectionId, nodes, edges, showToast])
 
   // =========================================================================
   // AUTO-SAVE WITH DEBOUNCE (1000ms)
@@ -902,7 +1168,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
   // Node-Specific Validation Check
   const handleValidateWorkflow = useCallback(() => {
     const errors = []
-    
+
     if (nodes.length === 0) {
       errors.push('Workflow canvas is empty.')
     }
@@ -1028,7 +1294,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     }
   }, [workflowId, workflowName, nodes, edges, showToast])
 
-  // Publish Workflow (real backend Studio API)
+  // Publish Workflow (real backend bpmn_definition table API)
   const handlePublish = useCallback(async () => {
     if (!workflowId) return
     setSaveStatus('saving')
@@ -1039,15 +1305,15 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         json_content: { nodes, edges }
       })
 
-      // 2. Publish in Studio backend
-      const response = await fetch(`/workflow-studio/workflows/${workflowId}/publish`, {
+      // 2. Publish in bpmn_definition backend
+      const response = await fetch(`/workflow/definitions/${workflowId}/publish`, {
         method: 'POST'
       })
       const result = await response.json()
-      if (response.ok) {
+      if (response.ok && (result.status === 'success' || !result.Error?.Error)) {
         setWorkflowStatus('Active')
-        if (result.version_number) {
-          setVersionNumber(result.version_number)
+        if (result.data?.version) {
+          setVersionNumber(result.data.version)
         }
         setSaveStatus('saved')
         showToast('Workflow published and activated successfully!', 'success')
@@ -1062,6 +1328,74 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     }
   }, [workflowId, workflowName, nodes, edges, showToast])
 
+  // Auto-Layout Algorithm: Organizes graph nodes into a clean left-to-right topological layout
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return
+
+    const inDegree = new Map(nodes.map(n => [n.id, 0]))
+    const adj = new Map(nodes.map(n => [n.id, []]))
+
+    edges.forEach(e => {
+      if (adj.has(e.source)) adj.get(e.source).push(e.target)
+      if (inDegree.has(e.target)) inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1)
+    })
+
+    const ranks = new Map()
+    const queue = []
+
+    nodes.forEach(n => {
+      if ((inDegree.get(n.id) || 0) === 0) {
+        queue.push(n.id)
+        ranks.set(n.id, 0)
+      }
+    })
+
+    if (queue.length === 0 && nodes.length > 0) {
+      queue.push(nodes[0].id)
+      ranks.set(nodes[0].id, 0)
+    }
+
+    while (queue.length > 0) {
+      const u = queue.shift()
+      const currentRank = ranks.get(u) || 0
+      const neighbors = adj.get(u) || []
+      neighbors.forEach(v => {
+        const nextRank = Math.max(ranks.get(v) || 0, currentRank + 1)
+        ranks.set(v, nextRank)
+        inDegree.set(v, (inDegree.get(v) || 0) - 1)
+        if ((inDegree.get(v) || 0) <= 0 && !queue.includes(v)) {
+          queue.push(v)
+        }
+      })
+    }
+
+    const rankBuckets = new Map()
+    nodes.forEach(n => {
+      const r = ranks.get(n.id) || 0
+      if (!rankBuckets.has(r)) rankBuckets.set(r, [])
+      rankBuckets.get(r).push(n.id)
+    })
+
+    const HORIZONTAL_SPACING = 280
+    const VERTICAL_SPACING = 140
+
+    const updatedNodes = nodes.map(n => {
+      const r = ranks.get(n.id) || 0
+      const bucket = rankBuckets.get(r) || [n.id]
+      const indexInBucket = bucket.indexOf(n.id)
+      const x = 100 + r * HORIZONTAL_SPACING
+      const y = 150 + indexInBucket * VERTICAL_SPACING - ((bucket.length - 1) * VERTICAL_SPACING) / 2
+      return {
+        ...n,
+        position: { x, y: Math.max(80, y) }
+      }
+    })
+
+    setNodes(updatedNodes)
+    pushHistoryState(updatedNodes, edges)
+    showToast('Auto-layout applied', 'success')
+  }, [nodes, edges, setNodes, pushHistoryState, showToast])
+
   return (
     <div className="wf-designer-fullscreen">
       {/* Loading Overlay */}
@@ -1073,131 +1407,43 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       )}
 
       {/* Hidden File Input for JSON Import */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        style={{ display: 'none' }} 
-        accept=".json" 
-        onChange={handleImportJSON} 
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        accept=".json"
+        onChange={handleImportJSON}
       />
 
       {/* 1. TOP HEADER */}
-      <header className="wf-designer-header">
-        <div className="wf-header-left">
-          {onClose && (
-            <button className="wf-back-btn" onClick={onClose} title="Return to Dashboard">
-              <ArrowLeft size={16} />
-              <span>Back</span>
-            </button>
-          )}
-          
-          <div className="wf-header-divider" />
-
-          <div className="wf-header-title-box">
-            <div className="wf-designer-top-tag">WORKFLOW STUDIO</div>
-            <div className="wf-header-title-display">
-              <span className="wf-header-label">Workflow:</span>
-              <span className="wf-header-name">{workflowName}</span>
-            </div>
-
-            <div className="wf-header-badges">
-              <span className="wf-badge-version">Version: {versionNumber}</span>
-              <span className={`wf-badge-status ${workflowStatus.toLowerCase()}`}>
-                Status: {workflowStatus}
-              </span>
-
-              {/* Save Status Indicator */}
-              <span className={`wf-save-indicator wf-save-${saveStatus}`}>
-                <span className="wf-save-dot" />
-                {saveStatus === 'dirty' && 'Unsaved changes'}
-                {saveStatus === 'saving' && 'Saving...'}
-                {saveStatus === 'saved' && 'Saved'}
-                {saveStatus === 'error' && 'Save failed'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="wf-header-actions">
-          <button 
-            className="wf-btn wf-btn-outline" 
-            onClick={handleSaveDraft}
-            disabled={saveStatus === 'saving'}
-            title="Save workflow state"
-          >
-            <Save size={14} />
-            <span>{saveStatus === 'saving' ? 'Saving...' : 'Save'}</span>
-          </button>
-
-          <button 
-            className="wf-btn wf-btn-outline wf-btn-validate"
-            onClick={handleValidateWorkflow}
-            title="Validate node integrity & connection contracts"
-          >
-            <CheckSquare size={14} />
-            <span>Validate</span>
-          </button>
-
-          <button 
-            className="wf-btn wf-btn-outline wf-btn-test"
-            onClick={() => setShowTestModal(true)}
-            title="Open workflow execution simulator"
-          >
-            <Play size={14} />
-            <span>Test</span>
-          </button>
-
-          <button 
-            className="wf-btn wf-btn-primary wf-btn-publish"
-            onClick={handlePublish}
-            disabled={saveStatus === 'saving'}
-            title="Publish current workflow definition"
-          >
-            <Zap size={14} />
-            <span>{saveStatus === 'saving' ? 'Publishing...' : 'Publish'}</span>
-          </button>
-
-          {/* More / ... Menu */}
-          <div className="wf-more-menu-wrapper">
-            <button 
-              className="wf-btn wf-btn-icon" 
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              title="More Actions"
-            >
-              <MoreVertical size={16} />
-            </button>
-
-            {showMoreMenu && (
-              <div className="wf-dropdown-menu" onClick={() => setShowMoreMenu(false)}>
-                <button className="wf-dropdown-item" onClick={handleExportJSON}>
-                  <Download size={13} />
-                  <span>Export JSON</span>
-                </button>
-                <button className="wf-dropdown-item" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={13} />
-                  <span>Import JSON</span>
-                </button>
-                <button className="wf-dropdown-item" onClick={handleLoadDemoTemplate}>
-                  <RotateCcw size={13} />
-                  <span>Reset Risk Workflow</span>
-                </button>
-                <div className="wf-dropdown-divider" />
-                <button className="wf-dropdown-item wf-item-danger" onClick={handleClearCanvas}>
-                  <Trash2 size={13} />
-                  <span>Clear Canvas</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      <DesignerHeader
+        workflowName={workflowName}
+        setWorkflowName={setWorkflowName}
+        versionNumber={versionNumber}
+        workflowStatus={workflowStatus}
+        workflowConnectionId={workflowConnectionId}
+        saveStatus={saveStatus}
+        saveWorkflow={handleSaveDraft}
+        handleUndo={handleUndo}
+        handleRedo={handleRedo}
+        handleAutoLayout={handleAutoLayout}
+        handleResetCanvas={handleClearCanvas}
+        handleValidateGraph={handleValidateWorkflow}
+        handleOpenTestModal={() => setShowTestModal(true)}
+        handleExportJSON={handleExportJSON}
+        fileInputRef={fileInputRef}
+        handleImportFile={handleImportJSON}
+        showMoreMenu={showMoreMenu}
+        setShowMoreMenu={setShowMoreMenu}
+        onClose={onClose}
+      />
 
       {/* 2. THREE-PANEL WORKSPACE BODY */}
       <div className="wf-workspace-body">
         {/* LEFT: NODE LIBRARY (Execution, Control-Flow, Boundary) */}
-        <NodeLibrary 
+        <NodeLibrary
           onAddNode={handleAddNodeFromClick}
-          onAddTemplateFlow={handleLoadDemoTemplate} 
+          onAddTemplateFlow={handleLoadDemoTemplate}
         />
 
         {/* CENTER: WORKFLOW CANVAS */}
@@ -1216,16 +1462,16 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
 
             <div className="wf-tool-divider" />
 
-            <button 
+            <button
               className={`wf-tool-btn ${historyIndexRef.current === 0 ? 'disabled' : ''}`}
-              onClick={handleUndo} 
+              onClick={handleUndo}
               title="Undo"
             >
               <Undo2 size={14} />
             </button>
-            <button 
+            <button
               className={`wf-tool-btn ${historyIndexRef.current >= historyRef.current.length - 1 ? 'disabled' : ''}`}
-              onClick={handleRedo} 
+              onClick={handleRedo}
               title="Redo"
             >
               <Redo2 size={14} />
@@ -1233,16 +1479,16 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
 
             <div className="wf-tool-divider" />
 
-            <button 
-              className={`wf-tool-btn ${showGrid ? 'active' : ''}`} 
-              onClick={() => setShowGrid(!showGrid)} 
+            <button
+              className={`wf-tool-btn ${showGrid ? 'active' : ''}`}
+              onClick={() => setShowGrid(!showGrid)}
               title="Toggle Grid"
             >
               <Grid size={14} />
               <span>Grid</span>
             </button>
 
-            <button 
+            <button
               className="wf-tool-btn wf-tool-auto"
               onClick={handleLoadDemoTemplate}
               title="Reset to Demo 4-Tier Flow"
@@ -1272,7 +1518,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             defaultEdgeOptions={{ type: 'workflow' }}
           >
             {showGrid && <Background gap={20} size={1} color="rgba(255, 255, 255, 0.08)" />}
-            <MiniMap 
+            <MiniMap
               nodeColor={(n) => {
                 if (n.type === 'start') return '#22c55e'
                 if (n.type === 'end') return '#10b981'
@@ -1283,7 +1529,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
                 if (n.type === 'record') return '#06b6d4'
                 if (n.type === 'action') return '#14b8a6'
                 return '#64748b'
-              }} 
+              }}
               maskColor="rgba(15, 18, 25, 0.75)"
               className="wf-minimap"
             />
@@ -1291,9 +1537,10 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         </main>
 
         {/* RIGHT: DYNAMIC PROPERTIES PANEL */}
-        <PropertiesPanel 
+        <PropertiesPanel
           selectedNode={selectedEnrichedNode}
           selectedEdge={selectedEdge}
+          workflowConnectionId={workflowConnectionId}
           onUpdateNodeData={handleUpdateNodeData}
           onUpdateEdgeData={handleUpdateEdgeData}
           onDeleteNode={handleDeleteNode}
@@ -1302,98 +1549,40 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       </div>
 
       {/* Validation Results Modal */}
-      {isValidationOpen && (
-        <div className="wf-validation-modal-overlay" onClick={() => setIsValidationOpen(false)}>
-          <div className="wf-validation-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="wf-modal-header">
-              <div className="flex items-center gap-2">
-                {validationErrors.length === 0 ? (
-                  <Check size={18} color="#4ade80" />
-                ) : (
-                  <AlertCircle size={18} color="#f87171" />
-                )}
-                <span className="font-bold text-sm">
-                  {validationErrors.length === 0 ? 'Workflow Validation Passed' : 'Validation Issues Found'}
-                </span>
-              </div>
-              <button className="wf-modal-close" onClick={() => setIsValidationOpen(false)}>
-                <X size={15} />
-              </button>
-            </div>
-            
-            <div className="wf-modal-content">
-              {validationErrors.length === 0 ? (
-                <div className="wf-valid-msg">
-                  <CheckCircle2 size={26} color="#4ade80" />
-                  <p>All nodes, action handle contracts, roles, and routing connections are structurally valid!</p>
-                </div>
-              ) : (
-                <ul className="wf-error-list">
-                  {validationErrors.map((err, i) => (
-                    <li key={i}>{err}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
+      <DesignerValidationModal
+        isOpen={isValidationOpen}
+        onClose={() => setIsValidationOpen(false)}
+        validationErrors={validationErrors}
+        onSelectNode={(nodeId) => {
+          const targetNode = nodes.find(n => n.id === nodeId)
+          if (targetNode) setSelectedNode(targetNode)
+        }}
+      />
 
-            <div className="wf-modal-footer">
-              <button className="wf-btn wf-btn-primary" onClick={() => setIsValidationOpen(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Simulator Modal */}
-      {showTestModal && (
-        <div className="wf-validation-modal-overlay" onClick={() => setShowTestModal(false)}>
-          <div className="wf-test-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="wf-modal-header">
-              <div className="flex items-center gap-2">
-                <Play size={16} color="#60a5fa" />
-                <span className="font-bold text-sm">Workflow Simulator (Outcome Path Tracer)</span>
-              </div>
-              <button className="wf-modal-close" onClick={() => setShowTestModal(false)}>
-                <X size={15} />
-              </button>
-            </div>
-
-            <div className="wf-modal-content">
-              <p className="text-xs text-muted mb-3">
-                Trace sequential outcomes through execution and control-flow nodes:
-              </p>
-
-              <div className="wf-sim-steps-list">
-                {nodes.map((n, idx) => (
-                  <div key={n.id} className="wf-sim-step-item">
-                    <div className="wf-sim-badge">{idx + 1}</div>
-                    <div className="wf-sim-info">
-                      <div className="wf-sim-name">{n.data?.label || n.data?.name || n.type}</div>
-                      <div className="wf-sim-type">
-                        Type: {n.type} | {n.data?.role ? `Role: ${n.data.role}` : n.type === 'condition' ? 'Rule Evaluation' : 'System Node'}
-                      </div>
-                    </div>
-                    <span className="wf-sim-status">Ready</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="wf-modal-footer">
-              <button 
-                className="wf-btn wf-btn-primary" 
-                onClick={() => {
-                  showToast('Simulation complete: path verified across all action handles', 'success')
-                  setShowTestModal(false)
-                }}
-              >
-                Execute Trace
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Dynamic Generic Workflow Test Runner & Database Inspector Modal */}
+      <DesignerTestRunnerModal
+        isOpen={showTestModal}
+        onClose={() => setShowTestModal(false)}
+        workflowName={workflowName}
+        specId={workflowId}
+        nodes={nodes}
+        edges={edges}
+        testSubTab={testSubTab}
+        setTestSubTab={setTestSubTab}
+        testRecordId={testRecordId}
+        setTestRecordId={setTestRecordId}
+        fetchRecordState={fetchRecordState}
+        startGenericSimulation={startGenericSimulation}
+        handleResetTestRecord={handleResetTestRecord}
+        testLoading={testLoading}
+        simActiveNodeId={simActiveNodeId}
+        setSimActiveNodeId={setSimActiveNodeId}
+        simStatus={simStatus}
+        simHistory={simHistory}
+        testRecordData={testRecordData}
+        testTxLogs={testTxLogs}
+        handleGenericNodeAction={handleGenericNodeAction}
+      />
     </div>
   )
 }

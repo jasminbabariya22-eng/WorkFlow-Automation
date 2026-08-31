@@ -26,6 +26,8 @@ from app.workflow_management.schemas import (
 )
 from app.workflow_management.services import WorkflowManagementService
 
+from app.workflow_definition.models import GenericWorkflow, WorkflowVersion
+
 router = APIRouter(prefix="/workflow/definitions", tags=["Workflow Management Platform"])
 
 
@@ -60,6 +62,7 @@ def list_workflow_definitions(
                 "is_active": d.is_active,
                 "status": d.status,
                 "tags": d.tags,
+                "connection_id": d.connection_id,
                 "created_by": d.created_by,
                 "created_on": d.created_on,
                 "updated_on": getattr(d, "updated_on", d.created_on),
@@ -94,6 +97,7 @@ def get_workflow_definition(
             "is_active": d.is_active,
             "status": d.status,
             "tags": d.tags,
+            "connection_id": d.connection_id,
             "created_by": d.created_by,
             "created_on": d.created_on,
             "updated_on": getattr(d, "updated_on", d.created_on),
@@ -132,9 +136,13 @@ def create_workflow_definition(
                 print(f"Compilation warning: {compile_err}")
 
         if not json_content_str and not xml_content:
-            default_graph = WorkflowGraphCompiler.get_default_starter_graph(payload.spec_id, payload.name)
+            default_graph = {"nodes": [], "edges": []}
             json_content_str = json.dumps(default_graph)
-            xml_content = WorkflowGraphCompiler.compile_graph_to_bpmn(payload.spec_id, default_graph)
+            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_{payload.spec_id}" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="{payload.spec_id}" name="{payload.name}" isExecutable="true">
+  </bpmn:process>
+</bpmn:definitions>"""
 
         new_def = BPMNDefinition(
             spec_id=payload.spec_id,
@@ -146,6 +154,7 @@ def create_workflow_definition(
             is_active=False,
             status="Draft",
             tags=payload.tags,
+            connection_id=payload.connection_id,
             created_by=current_user.get("id", 1),
             created_on=datetime.now()
         )
@@ -192,6 +201,8 @@ def update_workflow_definition(
 
         if payload.tags:
             definition.tags = payload.tags
+        if payload.connection_id is not None:
+            definition.connection_id = payload.connection_id
             
         definition.updated_on = datetime.now()
         db.commit()
@@ -258,11 +269,25 @@ def publish_workflow_definition(
 ):
     try:
         published = WorkflowManagementService.publish_workflow(db, id, current_user["id"])
+        
+        # Synchronize wf_definition and wf_version
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == published.spec_id) | (GenericWorkflow.workflow_id == published.id)
+        ).all()
+        for wf in wf_records:
+            wf.status = "ACTIVE"
+            wf.updated_at = datetime.now()
+            db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == wf.workflow_id
+            ).update({"status": "PUBLISHED", "published_at": datetime.now()})
+        db.commit()
+
         return success_response(
             data={"id": published.id, "version": published.version}, 
             message=f"Workflow successfully published as Version {published.version}"
         )
     except Exception as e:
+        db.rollback()
         return error_response(message=str(e), status_code=400)
 
 
@@ -286,6 +311,17 @@ def activate_workflow_definition(
         # Mark this version active
         definition.is_active = True
         definition.status = "Active"
+
+        # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.status = "ACTIVE"
+            wf.updated_at = datetime.now()
+            db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == wf.workflow_id
+            ).update({"status": "PUBLISHED", "published_at": datetime.now()})
 
         # Update active entity mapping for this specification
         target_entity = definition.spec_id or "DefaultEntity"
@@ -313,7 +349,49 @@ def activate_workflow_definition(
         return error_response(message=str(e), status_code=400)
 
 
-# 9. POST /workflow/definitions/{id}/duplicate
+# 9. POST /workflow/definitions/{id}/deactivate
+@router.post("/{id}/deactivate")
+def deactivate_workflow_definition(
+    id: int,
+    db: Session = Depends(get_workflow_db),
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        definition = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
+        if not definition:
+            raise HTTPException(status_code=404, detail="Workflow definition not found")
+
+        definition.is_active = False
+        definition.status = "Inactive"
+
+        # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.status = "INACTIVE"
+            wf.updated_at = datetime.now()
+            db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == wf.workflow_id
+            ).update({"status": "ARCHIVED"})
+
+        # Also deactivate entity config if linked
+        target_entity = definition.spec_id
+        entity_config = db.query(WorkflowEntityConfig).filter(
+            WorkflowEntityConfig.specification_id == target_entity
+        ).first()
+        if entity_config:
+            entity_config.is_active = False
+            entity_config.modified_on = datetime.now()
+
+        db.commit()
+        return success_response(message=f"Workflow version {definition.version} deactivated successfully")
+    except Exception as e:
+        db.rollback()
+        return error_response(message=str(e), status_code=400)
+
+
+# 10. POST /workflow/definitions/{id}/duplicate
 @router.post("/{id}/duplicate")
 def duplicate_workflow_definition(
     id: int,
@@ -337,6 +415,7 @@ def import_workflow_bpmn(
     name: str = Form(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    connection_id: Optional[int] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_workflow_db),
     current_user: dict = Depends(get_current_user)
@@ -369,6 +448,7 @@ def import_workflow_bpmn(
             is_active=False,
             status="Draft",
             tags=tags,
+            connection_id=connection_id,
             created_by=current_user["id"],
             created_on=datetime.now()
         )

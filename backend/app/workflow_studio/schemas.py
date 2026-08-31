@@ -38,6 +38,7 @@ class StudioWorkflowCreate(BaseModel):
     name: str = Field(..., description="Human-friendly name of the workflow")
     description: Optional[str] = None
     entity_type: Optional[str] = Field(None, description="Generic entity type metadata, e.g. 'Risk', 'Audit', 'Incident'")
+    connection_id: Optional[int] = Field(None, description="Target Client Database Connection ID")
     nodes: List[StudioNode] = Field(default_factory=list, description="List of nodes on canvas")
     edges: List[StudioEdge] = Field(default_factory=list, description="List of connections on canvas")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional workflow metadata")
@@ -47,6 +48,7 @@ class StudioWorkflowUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     entity_type: Optional[str] = None
+    connection_id: Optional[int] = None
     nodes: Optional[List[StudioNode]] = None
     edges: Optional[List[StudioEdge]] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -60,6 +62,7 @@ class StudioWorkflowResponse(BaseModel):
     name: str
     description: Optional[str] = None
     entity_type: Optional[str] = None
+    connection_id: Optional[int] = None
     status: str  # DRAFT, ACTIVE, ARCHIVED
     version_id: int
     version_number: int
@@ -80,6 +83,7 @@ class StudioWorkflowListItem(BaseModel):
     name: str
     description: Optional[str] = None
     entity_type: Optional[str] = None
+    connection_id: Optional[int] = None
     status: str
     latest_version: int
     published_version: Optional[int] = None

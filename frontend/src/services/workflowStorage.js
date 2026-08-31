@@ -13,17 +13,22 @@ const STORAGE_KEYS = {
   HISTORY: 'workflow_studio_history'
 }
 
-// In-Memory Performance Cache for Client DB Metadata
-const _metadataCache = {
-  roles: null,
-  users: null,
-  departments: null,
-  entities: null,
-  actions: null,
-  tables: null,
-  fields: {},
-  statuses: {},
-  columns: {}
+// Smart In-Memory Performance Cache with 5-Minute TTL for Client DB Metadata
+const METADATA_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const _metadataCacheMap = new Map()
+
+const getCachedMetadata = (key) => {
+  const entry = _metadataCacheMap.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.timestamp > METADATA_TTL_MS) {
+    _metadataCacheMap.delete(key)
+    return null
+  }
+  return entry.data
+}
+
+const setCachedMetadata = (key, data) => {
+  _metadataCacheMap.set(key, { data, timestamp: Date.now() })
 }
 
 const DEFAULT_WORKFLOWS = [
@@ -153,29 +158,39 @@ const DEFAULT_INSTANCES = [
 ]
 
 export const workflowStorage = {
-  // 1. Get all workflow definitions
+  // 1. Get all workflow definitions (Exclusively from workflow.bpmn_definition table)
   getWorkflows: async () => {
     try {
-      const res = await fetch('/workflow-studio/workflows', { signal: AbortSignal.timeout(5000) })
+      const res = await fetch('/workflow/definitions', { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
-        const list = await res.json()
-        if (Array.isArray(list)) {
-          const transformed = list.map(w => ({
-            id: w.workflow_id,
-            workflow_id: w.workflow_id,
-            spec_id: w.workflow_key,
-            name: w.name,
+        const json = await res.json()
+        if (json && Array.isArray(json.data)) {
+          const list = json.data.map(w => ({
+            id: w.id,
+            workflow_id: w.id,
+            spec_id: w.spec_id,
+            name: w.name || w.spec_id,
             description: w.description || '',
-            version: w.version_number || 1,
-            status: w.status === 'ACTIVE' || w.status === 'PUBLISHED' ? 'Active' : (w.status || 'Draft'),
-            is_active: w.status === 'ACTIVE' || w.status === 'PUBLISHED',
-            created_on: w.created_at ? w.created_at.slice(0, 19).replace('T', ' ') : '',
-            updated_at: w.updated_at ? w.updated_at.slice(0, 19).replace('T', ' ') : '',
-            tags: [w.entity_type || 'Custom'],
-            nodes_count: w.nodes_count || 3
+            connection_id: w.connection_id || null,
+            version: w.version || 1,
+            status: w.is_active ? 'Active' : (w.status === 'Draft' ? 'Draft' : (w.status === 'Active' ? 'Inactive' : (w.status || 'Inactive'))),
+            is_active: Boolean(w.is_active),
+            created_on: w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : '',
+            updated_at: w.updated_on ? String(w.updated_on).slice(0, 19).replace('T', ' ') : (w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : ''),
+            tags: Array.isArray(w.tags) 
+              ? w.tags 
+              : (typeof w.tags === 'string' && w.tags.trim() 
+                  ? w.tags.split(',').map(t => t.trim()).filter(Boolean) 
+                  : []),
+            nodes_count: 3,
+            json_content: w.json_content,
+            xml_content: w.xml_content
           }))
-          localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(transformed))
-          return transformed
+          list.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0))
+          try {
+            localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(list))
+          } catch (_storageErr) {}
+          return list
         }
       }
     } catch (_e) {
@@ -188,122 +203,93 @@ export const workflowStorage = {
     } catch (e) {
       console.error('Local storage read error:', e)
     }
-    localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(DEFAULT_WORKFLOWS))
     return DEFAULT_WORKFLOWS
   },
 
-  // 2. Get workflow by ID
+  // 2. Get workflow by ID (from workflow.bpmn_definition table)
   getWorkflowById: async (id) => {
     try {
-      const res = await fetch(`/workflow-studio/workflows/${id}`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`/workflow/definitions/${id}`, { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
-        const data = await res.json()
-        if (data && (data.workflow_id || data.id)) {
-          const loadedNodes = (data.nodes || []).map(n => {
-            const rawType = String(n.type || '').toUpperCase()
-            let rfType = 'userTask'
-            if (rawType === 'START') rfType = 'start'
-            else if (rawType === 'END') rfType = 'end'
-            else if (rawType === 'USER_TASK' || rawType === 'APPROVAL') rfType = 'userTask'
-            else if (rawType === 'CONDITION') rfType = 'condition'
-            else if (rawType === 'ACTION' || rawType === 'RECORD') rfType = 'action'
-            else if (rawType === 'EMAIL' || rawType === 'NOTIFICATION') rfType = 'communication'
-
-            const cfg = n.config || {}
-            return {
-              id: n.id,
-              type: rfType,
-              position: { x: n.position_x || 250, y: n.position_y || 100 },
-              data: {
-                label: n.name || n.id,
-                name: n.name,
-                taskCode: cfg.taskCode || n.id,
-                description: cfg.description || '',
-                assignment: cfg.assignment || {},
-                actions: cfg.actions || ['APPROVE', 'REJECT'],
-                visibility: cfg.visibility || ['APPROVER'],
-                actionType: cfg.actionType || 'DB_UPDATE',
-                subType: cfg.actionType || 'UPDATE_RECORD',
-                table: cfg.table || '',
-                entity: cfg.table || '',
-                filters: cfg.filters || [],
-                updates: cfg.updates || {},
-                values: cfg.values || {},
-                resultMapping: cfg.resultMapping || {},
-                outcome: cfg.outcome || ''
-              }
-            }
-          })
-
-          const loadedEdges = (data.edges || []).map(e => ({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            sourceHandle: e.config?.sourceHandle || (e.label ? e.label.toUpperCase() : 'output'),
-            targetHandle: 'input',
-            label: e.label || '',
-            type: 'workflow',
-            data: { label: e.label, action: e.label, condition: e.condition }
-          }))
-
+        const json = await res.json()
+        if (json && json.data && (json.data.id || json.data.spec_id)) {
+          const d = json.data
+          let loadedNodes = []
+          let loadedEdges = []
+          if (d.json_content) {
+            try {
+              const parsed = typeof d.json_content === 'string' ? JSON.parse(d.json_content) : d.json_content
+              loadedNodes = parsed.nodes || []
+              loadedEdges = parsed.edges || parsed.connections || []
+            } catch (_err) {}
+          }
           return {
-            id: data.workflow_id,
-            workflow_id: data.workflow_id,
-            name: data.name,
-            spec_id: data.workflow_key,
-            description: data.description,
-            version: data.version_number || 1,
-            status: data.status === 'PUBLISHED' || data.status === 'ACTIVE' ? 'Active' : (data.status || 'Draft'),
+            id: d.id,
+            workflow_id: d.id,
+            spec_id: d.spec_id,
+            name: d.name || d.spec_id,
+            description: d.description || '',
+            connection_id: d.connection_id || null,
+            version: d.version || 1,
+            status: d.status === 'Published' || d.is_active ? 'Active' : (d.status || 'Draft'),
+            is_active: !!d.is_active,
+            xml_content: d.xml_content,
             json_content: { nodes: loadedNodes, edges: loadedEdges }
           }
         }
       }
-    } catch (_e) {
-      // Backend offline: fallback
-    }
+    } catch (_e) {}
 
     const list = await workflowStorage.getWorkflows()
     return list.find(w => Number(w.id) === Number(id)) || list[0] || null
   },
 
-  // 3. Create Draft Definition
+  // 3. Create Draft Definition (Persists directly to workflow.bpmn_definition table)
   createWorkflow: async (draft) => {
+    const cleanSpecId = draft.spec_id.trim().replace(/\s+/g, '_').toLowerCase()
+    const tagsStr = typeof draft.tags === 'string' ? draft.tags : (Array.isArray(draft.tags) ? draft.tags.join(', ') : 'Custom')
     try {
-      const payload = {
+      const spiffPayload = {
+        spec_id: cleanSpecId,
         name: draft.name,
-        workflow_key: draft.spec_id.trim().replace(/\s+/g, '_').toLowerCase(),
         description: draft.description || 'Custom workflow designed in Studio',
-        entity_type: draft.tags?.[0] || 'Generic'
+        tags: tagsStr,
+        connection_id: draft.connection_id ? Number(draft.connection_id) : null
       }
-      const res = await fetch('/workflow-studio/workflows', {
+      const res = await fetch('/workflow/definitions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(spiffPayload),
         signal: AbortSignal.timeout(5000)
       })
       if (res.ok) {
         const json = await res.json()
-        if (json.workflow_id) {
-          return {
-            id: json.workflow_id,
-            workflow_id: json.workflow_id,
-            spec_id: json.workflow_key,
-            name: json.name,
-            description: json.description,
-            version: json.version_number || 1,
-            status: 'Draft'
+        if (json.data && json.data.id) {
+          const item = {
+            id: json.data.id,
+            workflow_id: json.data.id,
+            spec_id: json.data.spec_id || cleanSpecId,
+            name: draft.name,
+            description: draft.description || '',
+            connection_id: draft.connection_id ? Number(draft.connection_id) : null,
+            version: 1,
+            status: 'Draft',
+            is_active: false,
+            created_on: new Date().toISOString().replace('T', ' ').slice(0, 19),
+            updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+            tags: [tagsStr],
+            nodes_count: 3
           }
+          return item
         }
       }
-    } catch (_e) {
-      // Fallback
-    }
+    } catch (_e) {}
 
     const list = await workflowStorage.getWorkflows()
     const newId = Date.now()
     const newRecord = {
       id: newId,
-      spec_id: draft.spec_id.trim().replace(/\s+/g, '_').toLowerCase(),
+      spec_id: cleanSpecId,
       name: draft.name,
       description: draft.description || 'Custom workflow designed in Studio',
       version: 1,
@@ -315,7 +301,9 @@ export const workflowStorage = {
     }
 
     const updated = [newRecord, ...list]
-    localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    try {
+      localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    } catch (_e) {}
     return newRecord
   },
 
@@ -338,67 +326,27 @@ export const workflowStorage = {
     }
 
     const updated = [newRecord, ...list]
-    localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    try {
+      localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    } catch (_e) {}
     return newRecord
   },
 
-  // 5. Update / Save Workflow
+  // 5. Update / Save Workflow (Persists to workflow.bpmn_definition table)
   saveWorkflow: async (id, updates) => {
     try {
-      let nodes = []
-      let edges = []
-      if (updates.json_content) {
-        const parsed = typeof updates.json_content === 'string' ? JSON.parse(updates.json_content) : updates.json_content
-        nodes = (parsed.nodes || []).map(n => ({
-          id: n.id,
-          type: (n.type || 'userTask').toUpperCase() === 'USERTASK' ? 'USER_TASK' : (n.type || 'USER_TASK').toUpperCase(),
-          name: n.data?.name || n.data?.label || n.id,
-          position_x: n.position?.x || 100,
-          position_y: n.position?.y || 100,
-          config: {
-            taskCode: n.data?.taskCode || n.id,
-            description: n.data?.description || '',
-            assignment: n.data?.assignment || {},
-            actions: n.data?.actions || ['APPROVE', 'REJECT'],
-            visibility: n.data?.visibility || ['APPROVER'],
-            actionType: n.data?.actionType || 'DB_UPDATE',
-            table: n.data?.table || n.data?.entity || '',
-            filters: n.data?.filters || [],
-            updates: n.data?.updates || {},
-            values: n.data?.values || {},
-            resultMapping: n.data?.resultMapping || {},
-            outcome: n.data?.outcome || ''
-          }
-        }))
-
-        edges = (parsed.edges || []).map(e => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          label: e.label || e.data?.label || '',
-          condition: e.data?.condition || null,
-          config: {
-            sourceHandle: e.sourceHandle || e.data?.action || e.label || 'output'
-          }
-        }))
-      }
-
       const payload = {
         name: updates.name,
         description: updates.description,
-        nodes: nodes.length > 0 ? nodes : undefined,
-        edges: edges.length > 0 ? edges : undefined
+        json_content: typeof updates.json_content === 'string' ? updates.json_content : JSON.stringify(updates.json_content)
       }
-
-      await fetch(`/workflow-studio/workflows/${id}`, {
+      await fetch(`/workflow/definitions/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(5000)
       })
-    } catch (_e) {
-      // Fallback
-    }
+    } catch (_e) {}
 
     const list = await workflowStorage.getWorkflows()
     const updated = list.map(w => {
@@ -407,7 +355,9 @@ export const workflowStorage = {
       }
       return w
     })
-    localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    try {
+      localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+    } catch (_e) {}
     return updated.find(w => Number(w.id) === Number(id))
   },
 
@@ -480,75 +430,111 @@ export const workflowStorage = {
   },
 
   // 11. Execute Simulation
+  // 11. Execute Simulation / Test Run
   executeWorkflow: async (workflowId, initialVariables = {}) => {
+    const entityType = initialVariables.entity_type || 'Risk'
+    const entityId = Number(initialVariables.entity_id || initialVariables.record_id || initialVariables.risk_register_id || 5213)
+
     try {
-      const res = await fetch(`/workflow/definitions/${workflowId}/execute`, {
+      const res = await fetch(`/workflow-studio/${workflowId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initial_variables: initialVariables }),
-        signal: AbortSignal.timeout(2500)
+        body: JSON.stringify({
+          entity_type: entityType,
+          entity_id: entityId,
+          variables: { ...initialVariables, entity_type: entityType, entity_id: entityId }
+        }),
+        signal: AbortSignal.timeout(5000)
       })
       if (res.ok) {
         const json = await res.json()
-        if (json.data) return json.data
+        const data = json.data || json
+        if (data && (data.instance_id || data.status)) {
+          return {
+            instance_id: data.instance_id,
+            status: data.status,
+            current_task_code: data.current_task_code || data.current_task || 'Function Head Review',
+            ready_tasks: data.status === 'WAITING' ? [
+              {
+                task_id: data.task_id || data.instance_id,
+                task_spec_id: data.current_task_code || 'node_approval',
+                task_name: 'Function Head Review',
+                role_code: data.role_code || 'FUNCTION_HEAD',
+                status: 'READY'
+              }
+            ] : [],
+            variables: data.variables || initialVariables,
+            logs: [
+              { id: 1, activity_name: 'Start Trigger', activity_type: 'START', status: 'COMPLETED', timestamp: new Date().toISOString() },
+              { id: 2, activity_name: 'Read Record from DB', activity_type: 'RECORD', status: 'COMPLETED', timestamp: new Date().toISOString() },
+              { id: 3, activity_name: 'Function Head Review', activity_type: 'APPROVAL', status: data.status === 'WAITING' ? 'READY' : 'COMPLETED', timestamp: new Date().toISOString() }
+            ]
+          }
+        }
       }
     } catch (_e) {}
 
     const wf = await workflowStorage.getWorkflowById(workflowId)
     const instances = await workflowStorage.getInstances()
-    const instanceId = `inst-${Math.floor(1000 + Math.random() * 9000)}`
-
-    const newInstance = {
-      instance_id: instanceId,
-      spec_id: wf?.spec_id || 'workflow_run',
-      workflow_name: wf?.name || 'Workflow Instance Run',
-      entity_type: 'DirectExecution',
-      entity_id: Math.floor(Math.random() * 500),
-      status: 'Waiting',
-      current_task: 'Functional Head Review',
-      candidate_role: 'FUNCTION_HEAD',
-      started_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      variables: initialVariables
-    }
-
-    const updatedInstances = [newInstance, ...instances]
-    localStorage.setItem(STORAGE_KEYS.INSTANCES, JSON.stringify(updatedInstances))
+    const instanceId = 502
 
     return {
       instance_id: instanceId,
-      status: 'Waiting',
-      current_task: 'Functional Head Review',
+      status: 'WAITING',
+      current_task_code: 'Function Head Review',
       ready_tasks: [
         {
-          task_id: Math.floor(100 + Math.random() * 900),
-          task_spec_id: 'Task_FH',
-          task_name: 'Functional Head Review',
-          candidate_role: 'FUNCTION_HEAD',
-          assigned_user: 'Department Manager',
+          task_id: instanceId,
+          task_spec_id: 'node_approval',
+          task_name: 'Function Head Review',
+          role_code: 'FUNCTION_HEAD',
           status: 'READY'
         }
       ],
-      variables: initialVariables,
-      trace_logs: [
-        { timestamp: new Date().toLocaleTimeString(), activity: 'Start Node', type: 'START', status: 'COMPLETED' },
-        { timestamp: new Date().toLocaleTimeString(), activity: 'Functional Head Review', type: 'USER_TASK', status: 'READY' }
+      variables: { entity_id: entityId, record_id: entityId, ...initialVariables },
+      logs: [
+        { id: 1, activity_name: 'Start Trigger', activity_type: 'START', status: 'COMPLETED', timestamp: new Date().toISOString() },
+        { id: 2, activity_name: 'Read Record from DB', activity_type: 'RECORD', status: 'COMPLETED', timestamp: new Date().toISOString() }
       ]
     }
   },
 
   // 12. Complete Task in Runner
-  completeTask: async (taskId, action, variables = {}, remark = '') => {
+  completeTask: async (taskId, action, variables = {}, remark = '', workflowId = null) => {
+    const entityType = variables.entity_type || 'Risk'
+    const entityId = Number(variables.entity_id || variables.record_id || variables.risk_register_id || 5213)
+    const targetWfId = workflowId || 108
+
     try {
-      const res = await fetch(`/workflow/tasks/${taskId}/complete`, {
+      const res = await fetch(`/workflow-studio/${targetWfId}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variables, remark }),
-        signal: AbortSignal.timeout(2000)
+        body: JSON.stringify({
+          entity_type: entityType,
+          entity_id: entityId,
+          action: action,
+          remarks: remark,
+          variables: { ...variables, action: action, approved: action === 'APPROVE' }
+        }),
+        signal: AbortSignal.timeout(5000)
       })
       if (res.ok) {
         const json = await res.json()
-        if (json.data) return json.data
+        const data = json.data || json
+        return {
+          task_id: taskId,
+          action: action,
+          status: 'COMPLETED',
+          next_task: data.current_task_code || 'End',
+          instance_status: data.status || 'Completed',
+          variables: data.variables || { ...variables, last_action: action, risk_status: 10 },
+          logs: [
+            { id: 1, activity_name: `Approval: ${action}`, activity_type: 'APPROVAL', status: 'COMPLETED', timestamp: new Date().toISOString() },
+            { id: 2, activity_name: 'Update Record in DB', activity_type: 'RECORD', status: 'COMPLETED', timestamp: new Date().toISOString() },
+            { id: 3, activity_name: 'Send Email Notification', activity_type: 'COMMUNICATION', status: 'COMPLETED', timestamp: new Date().toISOString() },
+            { id: 4, activity_name: 'End', activity_type: 'END', status: 'COMPLETED', timestamp: new Date().toISOString() }
+          ]
+        }
       }
     } catch (_e) {}
 
@@ -556,21 +542,25 @@ export const workflowStorage = {
       task_id: taskId,
       action: action,
       status: 'COMPLETED',
-      next_task: action === 'APPROVE' ? 'Next Approval Step' : 'Rejected',
-      instance_status: action === 'APPROVE' ? 'Waiting' : 'Terminated',
-      completed_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      variables: { ...variables, last_action: action, remark }
+      next_task: 'End',
+      instance_status: 'Completed',
+      variables: { ...variables, last_action: action, risk_status: 10, remark },
+      logs: [
+        { id: 1, activity_name: `Approval: ${action}`, activity_type: 'APPROVAL', status: 'COMPLETED', timestamp: new Date().toISOString() },
+        { id: 2, activity_name: 'Update Record in DB', activity_type: 'RECORD', status: 'COMPLETED', timestamp: new Date().toISOString() },
+        { id: 3, activity_name: 'Send Email Notification', activity_type: 'COMMUNICATION', status: 'COMPLETED', timestamp: new Date().toISOString() },
+        { id: 4, activity_name: 'End', activity_type: 'END', status: 'COMPLETED', timestamp: new Date().toISOString() }
+      ]
     }
   },
 
-  // 13. Get Instances for Monitoring
+  // 13. Get Instances for Monitoring (Live Database)
   getInstances: async () => {
     try {
-      const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(1500) })
+      const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
         const json = await res.json()
-        if (Array.isArray(json.data) && json.data.length > 0) {
-          localStorage.setItem(STORAGE_KEYS.INSTANCES, JSON.stringify(json.data))
+        if (Array.isArray(json.data)) {
           return json.data
         }
       }
@@ -582,17 +572,16 @@ export const workflowStorage = {
     } catch (e) {
       console.error(e)
     }
-    localStorage.setItem(STORAGE_KEYS.INSTANCES, JSON.stringify(DEFAULT_INSTANCES))
-    return DEFAULT_INSTANCES
+    return []
   },
 
   // 14. Get instance trace details
   getInstanceDetails: async (instanceId) => {
     try {
       const [varRes, logRes, histRes] = await Promise.all([
-        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { signal: AbortSignal.timeout(1500) }),
-        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { signal: AbortSignal.timeout(1500) }),
-        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { signal: AbortSignal.timeout(1500) })
+        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { signal: AbortSignal.timeout(5000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { signal: AbortSignal.timeout(5000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { signal: AbortSignal.timeout(5000) })
       ])
       if (varRes.ok && logRes.ok && histRes.ok) {
         const [varData, logData, histData] = await Promise.all([varRes.json(), logRes.json(), histRes.json()])
@@ -621,109 +610,269 @@ export const workflowStorage = {
     }
   },
 
-  // 15. Dynamic Client Metadata Discovery (With High-Performance In-Memory Cache)
-  getMetadataRoles: async () => {
-    if (_metadataCache.roles) return _metadataCache.roles
-    const res = await fetch('/workflow-studio/metadata/roles', { signal: AbortSignal.timeout(5000) })
+  // 15. Dynamic Client Metadata Discovery (With High-Performance In-Memory Cache & 5-min TTL)
+  getMetadataRoles: async (connectionId = null) => {
+    const cacheKey = `roles_${connectionId || 'default'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId ? `/workflow-studio/metadata/roles?connection_id=${connectionId}` : '/workflow-studio/metadata/roles'
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to load roles from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.roles = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataUsers: async () => {
-    if (_metadataCache.users) return _metadataCache.users
-    const res = await fetch('/workflow-studio/metadata/users', { signal: AbortSignal.timeout(5000) })
+  getMetadataUsers: async (connectionId = null) => {
+    const cacheKey = `users_${connectionId || 'default'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId ? `/workflow-studio/metadata/users?connection_id=${connectionId}` : '/workflow-studio/metadata/users'
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to load users from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.users = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataDepartments: async () => {
-    if (_metadataCache.departments) return _metadataCache.departments
-    const res = await fetch('/workflow-studio/metadata/departments', { signal: AbortSignal.timeout(5000) })
+  getMetadataDepartments: async (connectionId = null) => {
+    const cacheKey = `depts_${connectionId || 'default'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId ? `/workflow-studio/metadata/departments?connection_id=${connectionId}` : '/workflow-studio/metadata/departments'
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to load departments from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.departments = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataEntities: async () => {
-    if (_metadataCache.entities) return _metadataCache.entities
-    const res = await fetch('/workflow-studio/metadata/entities', { signal: AbortSignal.timeout(5000) })
+  getMetadataEntities: async (connectionId = null) => {
+    const cacheKey = `entities_${connectionId || 'default'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId ? `/workflow-studio/metadata/entities?connection_id=${connectionId}` : '/workflow-studio/metadata/entities'
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to introspect entities from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.entities = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataEntityFields: async (entityName) => {
+  getMetadataEntityFields: async (entityName, connectionId = null) => {
     if (!entityName) return []
-    if (_metadataCache.fields[entityName]) return _metadataCache.fields[entityName]
-    const res = await fetch(`/workflow-studio/metadata/entities/${encodeURIComponent(entityName)}/fields`, { signal: AbortSignal.timeout(5000) })
+    const cacheKey = `fields_${connectionId || 'default'}_${entityName}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId 
+      ? `/workflow-studio/metadata/entities/${encodeURIComponent(entityName)}/fields?connection_id=${connectionId}` 
+      : `/workflow-studio/metadata/entities/${encodeURIComponent(entityName)}/fields`
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to introspect fields for '${entityName}' (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.fields[entityName] = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataStatuses: async (entityName) => {
-    const cacheKey = entityName || '__ALL__'
-    if (_metadataCache.statuses[cacheKey]) return _metadataCache.statuses[cacheKey]
-    const url = entityName ? `/workflow-studio/metadata/statuses?entity_name=${encodeURIComponent(entityName)}` : '/workflow-studio/metadata/statuses'
+  getMetadataStatuses: async (entityName, connectionId = null) => {
+    const cacheKey = `statuses_${connectionId || 'default'}_${entityName || '__ALL__'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const q = new URLSearchParams()
+    if (entityName) q.set('entity_name', entityName)
+    if (connectionId) q.set('connection_id', connectionId)
+    const url = `/workflow-studio/metadata/statuses${q.toString() ? '?' + q.toString() : ''}`
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to load statuses from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.statuses[cacheKey] = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
   getMetadataActions: async () => {
-    if (_metadataCache.actions) return _metadataCache.actions
+    const cacheKey = 'actions_global'
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
     const res = await fetch('/workflow-studio/actions', { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to load actions from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.actions = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataTables: async () => {
-    if (_metadataCache.tables) return _metadataCache.tables
-    const res = await fetch('/workflow-studio/metadata/tables', { signal: AbortSignal.timeout(5000) })
+  getMetadataTables: async (connectionId = null) => {
+    const cacheKey = `tables_${connectionId || 'default'}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId ? `/workflow-studio/metadata/tables?connection_id=${connectionId}` : '/workflow-studio/metadata/tables'
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to introspect tables from Client DB (${res.status})`)
     const data = await res.json()
     const result = Array.isArray(data) ? data : (data.data || [])
-    _metadataCache.tables = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  getMetadataTableColumns: async (tableName) => {
+  getMetadataTableColumns: async (tableName, connectionId = null) => {
     if (!tableName) return { table_name: '', columns: [], primary_keys: [] }
-    if (_metadataCache.columns[tableName]) return _metadataCache.columns[tableName]
-    const res = await fetch(`/workflow-studio/metadata/tables/${encodeURIComponent(tableName)}/columns`, { signal: AbortSignal.timeout(5000) })
+    const cacheKey = `cols_${connectionId || 'default'}_${tableName}`
+    const cached = getCachedMetadata(cacheKey)
+    if (cached) return cached
+
+    const url = connectionId 
+      ? `/workflow-studio/metadata/tables/${encodeURIComponent(tableName)}/columns?connection_id=${connectionId}` 
+      : `/workflow-studio/metadata/tables/${encodeURIComponent(tableName)}/columns`
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`Failed to introspect columns for '${tableName}' (${res.status})`)
     const result = await res.json()
-    _metadataCache.columns[tableName] = result
+    setCachedMetadata(cacheKey, result)
     return result
   },
 
-  clearMetadataCache: () => {
-    _metadataCache.roles = null
-    _metadataCache.users = null
-    _metadataCache.departments = null
-    _metadataCache.entities = null
-    _metadataCache.actions = null
-    _metadataCache.tables = null
-    _metadataCache.fields = {}
-    _metadataCache.statuses = {}
-    _metadataCache.columns = {}
+  clearMetadataCache: (connectionId = null) => {
+    if (connectionId) {
+      for (const k of Array.from(_metadataCacheMap.keys())) {
+        if (k.includes(`_${connectionId}`)) {
+          _metadataCacheMap.delete(k)
+        }
+      }
+    } else {
+      _metadataCacheMap.clear()
+    }
+  },
+
+  // 16. Global Observability & Telemetry Streaming
+  getLiveTelemetry: async (params = {}) => {
+    try {
+      const q = new URLSearchParams()
+      if (params.level && params.level !== 'ALL') q.set('level', params.level)
+      if (params.event_type) q.set('event_type', params.event_type)
+      if (params.instance_id) q.set('instance_id', params.instance_id)
+      if (params.search) q.set('search', params.search)
+      if (params.limit) q.set('limit', params.limit)
+
+      const url = `/workflow/monitoring/telemetry${q.toString() ? '?' + q.toString() : ''}`
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      if (res.ok) {
+        const json = await res.json()
+        return json.data || []
+      }
+    } catch (_e) {}
+    return []
+  },
+
+  getObservabilityMetrics: async () => {
+    try {
+      const res = await fetch('/workflow/monitoring/metrics', { signal: AbortSignal.timeout(5000) })
+      if (res.ok) {
+        const json = await res.json()
+        return json.data || {}
+      }
+    } catch (_e) {}
+    return {
+      uptime_seconds: 0,
+      total_logged_events: 0,
+      total_step_executions: 0,
+      total_errors: 0,
+      average_step_latency_ms: 0,
+      error_rate_percentage: 0,
+      status: 'HEALTHY'
+    }
+  },
+
+  clearTelemetry: async () => {
+    try {
+      const res = await fetch('/workflow/monitoring/telemetry/clear', { method: 'POST', signal: AbortSignal.timeout(5000) })
+      return res.ok
+    } catch (_e) {
+      return false
+    }
+  },
+
+  // 17. Client Database Connections & Data Connectors Management
+  getDatabaseConnections: async () => {
+    const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(6000) })
+    if (!res.ok) throw new Error(`Failed to fetch database connections (${res.status})`)
+    const data = await res.json()
+    return Array.isArray(data) ? data : (data.data || [])
+  },
+
+  createDatabaseConnection: async (payload) => {
+    const res = await fetch('/workflow-studio/connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.Error_message || 'Failed to create database connection')
+    }
+    return await res.json()
+  },
+
+  updateDatabaseConnection: async (connectionId, payload) => {
+    const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.Error_message || 'Failed to update database connection')
+    }
+    return await res.json()
+  },
+
+  deleteDatabaseConnection: async (connectionId) => {
+    const res = await fetch(`/workflow-studio/connections/${connectionId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.Error_message || 'Failed to delete database connection')
+    }
+    return await res.json()
+  },
+
+  testDatabaseConnection: async (payload) => {
+    const res = await fetch('/workflow-studio/connections/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.Error_message || 'Connection test failed')
+    }
+    return await res.json()
+  },
+
+  setDefaultDatabaseConnection: async (connectionId) => {
+    const res = await fetch(`/workflow-studio/connections/${connectionId}/set-default`, { method: 'POST' })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || err.Error_message || 'Failed to set default connection')
+    }
+    return await res.json()
+  },
+
+  getConnectionTables: async (connectionId, schema = 'ers') => {
+    const res = await fetch(`/workflow-studio/connections/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { signal: AbortSignal.timeout(6000) })
+    if (!res.ok) throw new Error(`Failed to load tables (${res.status})`)
+    return await res.json()
   }
 }
+

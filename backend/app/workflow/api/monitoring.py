@@ -213,3 +213,62 @@ def list_pending_tasks(
         return success_response(data=result)
     except Exception as e:
         return error_response(message=str(e), status_code=400)
+
+
+# 7. GET /workflow/monitoring/telemetry - Live Real-Time Telemetry & Observability Feed
+@router.get("/telemetry")
+def get_live_telemetry(
+    level: Optional[str] = Query(None, description="Filter by level: ALL, INFO, WARN, ERROR, AUDIT"),
+    event_type: Optional[str] = Query(None, description="Filter by event type: NODE_EXECUTION, AUDIT_TRAIL, DB_QUERY, SYSTEM_ERROR"),
+    instance_id: Optional[int] = Query(None, description="Filter by workflow instance ID"),
+    search: Optional[str] = Query(None, description="Search in message, node name, or trace ID"),
+    limit: int = Query(100, ge=1, le=500, description="Max logs to return"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Retrieves live structured telemetry events from the high-speed in-memory buffer.
+    """
+    try:
+        from app.core.logger import WorkflowTelemetryLogger
+        events = WorkflowTelemetryLogger.get_telemetry_events(
+            level=level,
+            event_type=event_type,
+            instance_id=instance_id,
+            search=search,
+            limit=limit
+        )
+        return success_response(data=events)
+    except Exception as e:
+        return error_response(message=str(e), status_code=400)
+
+
+# 8. GET /workflow/monitoring/metrics - Live System Observability Metrics
+@router.get("/metrics")
+def get_observability_metrics(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Returns real-time execution throughput, average step latency (ms), and health indicators.
+    """
+    try:
+        from app.core.logger import WorkflowTelemetryLogger
+        metrics = WorkflowTelemetryLogger.get_observability_metrics()
+        return success_response(data=metrics)
+    except Exception as e:
+        return error_response(message=str(e), status_code=400)
+
+
+# 9. POST /workflow/monitoring/telemetry/clear - Reset Telemetry Buffer
+@router.post("/telemetry/clear")
+def clear_telemetry_buffer(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Clears the in-memory telemetry ring buffer.
+    """
+    try:
+        from app.core.logger import WorkflowTelemetryLogger
+        WorkflowTelemetryLogger.clear_buffer()
+        return success_response(message="Telemetry ring buffer cleared successfully")
+    except Exception as e:
+        return error_response(message=str(e), status_code=400)

@@ -522,9 +522,12 @@ export const CommunicationNode = memo(({ id, data, selected }) => {
 // 9. RECORD OPERATIONS (Create / Update / Read Record) (Execution Nodes)
 // =========================================================================
 export const RecordNode = memo(({ id, data, selected }) => {
-  const opType = (data?.subType || data?.type || 'UPDATE_RECORD').toUpperCase()
   const title = data?.label || data?.name || 'Record Operation'
-  const entity = data?.entity || 'Entity'
+  const opType = (data?.subType || 
+    (String(title).toLowerCase().includes('create') ? 'CREATE_RECORD' :
+     String(title).toLowerCase().includes('read') ? 'READ_RECORD' :
+     data?.type || data?.actionType || 'UPDATE_RECORD')).toUpperCase()
+  const entity = data?.entity || data?.table || 'Entity'
   const recordId = data?.recordId || data?.record || '{{workflow.entity_id}}'
 
   let icon = <RefreshCw size={15} color="#ffffff" />
@@ -586,7 +589,7 @@ export const ActionNode = memo(({ id, data, selected }) => {
   const isApi = data?.subType === 'API' || data?.type === 'apiCall' || data?.type === 'action'
   const title = data?.label || data?.name || (isApi ? 'API Call' : 'Database Action')
   const methodOrOp = isApi ? (data?.method || 'POST') : (data?.operation || 'Stored Procedure')
-  const target = isApi ? (data?.url || 'https://api.internal/v1/event') : (data?.procedure || data?.entity || 'update_status')
+  const target = isApi ? (data?.url || 'https://api.internal/v1/event') : (data?.procedure || data?.entity || data?.table || 'update_status')
 
   return (
     <div className={`wf-card wf-card-action ${selected ? 'wf-selected' : ''}`}>

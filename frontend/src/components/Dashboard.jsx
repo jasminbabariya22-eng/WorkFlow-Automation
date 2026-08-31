@@ -12,12 +12,17 @@ import {
   Zap,
   Globe,
   Loader,
-  X
+  X,
+  Database
 } from 'lucide-react'
 import ExecutionModal from './ExecutionModal'
+import DatabaseConnectionsModal from './DatabaseConnectionsModal'
 import { workflowStorage } from '../services/workflowStorage'
 
 function Dashboard({ onOpenDesigner, showToast }) {
+  // Feature flag: Set to true if you want to re-enable the Test Run button on the Dashboard
+  const ENABLE_DASHBOARD_TEST_RUN = false
+
   const [workflows, setWorkflows] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -26,19 +31,25 @@ function Dashboard({ onOpenDesigner, showToast }) {
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showDbModal, setShowDbModal] = useState(false)
   const [executingWorkflow, setExecutingWorkflow] = useState(null)
+  const [dbConnections, setDbConnections] = useState([])
 
   // Form payloads
-  const [newDraft, setNewDraft] = useState({ spec_id: '', name: '', description: '', tags: '' })
-  const [importDraft, setImportDraft] = useState({ spec_id: '', name: '', description: '', tags: '', file: null })
+  const [newDraft, setNewDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '' })
+  const [importDraft, setImportDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '', file: null })
   const [submitting, setSubmitting] = useState(false)
 
-  // Fetch all workflow definitions
+  // Fetch all workflow definitions & database connections
   const fetchWorkflows = async () => {
     setLoading(true)
     try {
-      const data = await workflowStorage.getWorkflows()
-      setWorkflows(data || [])
+      const [wfData, connData] = await Promise.allSettled([
+        workflowStorage.getWorkflows(),
+        workflowStorage.getDatabaseConnections()
+      ])
+      if (wfData.status === 'fulfilled') setWorkflows(wfData.value || [])
+      if (connData.status === 'fulfilled') setDbConnections(connData.value || [])
     } catch (error) {
       showToast('Error while loading definitions', 'error')
     } finally {
@@ -217,6 +228,15 @@ function Dashboard({ onOpenDesigner, showToast }) {
         </div>
 
         <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowDbModal(true)}
+            style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+            title="Configure and test Client Database connections"
+          >
+            <Database size={16} />
+            <span>Database Connections</span>
+          </button>
           <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
             <Upload size={16} />
             <span>Import BPMN</span>
@@ -245,6 +265,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
               <tr>
                 <th>Specification ID</th>
                 <th>Process Name</th>
+                <th>Database</th>
                 <th>Version</th>
                 <th>Status</th>
                 <th>Tags</th>
@@ -257,6 +278,25 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 <tr key={wf.id} onClick={() => onOpenDesigner(wf.id)}>
                   <td style={{ fontWeight: '600', color: 'var(--color-accent-secondary)' }}>{wf.spec_id}</td>
                   <td style={{ fontWeight: '500' }}>{wf.name}</td>
+                  <td>
+                    {(() => {
+                      const connId = wf.connection_id
+                      if (!connId) {
+                        return (
+                          <span style={{ fontSize: '11px', color: '#94a3b8', background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            ★ Default DB
+                          </span>
+                        )
+                      }
+                      const conn = dbConnections.find(c => c.connection_id === connId)
+                      return (
+                        <span style={{ fontSize: '11px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.25)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <Database size={10} />
+                          {conn ? conn.connection_name : `DB #${connId}`}
+                        </span>
+                      )
+                    })()}
+                  </td>
                   <td>v{wf.version}</td>
                   <td>
                     <span className={`status-badge ${wf.status.toLowerCase()}`}>
@@ -272,29 +312,31 @@ function Dashboard({ onOpenDesigner, showToast }) {
                     )) : <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>—</span>
                   })()}</td>
                   <td style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
-                    {new Date(wf.updated_on || wf.created_on).toLocaleString()}
+                    {wf.updated_at || wf.updated_on || wf.created_on || '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', justifyItems: 'flex-end', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button 
-                        className="btn btn-secondary btn-sm" 
-                        style={{ borderColor: 'rgba(0, 229, 255, 0.4)', color: 'var(--color-accent-secondary)' }} 
-                        title="Execute / Test Run Workflow" 
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setExecutingWorkflow(wf)
-                        }}
-                      >
-                        <Zap size={12} />
-                        <span>Test Run</span>
-                      </button>
+                      {ENABLE_DASHBOARD_TEST_RUN && (
+                        <button 
+                          className="btn btn-secondary btn-sm" 
+                          style={{ borderColor: 'rgba(0, 229, 255, 0.4)', color: 'var(--color-accent-secondary)' }} 
+                          title="Execute / Test Run Workflow" 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setExecutingWorkflow(wf)
+                          }}
+                        >
+                          <Zap size={12} />
+                          <span>Test Run</span>
+                        </button>
+                      )}
                       {wf.status === 'Draft' && (
                         <button className="btn btn-secondary btn-sm" style={{ borderColor: 'rgba(0, 229, 255, 0.3)', color: 'var(--color-accent-secondary)' }} onClick={(e) => handlePublish(wf.id, e)}>
                           <Globe size={12} />
                           <span>Publish</span>
                         </button>
                       )}
-                      {wf.status === 'Published' && (
+                      {!wf.is_active && wf.status !== 'Draft' && (
                         <button className="btn btn-secondary btn-sm" style={{ borderColor: 'rgba(0, 230, 118, 0.3)', color: 'var(--color-success)' }} onClick={(e) => handleActivate(wf.id, e)}>
                           <Zap size={12} />
                           <span>Activate</span>
@@ -375,6 +417,24 @@ function Dashboard({ onOpenDesigner, showToast }) {
                   onChange={(e) => setNewDraft({ ...newDraft, tags: e.target.value })}
                 />
               </div>
+              <div className="form-group">
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Database size={13} color="#38bdf8" />
+                  <span>Target Client Database Connection</span>
+                </label>
+                <select 
+                  className="form-control"
+                  value={newDraft.connection_id || ''}
+                  onChange={(e) => setNewDraft({ ...newDraft, connection_id: e.target.value ? Number(e.target.value) : null })}
+                >
+                  <option value="">★ Global Default Active Database</option>
+                  {dbConnections.map(c => (
+                    <option key={c.connection_id} value={c.connection_id}>
+                      {c.connection_name} ({c.db_type?.toUpperCase()} — {c.database_name}) {c.is_default ? '★ Default' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting}>
@@ -438,6 +498,24 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Database size={13} color="#38bdf8" />
+                  <span>Target Client Database Connection</span>
+                </label>
+                <select 
+                  className="form-control"
+                  value={importDraft.connection_id || ''}
+                  onChange={(e) => setImportDraft({ ...importDraft, connection_id: e.target.value ? Number(e.target.value) : null })}
+                >
+                  <option value="">★ Global Default Active Database</option>
+                  {dbConnections.map(c => (
+                    <option key={c.connection_id} value={c.connection_id}>
+                      {c.connection_name} ({c.db_type?.toUpperCase()} — {c.database_name}) {c.is_default ? '★ Default' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
                 <label className="form-label">BPMN 2.0 File (.bpmn, .xml)</label>
                 <input 
                   type="file" 
@@ -464,6 +542,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
           workflowId={executingWorkflow.id}
           workflowSpec={`${executingWorkflow.name || executingWorkflow.spec_id} (v${executingWorkflow.version})`}
           onClose={() => setExecutingWorkflow(null)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Client Database Connections & Data Sources Modal */}
+      {showDbModal && (
+        <DatabaseConnectionsModal 
+          onClose={() => setShowDbModal(false)}
           showToast={showToast}
         />
       )}

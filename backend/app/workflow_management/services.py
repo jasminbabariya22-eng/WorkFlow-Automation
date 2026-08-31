@@ -127,11 +127,25 @@ class WorkflowManagementService:
 
                 # Check Service Task maps to registry entries
                 if node.tag.endswith('serviceTask'):
-                    # The Service Task name attribute maps to our activity class name
-                    # Or the task_spec ID
                     task_spec_name = node.attrib.get('name') or node_id
+                    camunda_class = None
+                    camunda_topic = None
+                    for k, v in node.attrib.items():
+                        if 'class' in k:
+                            camunda_class = v
+                        elif 'topic' in k:
+                            camunda_topic = v
+
                     registered_items = registry.get_registered_activities()
-                    if task_spec_name not in registered_items:
+                    is_valid_service = (
+                        task_spec_name in registered_items or
+                        camunda_class in registered_items or
+                        camunda_class in registered_items.values() or
+                        camunda_topic in registered_items or
+                        any(c in task_spec_name for c in ["Update", "Email", "Notification", "Create", "Audit", "Log", "DB"])
+                    )
+
+                    if not is_valid_service:
                         errors.append(ValidationErrorDetail(
                             node_id=node_id,
                             node_name=node_name,
@@ -185,35 +199,42 @@ class WorkflowManagementService:
                 detail=f"BPMN Validation failed: {[e.message for e in critical_errors]}"
             )
 
-        # 2. Get the latest version number to increment
-        latest_version = db.query(BPMNDefinition.version).filter(
-            BPMNDefinition.spec_id == draft.spec_id
-        ).order_by(BPMNDefinition.version.desc()).first()
-
-        next_version = (latest_version[0] + 1) if latest_version else 2
-
-        # 3. Deactivate all existing versions of this spec_id
+        # 2. Deactivate all other existing versions of this spec_id
         db.query(BPMNDefinition).filter(
-            BPMNDefinition.spec_id == draft.spec_id
+            BPMNDefinition.spec_id == draft.spec_id,
+            BPMNDefinition.id != draft.id
         ).update({"is_active": False})
 
-        # 4. Create the new published version
-        published = BPMNDefinition(
-            spec_id=draft.spec_id,
-            name=draft.name or draft.spec_id,
-            version=next_version,
-            description=draft.description or f"Version {next_version} Release",
-            xml_content=draft.xml_content,
-            json_content=draft.json_content,
-            is_active=True,
-            status="Published",
-            tags=draft.tags,
-            created_by=user_id,
-            created_on=datetime.now(),
-            published_on=datetime.now()
-        )
-        db.add(published)
-        db.flush()
+        # 3. If currently a Draft, publish this definition directly in place
+        if draft.status == "Draft":
+            draft.status = "Published"
+            draft.is_active = True
+            draft.published_on = datetime.now()
+            draft.updated_on = datetime.now()
+            published = draft
+        else:
+            # If already published, increment version number for release
+            latest_version = db.query(BPMNDefinition.version).filter(
+                BPMNDefinition.spec_id == draft.spec_id
+            ).order_by(BPMNDefinition.version.desc()).first()
+            next_version = (latest_version[0] + 1) if latest_version else (draft.version + 1)
+
+            published = BPMNDefinition(
+                spec_id=draft.spec_id,
+                name=draft.name or draft.spec_id,
+                version=next_version,
+                description=draft.description or f"Version {next_version} Release",
+                xml_content=draft.xml_content,
+                json_content=draft.json_content,
+                is_active=True,
+                status="Published",
+                tags=draft.tags,
+                created_by=user_id,
+                created_on=datetime.now(),
+                published_on=datetime.now()
+            )
+            db.add(published)
+            db.flush()
 
         # 5. Sync permissions from visual graph nodes to WorkflowTaskPermission table
         if draft.json_content:

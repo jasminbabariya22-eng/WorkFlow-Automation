@@ -9,6 +9,7 @@ class WorkflowCreateRequest(BaseModel):
     xml_content: Optional[str] = None
     json_content: Optional[str] = None
     tags: Optional[str] = None
+    connection_id: Optional[int] = None
 
 class WorkflowUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -16,6 +17,7 @@ class WorkflowUpdateRequest(BaseModel):
     xml_content: Optional[str] = None
     json_content: Optional[str] = None
     tags: Optional[str] = None
+    connection_id: Optional[int] = None
 
 class ValidationErrorDetail(BaseModel):
     node_id: Optional[str] = None
@@ -38,6 +40,7 @@ class WorkflowDefinitionResponse(BaseModel):
     is_active: bool
     status: str
     tags: Optional[str]
+    connection_id: Optional[int] = None
     created_by: Optional[int]
     created_on: datetime
     updated_on: datetime

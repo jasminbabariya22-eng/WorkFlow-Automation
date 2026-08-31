@@ -19,6 +19,7 @@ class GenericWorkflow(WorkflowBase):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     entity_type = Column(String(100), nullable=True, index=True)  # Generic metadata: e.g. "Risk", "Audit", "Incident", "Purchase"
+    connection_id = Column(Integer, nullable=True)  # Target Database Connection ID
     status = Column(String(20), default="DRAFT", nullable=False)   # "DRAFT", "ACTIVE", "ARCHIVED"
     created_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now, nullable=False)

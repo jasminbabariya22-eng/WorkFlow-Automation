@@ -20,6 +20,7 @@ class BPMNDefinition(WorkflowBase):
     is_active = Column(Boolean, default=True, nullable=False)
     status = Column(String(20), default="Draft", nullable=False)
     tags = Column(String(500))
+    connection_id = Column(Integer, nullable=True)  # Bound Client Database Connection ID
     created_by = Column(Integer)
     created_on = Column(DateTime, default=datetime.now, nullable=False)
     updated_on = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
@@ -108,4 +109,29 @@ class WorkflowTaskPermission(WorkflowBase):
     actions = Column(Text, nullable=False) # e.g. "APPROVE,REJECT"
     is_active = Column(Boolean, default=True, nullable=False)
     created_on = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class DatabaseConnection(WorkflowBase):
+    """
+    SQLAlchemy model representing dynamic Client Database connection profiles.
+    """
+    __tablename__ = "db_connections"
+    __table_args__ = {"schema": settings.WORKFLOW_DB_SCHEMA}
+
+    connection_id = Column(Integer, primary_key=True, autoincrement=True)
+    connection_name = Column(String(100), unique=True, nullable=False)
+    db_type = Column(String(50), default="postgresql", nullable=False) # postgresql, mysql, mssql, oracle, sqlite
+    host = Column(String(255), nullable=True)
+    port = Column(Integer, nullable=True)
+    database_name = Column(String(100), nullable=True)
+    default_schema = Column(String(100), default="ers", nullable=True)
+    username = Column(String(100), nullable=True)
+    password_encrypted = Column(Text, nullable=True)
+    ssl_mode = Column(String(20), default="disable", nullable=True)
+    pool_size = Column(Integer, default=10, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
 
