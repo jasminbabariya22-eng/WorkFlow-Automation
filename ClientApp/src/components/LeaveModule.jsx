@@ -19,7 +19,9 @@ import {
   Info
 } from 'lucide-react'
 import { clientDb } from '../services/clientDb'
-import { workflowClient } from '../services/workflowClient'
+import { genericWorkflowApi } from '../services/genericWorkflowApi'
+
+const MODULE_KEY = 'leave_requests'
 
 export default function LeaveModule({ currentUser, onDataChanged }) {
   const [leavesList, setLeavesList] = useState([])
@@ -65,6 +67,50 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   // Manager record for current user
   const reportingManager = useMemo(() => {
     return clientDb.getManagerForUser(currentUser?.id)
+  }, [currentUser])
+
+  // Generic records fetch from Python Gateway
+  const loadRecords = async () => {
+    try {
+      setIsLoading(true)
+      const data = await genericWorkflowApi.fetchRecords(MODULE_KEY)
+      if (Array.isArray(data)) {
+        const users = clientDb.getUsers()
+        const types = clientDb.getLeaveTypes()
+        const mapped = data.map(r => {
+          const u = users.find(x => String(x.id) === String(r.employee_id))
+          const mgr = u ? clientDb.getManagerForUser(u.id) : null
+          const lt = types.find(t => Number(t.id) === Number(r.leave_type_id))
+          return {
+            id: r.leave_request_id,
+            employeeId: String(r.employee_id),
+            employeeName: u ? u.name : `Employee #${r.employee_id}`,
+            employeeEmail: u ? u.email : 'employee@company.com',
+            managerId: mgr ? String(mgr.id) : (u?.manager_id ? String(u.manager_id) : '3'),
+            managerName: mgr ? mgr.name : 'Rajesh Kumar',
+            leaveTypeId: r.leave_type_id,
+            leaveType: lt ? lt.name : 'Annual Leave',
+            startDate: r.start_date,
+            endDate: r.end_date || r.start_date,
+            days: 2,
+            status: String(r.status || 'PENDING').toUpperCase(),
+            reason: r.reason || 'Leave Request',
+            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'Recent'
+          }
+        })
+        setLeavesList(mapped)
+      } else {
+        setLeavesList([])
+      }
+    } catch (_e) {
+      setLeavesList([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadRecords()
   }, [currentUser])
 
   // Data Slices
@@ -131,7 +177,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setLeaveTypeId(1)
   }
 
-  const handleSubmitLeave = (e) => {
+  const handleSubmitLeave = async (e) => {
     e.preventDefault()
     if (isSubmitting) return
     setIsSubmitting(true)
@@ -141,25 +187,27 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      const newLeave = {
-        id: leavesList.length + 1,
-        employeeId: String(currentUser.id),
-        employeeName: currentUser.name,
-        employeeEmail: currentUser.email,
-        managerId: reportingManager ? String(reportingManager.id) : '3',
-        managerName: reportingManager ? reportingManager.name : 'Rajesh Kumar',
-        leaveTypeId: Number(leaveTypeId),
+      // 1. Generic submission through Python Gateway
+      const res = await genericWorkflowApi.submit(MODULE_KEY, {
+        employee_id: Number(currentUser.id) || 5,
+        leave_type_id: Number(leaveTypeId) || 1,
+        start_date: startDate,
+        end_date: endDate,
+        reason: reason || 'Leave Request',
+        status: 'PENDING'
+      }, currentUser)
+
+      await loadRecords()
+
+      setSubmissionResult({
+        id: res.record_id,
         leaveType: typeName,
         startDate,
         endDate,
         days: calculatedDays,
-        status: 'PENDING',
-        reason: reason || 'Leave Application',
-        submittedAt: new Date().toLocaleString()
-      }
-
-      setLeavesList(prev => [newLeave, ...prev])
-      setSubmissionResult(newLeave)
+        managerName: reportingManager ? reportingManager.name : 'Rajesh Kumar',
+        reason
+      })
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
@@ -176,22 +224,28 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setApprovalComment('')
   }
 
-  const handleConfirmApprove = () => {
+  const handleConfirmApprove = async () => {
     if (!approveConfirmItem || actionLoadingId) return
     const requestId = approveConfirmItem.id
     setActionLoadingId(requestId)
 
-    setLeavesList(prev =>
-      prev.map(item => (item.id === requestId ? { ...item, status: 'APPROVED' } : item))
-    )
+    try {
+      await genericWorkflowApi.executeAction(MODULE_KEY, requestId, 'APPROVE', approvalComment, currentUser, {
+        employee_email: approveConfirmItem.employeeEmail
+      })
 
-    setFeedbackBanner({
-      type: 'success',
-      message: `✓ Leave request #LR-${requestId} approved successfully.`
-    })
+      setFeedbackBanner({
+        type: 'success',
+        message: `✓ Leave request #LR-${requestId} approved successfully.`
+      })
 
-    setApproveConfirmItem(null)
-    setActionLoadingId(null)
+      setApproveConfirmItem(null)
+      await loadRecords()
+    } catch (err) {
+      setFeedbackBanner({ type: 'error', message: err.message })
+    } finally {
+      setActionLoadingId(null)
+    }
   }
 
   const handleOpenRejectModal = (req, e) => {
@@ -201,7 +255,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setRejectionError('')
   }
 
-  const handleConfirmReject = () => {
+  const handleConfirmReject = async () => {
     if (!rejectConfirmItem || actionLoadingId) return
     if (!rejectionReason.trim()) {
       setRejectionError('Rejection reason is mandatory.')
@@ -211,17 +265,23 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const requestId = rejectConfirmItem.id
     setActionLoadingId(requestId)
 
-    setLeavesList(prev =>
-      prev.map(item => (item.id === requestId ? { ...item, status: 'REJECTED' } : item))
-    )
+    try {
+      await genericWorkflowApi.executeAction(MODULE_KEY, requestId, 'REJECT', rejectionReason, currentUser, {
+        employee_email: rejectConfirmItem.employeeEmail
+      })
 
-    setFeedbackBanner({
-      type: 'success',
-      message: `✓ Leave request #LR-${requestId} rejected.`
-    })
+      setFeedbackBanner({
+        type: 'success',
+        message: `✓ Leave request #LR-${requestId} rejected.`
+      })
 
-    setRejectConfirmItem(null)
-    setActionLoadingId(null)
+      setRejectConfirmItem(null)
+      await loadRecords()
+    } catch (err) {
+      setFeedbackBanner({ type: 'error', message: err.message })
+    } finally {
+      setActionLoadingId(null)
+    }
   }
 
   const handleViewDetails = (req, e) => {

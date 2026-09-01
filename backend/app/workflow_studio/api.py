@@ -849,3 +849,188 @@ def create_client_record(payload: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Failed to create record in '{full_table}': {str(e)}")
 
 
+# ==========================================
+# 6. DECLARATIVE WORKFLOW BINDINGS (GENERIC ZERO-CODE GATEWAY)
+# ==========================================
+
+@catalog_router.get("/bindings")
+def get_workflow_bindings():
+    """Lists all registered Python workflow bindings."""
+    from app.workflow_studio.bindings import list_bindings
+    return list_bindings()
+
+
+@catalog_router.get("/bindings/{module_key}/records")
+def get_bound_module_records(
+    module_key: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Retrieves live records from the bound Client Database table for a specific module.
+    """
+    from app.workflow_studio.bindings import get_binding
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
+    from sqlalchemy import text
+
+    binding = get_binding(module_key)
+    if not binding:
+        raise HTTPException(status_code=404, detail=f"No workflow binding registered for module '{module_key}'")
+
+    conn_id = binding.get("connection_id")
+    table_name = binding["table_name"]
+    pk = binding.get("primary_key", "id")
+    eng = DynamicEnginePool.get_engine(conn_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
+    full_table = f"{target_schema}.{table_name}" if target_schema else table_name
+
+    query_sql = f"SELECT * FROM {full_table} ORDER BY {pk} DESC LIMIT 100"
+
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(text(query_sql)).fetchall()
+            result = []
+            for r in rows:
+                row_dict = {}
+                for k, v in r._mapping.items():
+                    if hasattr(v, "isoformat"):
+                        row_dict[k] = v.isoformat()
+                    else:
+                        row_dict[k] = v
+                result.append(row_dict)
+            return {"success": True, "module_key": module_key, "count": len(result), "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query bound records: {str(e)}")
+
+
+@catalog_router.post("/bindings/{module_key}/submit")
+def submit_bound_workflow_record(
+    module_key: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Generic submission gateway:
+    1. Inserts the entity record into the bound Client Database table.
+    2. Automatically initiates the SpiffWorkflow instance for the configured workflow ID.
+    """
+    from app.workflow_studio.bindings import get_binding
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
+    from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+    from sqlalchemy import text
+
+    binding = get_binding(module_key)
+    if not binding:
+        raise HTTPException(status_code=404, detail=f"No workflow binding registered for module '{module_key}'")
+
+    conn_id = binding.get("connection_id")
+    table_name = binding["table_name"]
+    workflow_id = binding["workflow_id"]
+    values = payload.get("data") or payload.get("values") or {}
+    user_id = payload.get("user_id") or values.get("employee_id") or 5
+    user_name = payload.get("user_name") or "Employee"
+    user_email = payload.get("user_email") or "employee@company.com"
+
+    # Set default status if defined
+    status_col = binding.get("status_column", "status")
+    if status_col not in values:
+        values[status_col] = binding.get("default_status", "PENDING")
+
+    # 1. Insert into Client Database
+    eng = DynamicEnginePool.get_engine(conn_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
+    full_table = f"{target_schema}.{table_name}" if target_schema else table_name
+    col_meta = ClientDatabaseAdapter.get_table_columns(table_name, schema=target_schema, connection_id=conn_id)
+    pks = col_meta.get("primary_keys") or []
+    primary_key = pks[0] if pks else binding.get("primary_key", "id")
+
+    col_names = {c["name"]: c for c in col_meta.get("columns", [])}
+    filtered_vals = {k: v for k, v in values.items() if k in col_names}
+    if not filtered_vals:
+        raise HTTPException(status_code=400, detail="No matching columns found to insert")
+
+    cols = list(filtered_vals.keys())
+    placeholders = [f":val_{c}" for c in cols]
+    binds = {f"val_{c}": v for c, v in filtered_vals.items()}
+    insert_sql = f"INSERT INTO {full_table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING {primary_key}"
+
+    with eng.begin() as conn:
+        res = conn.execute(text(insert_sql), binds).first()
+        new_record_id = res[0] if res else None
+
+    # 2. Trigger SpiffWorkflow
+    instance_id = None
+    try:
+        wf_variables = {
+            **values,
+            "entity_id": new_record_id,
+            "user_id": user_id,
+            "user_name": user_name,
+            "user_email": user_email,
+            "employee_id": user_id,
+            "employee_name": user_name,
+            "employee_email": user_email,
+            "connection_id": conn_id
+        }
+        wf_res = StudioExecutionAdapter.start_workflow_instance(
+            db=db,
+            workflow_id=workflow_id,
+            entity_type=table_name,
+            entity_id=str(new_record_id),
+            user_id=user_id,
+            initial_variables=wf_variables
+        )
+        instance_id = wf_res.get("instance_id")
+    except Exception as wf_err:
+        pass
+
+    return {
+        "success": True,
+        "module_key": module_key,
+        "record_id": new_record_id,
+        "instance_id": instance_id,
+        "status": values.get(status_col, "PENDING")
+    }
+
+
+@catalog_router.post("/bindings/{module_key}/action")
+def execute_bound_workflow_action(
+    module_key: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Generic action gateway:
+    Executes a Spiff human task action (APPROVE, REJECT, etc.) for a bound entity.
+    """
+    from app.workflow_studio.bindings import get_binding
+    from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+
+    binding = get_binding(module_key)
+    if not binding:
+        raise HTTPException(status_code=404, detail=f"No workflow binding registered for module '{module_key}'")
+
+    workflow_id = binding["workflow_id"]
+    table_name = binding["table_name"]
+    entity_id = payload.get("record_id") or payload.get("entity_id")
+    action = payload.get("action") or "APPROVE"
+    user_id = payload.get("user_id") or 3
+    remarks = payload.get("remarks") or ""
+    variables = payload.get("variables") or {}
+
+    variables["connection_id"] = binding.get("connection_id", 4)
+    variables["status"] = "APPROVED" if action.upper() == "APPROVE" else "REJECTED"
+
+    res = StudioExecutionAdapter.execute_action(
+        db=db,
+        workflow_id=workflow_id,
+        entity_type=table_name,
+        entity_id=str(entity_id),
+        action=action,
+        user_id=user_id,
+        remarks=remarks,
+        variables=variables
+    )
+    return res
+
+
+

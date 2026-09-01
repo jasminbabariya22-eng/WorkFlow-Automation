@@ -1,25 +1,55 @@
 import React, { useState, useEffect } from 'react'
 import { Inbox, CheckCircle2, XCircle, AlertCircle, ArrowRight, User, Clock, Check } from 'lucide-react'
-import { workflowClient } from '../services/workflowClient'
+import { genericWorkflowApi } from '../services/genericWorkflowApi'
 
 export default function ApprovalsInbox({ currentUser, onDataChanged }) {
   const [tasks, setTasks] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
   const [remarksMap, setRemarksMap] = useState({})
   const [actionLoading, setActionLoading] = useState(null)
   const [feedback, setFeedback] = useState(null)
 
-  const handleAction = (task, actionType) => {
-    const actionKey = `${task.entity_type || 'task'}_${task.entity_id || task.task_id}_${actionType}`
+  const reloadTasks = async () => {
+    if (!currentUser?.id) return
+    try {
+      setIsLoading(true)
+      const list = await genericWorkflowApi.fetchMyTasks(currentUser.id)
+      setTasks(Array.isArray(list) ? list : [])
+      if (onDataChanged) onDataChanged()
+    } catch (_e) {
+      setTasks([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    reloadTasks()
+  }, [currentUser])
+
+  const handleAction = async (task, actionType) => {
+    const moduleKey = task.entity_type || 'leave_requests'
+    const recordId = task.entity_id || task.task_id
+    const actionKey = `${moduleKey}_${recordId}_${actionType}`
     setActionLoading(actionKey)
     setFeedback(null)
+    const remarks = remarksMap[`${moduleKey}_${recordId}`] || ''
 
-    setTasks(prev => prev.filter(t => t !== task))
-    setFeedback({
-      success: true,
-      message: `✓ Task '${task.task_name || 'Approval'}' (${actionType}) completed.`
-    })
-    setActionLoading(null)
-    if (onDataChanged) onDataChanged()
+    try {
+      await genericWorkflowApi.executeAction(moduleKey, recordId, actionType, remarks, currentUser)
+      setFeedback({
+        success: true,
+        message: `✓ Task '${task.task_name || 'Approval'}' (${actionType}) completed.`
+      })
+      await reloadTasks()
+    } catch (err) {
+      setFeedback({
+        success: false,
+        message: `Action error: ${err.message}`
+      })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   return (
