@@ -482,8 +482,9 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     email_job_id = None
     try:
         eng = DynamicEnginePool.get_engine(conn_id)
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
         with eng.begin() as conn:
-            for mail_tbl in ["ers.mst_email_job", "mst_email_job", "email_jobs"]:
+            for mail_tbl in [f"{target_schema}.mst_email_job", "mst_email_job", "ers.mst_email_job", "email_jobs"]:
                 try:
                     res = conn.execute(
                         text(f"""
@@ -495,7 +496,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                                 1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
                                 :email_body, 'New', 3, 0, 5000,
                                 :now_dt, :now_dt, :user_id, 0
-                            ) RETURNING id
+                            ) RETURNING email_job_id
                         """),
                         {
                             "email_to": to_email,
@@ -509,7 +510,33 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                         email_job_id = res[0]
                         break
                 except Exception:
-                    continue
+                    try:
+                        # Fallback for tables with 'id' PK
+                        res = conn.execute(
+                            text(f"""
+                                INSERT INTO {mail_tbl} (
+                                    email_server_id, email_module, email_to, email_subject, email_type,
+                                    email_body, send_status, total_attempts, send_attempts, attempt_delay,
+                                    next_attempt_at, created_on, created_by, is_deleted
+                                ) VALUES (
+                                    1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
+                                    :email_body, 'New', 3, 0, 5000,
+                                    :now_dt, :now_dt, :user_id, 0
+                                ) RETURNING id
+                            """),
+                            {
+                                "email_to": to_email,
+                                "email_subject": subject,
+                                "email_body": html_body,
+                                "now_dt": now_dt,
+                                "user_id": user_id
+                            }
+                        ).first()
+                        if res:
+                            email_job_id = res[0]
+                            break
+                    except Exception:
+                        continue
     except Exception:
         pass
 
