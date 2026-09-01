@@ -25,6 +25,36 @@ class PublishDefinitionRequest(BaseModel):
     description: Optional[str] = None
 
 
+@router.get("")
+def list_workflow_definitions(
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Returns all active and draft workflow definitions for the dashboard.
+    """
+    try:
+        wfs = db.query(GenericWorkflow).order_by(GenericWorkflow.workflow_id.desc()).all()
+        result = []
+        for w in wfs:
+            latest_v = max([v.version_number for v in w.versions]) if w.versions else 1
+            result.append({
+                "id": w.workflow_id,
+                "spec_id": w.workflow_key or f"workflow_{w.workflow_id}",
+                "name": w.name,
+                "description": w.description or "",
+                "connection_id": w.connection_id,
+                "version": latest_v,
+                "status": "Active" if w.status == "ACTIVE" else "Draft",
+                "is_active": (w.status == "ACTIVE"),
+                "created_on": w.created_at.isoformat() if w.created_at else None,
+                "updated_on": w.updated_at.isoformat() if w.updated_at else None,
+                "tags": [w.entity_type] if w.entity_type else []
+            })
+        return success_response(data=result)
+    except Exception as e:
+        return error_response(message=str(e), status_code=500)
+
+
 @router.post("/save")
 def save_workflow_definition(
     payload: SaveDefinitionRequest,
