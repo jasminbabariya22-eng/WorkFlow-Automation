@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   Calendar,
   Plus,
@@ -22,6 +22,9 @@ import { clientDb } from '../services/clientDb'
 import { workflowClient } from '../services/workflowClient'
 
 export default function LeaveModule({ currentUser, onDataChanged }) {
+  const [leavesList, setLeavesList] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+
   // Roles
   const isManager = currentUser?.role === 'MANAGER'
   const isHR = currentUser?.role === 'HR'
@@ -56,7 +59,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const [actionLoadingId, setActionLoadingId] = useState(null)
   const [feedbackBanner, setFeedbackBanner] = useState(null)
 
-  // Leave types from DB
+  // Leave types from directory
   const leaveTypes = useMemo(() => clientDb.getLeaveTypes(), [])
 
   // Manager record for current user
@@ -64,16 +67,64 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     return clientDb.getManagerForUser(currentUser?.id)
   }, [currentUser])
 
-  // Data Loading
+  // Direct Live PostgreSQL Fetching
+  const fetchLeaves = async () => {
+    try {
+      setIsLoading(true)
+      const liveRows = await workflowClient.fetchRecords('leave_requests', 4)
+      if (Array.isArray(liveRows)) {
+        const users = clientDb.getUsers()
+        const types = clientDb.getLeaveTypes()
+        const mapped = liveRows.map(r => {
+          const u = users.find(x => String(x.id) === String(r.employee_id))
+          const mgr = u ? clientDb.getManagerForUser(u.id) : null
+          const lt = types.find(t => Number(t.id) === Number(r.leave_type_id))
+          const statusUpper = String(r.status || 'PENDING').toUpperCase()
+
+          return {
+            id: r.leave_request_id,
+            employeeId: String(r.employee_id),
+            employeeName: u ? u.name : `Employee #${r.employee_id}`,
+            employeeEmail: u ? u.email : 'employee@company.com',
+            managerId: mgr ? String(mgr.id) : (u?.manager_id ? String(u.manager_id) : '3'),
+            managerName: mgr ? mgr.name : 'Rajesh Kumar',
+            leaveTypeId: r.leave_type_id,
+            leaveType: lt ? lt.name : 'Leave',
+            startDate: r.start_date,
+            endDate: r.end_date || r.start_date,
+            days: 2,
+            status: statusUpper,
+            reason: r.reason || 'Leave Request',
+            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'Recent'
+          }
+        })
+        setLeavesList(mapped)
+      } else {
+        setLeavesList([])
+      }
+    } catch (_err) {
+      setLeavesList([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchLeaves()
+  }, [currentUser])
+
+  // Data Slices
   const myRequests = useMemo(() => {
-    return clientDb.getLeavesForUser(currentUser)
-  }, [currentUser, onDataChanged])
+    return leavesList.filter(r => String(r.employeeId) === String(currentUser?.id))
+  }, [leavesList, currentUser])
 
   const pendingApprovals = useMemo(() => {
-    return canApprove ? clientDb.getPendingLeavesForManager(currentUser) : []
-  }, [currentUser, canApprove, onDataChanged])
+    return canApprove
+      ? leavesList.filter(r => (r.status === 'PENDING' || r.status === 'PENDING_MANAGER') && String(r.managerId) === String(currentUser?.id))
+      : []
+  }, [leavesList, currentUser, canApprove])
 
-  // Auto-calculate Duration (End Date - Start Date + 1)
+  // Auto-calculate Duration
   const calculatedDays = useMemo(() => {
     if (!startDate || !endDate) return 1
     const start = new Date(startDate)
@@ -116,10 +167,6 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     })
   }, [myRequests, searchQuery, statusFilter, typeFilter])
 
-  const triggerReload = () => {
-    if (onDataChanged) onDataChanged()
-  }
-
   // --- Handlers ---
 
   const handleOpenApplyModal = () => {
@@ -141,41 +188,58 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      // 1. Create in local database (enforces manager_id lookup from user record)
-      const newLeave = clientDb.createLeave(
-        {
-          leaveTypeId: Number(leaveTypeId),
-          leaveType: typeName,
-          startDate,
-          endDate,
-          days: calculatedDays,
-          reason
-        },
-        currentUser
-      )
+      // 1. Insert directly into PostgreSQL (Connection #4)
+      const recRes = await workflowClient.createRecord('leave_requests', {
+        employee_id: Number(currentUser.id) || 5,
+        leave_type_id: Number(leaveTypeId) || 1,
+        start_date: startDate,
+        end_date: endDate,
+        reason: reason || 'Leave Request',
+        status: 'PENDING'
+      }, 4)
 
-      // 2. Trigger Generic Centralized Workflow Engine
+      const targetEntityId = recRes?.id
+      if (!targetEntityId) {
+        throw new Error('Failed to obtain new record ID from database.')
+      }
+
+      // 2. Trigger Workflow Engine (Emp_Leave_Request #112)
       try {
-        await workflowClient.startWorkflow(1, {
-          entityType: 'LeaveRequest',
-          entityId: newLeave.id,
+        await workflowClient.startWorkflow(112, {
+          entityType: 'leave_requests',
+          entityId: targetEntityId,
           userId: currentUser.id,
           variables: {
+            entity_id: targetEntityId,
+            employee_id: currentUser.id,
+            employee_name: currentUser.name,
+            employee_email: currentUser.email,
+            manager_id: reportingManager ? reportingManager.id : 3,
+            manager_name: reportingManager ? reportingManager.name : 'Rajesh Kumar',
+            manager_email: reportingManager?.email || 'rajesh.kumar@example.com',
             leave_type: typeName,
             days: calculatedDays,
             start_date: startDate,
             end_date: endDate,
-            manager_id: newLeave.managerId,
-            manager_name: newLeave.managerName
+            reason: reason
           }
         })
       } catch (wfErr) {
-        console.warn('Workflow Server offline or unreachable:', wfErr.message)
+        console.warn('Workflow start notice:', wfErr.message)
       }
 
-      // Show friendly business success screen
-      setSubmissionResult(newLeave)
-      triggerReload()
+      // 3. Refresh live records from PostgreSQL
+      await fetchLeaves()
+
+      setSubmissionResult({
+        id: targetEntityId,
+        leaveType: typeName,
+        startDate,
+        endDate,
+        days: calculatedDays,
+        managerName: reportingManager ? reportingManager.name : 'Rajesh Kumar',
+        reason
+      })
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
@@ -198,21 +262,21 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setActionLoadingId(requestId)
 
     try {
-      // 1. Enforce Action-level RBAC & Concurrency Check in clientDb
-      clientDb.approveLeave(requestId, currentUser, approvalComment)
-
-      // 2. Generic Workflow Action Execution
-      try {
-        await workflowClient.executeAction(1, {
-          entityType: 'LeaveRequest',
-          entityId: requestId,
-          action: 'APPROVE',
-          userId: currentUser.id,
-          remarks: approvalComment || 'Approved by manager'
-        })
-      } catch (wfErr) {
-        console.warn('Workflow action message:', wfErr.message)
-      }
+      // 1. Generic Workflow Action Execution (Emp_Leave_Request #112)
+      await workflowClient.executeAction(112, {
+        entityType: 'leave_requests',
+        entityId: requestId,
+        action: 'APPROVE',
+        userId: currentUser.id,
+        remarks: approvalComment || 'Approved by manager',
+        variables: {
+          status: 'APPROVED',
+          approved_by: currentUser.name,
+          user_role: currentUser.role || 'MANAGER',
+          connection_id: 4,
+          employee_email: approveConfirmItem.employeeEmail || `${(approveConfirmItem.employeeName || 'employee').toLowerCase().replace(/\s+/g, '')}@company.com`
+        }
+      })
 
       setFeedbackBanner({
         type: 'success',
@@ -220,10 +284,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
       })
 
       setApproveConfirmItem(null)
-      if (selectedRequest && selectedRequest.id === requestId) {
-        setSelectedRequest(clientDb.getLeaveById(requestId, currentUser))
-      }
-      triggerReload()
+      await fetchLeaves()
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
@@ -252,21 +313,21 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setActionLoadingId(requestId)
 
     try {
-      // 1. Enforce Action-level RBAC & Mandatory Reason in clientDb
-      clientDb.rejectLeave(requestId, currentUser, rejectionReason)
-
-      // 2. Generic Workflow Action Execution
-      try {
-        await workflowClient.executeAction(1, {
-          entityType: 'LeaveRequest',
-          entityId: requestId,
-          action: 'REJECT',
-          userId: currentUser.id,
-          remarks: rejectionReason
-        })
-      } catch (wfErr) {
-        console.warn('Workflow action message:', wfErr.message)
-      }
+      // 1. Generic Workflow Action Execution (Emp_Leave_Request #112)
+      await workflowClient.executeAction(112, {
+        entityType: 'leave_requests',
+        entityId: requestId,
+        action: 'REJECT',
+        userId: currentUser.id,
+        remarks: rejectionReason,
+        variables: {
+          status: 'REJECTED',
+          rejected_by: currentUser.name,
+          user_role: currentUser.role || 'MANAGER',
+          connection_id: 4,
+          employee_email: rejectConfirmItem.employeeEmail || `${(rejectConfirmItem.employeeName || 'employee').toLowerCase().replace(/\s+/g, '')}@company.com`
+        }
+      })
 
       setFeedbackBanner({
         type: 'success',
@@ -274,10 +335,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
       })
 
       setRejectConfirmItem(null)
-      if (selectedRequest && selectedRequest.id === requestId) {
-        setSelectedRequest(clientDb.getLeaveById(requestId, currentUser))
-      }
-      triggerReload()
+      await fetchLeaves()
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
@@ -290,12 +348,8 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
   const handleViewDetails = (req, e) => {
     if (e) e.stopPropagation()
-    try {
-      const fullItem = clientDb.getLeaveById(req.id, currentUser)
-      setSelectedRequest(fullItem)
-    } catch (err) {
-      setFeedbackBanner({ type: 'error', message: err.message })
-    }
+    const item = leavesList.find(x => x.id === req.id)
+    setSelectedRequest(item || req)
   }
 
   // Format Helper

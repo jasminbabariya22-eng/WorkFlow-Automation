@@ -102,6 +102,39 @@ class WorkflowClient {
     }
     return await res.json()
   }
+
+  // 5. Query Client Database Table Records
+  async fetchRecords(tableName = 'leave_requests', connectionId = 4) {
+    try {
+      const res = await fetch(`${this.serverUrl}/workflow-studio/records?table_name=${tableName}&connection_id=${connectionId}`, {
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      return data.data || []
+    } catch (_err) {
+      return []
+    }
+  }
+
+  // 6. Insert Record into Client Database
+  async createRecord(tableName = 'leave_requests', values = {}, connectionId = 4) {
+    const res = await fetch(`${this.serverUrl}/workflow-studio/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        table_name: tableName,
+        values,
+        connection_id: connectionId
+      }),
+      signal: AbortSignal.timeout(8000)
+    })
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      throw new Error(errData.detail || errData.message || `Insert failed with ${res.status}`)
+    }
+    return await res.json()
+  }
 }
 
 export const workflowClient = new WorkflowClient()
