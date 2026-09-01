@@ -761,3 +761,91 @@ def execute_generic_test_node(
         raise HTTPException(status_code=500, detail=f"Node execution failed: {str(e)}")
 
 
+@catalog_router.get("/records")
+def get_client_records(
+    table_name: str = Query("leave_requests"),
+    schema: Optional[str] = Query(None),
+    connection_id: Optional[int] = Query(None),
+    limit: int = Query(100)
+):
+    """
+    Generic endpoint to query live records from the bound Client Database table.
+    """
+    from sqlalchemy import text
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
+
+    eng = DynamicEnginePool.get_engine(connection_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+    clean_table = table_name
+    if "." in table_name:
+        parts = table_name.split(".", 1)
+        target_schema = parts[0]
+        clean_table = parts[1]
+
+    full_table = f"{target_schema}.{clean_table}" if target_schema else clean_table
+    col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema, connection_id=connection_id)
+    pks = col_meta.get("primary_keys") or []
+    primary_key = pks[0] if pks else "id"
+
+    try:
+        with eng.connect() as conn:
+            rows = conn.execute(text(f"SELECT * FROM {full_table} ORDER BY {primary_key} DESC LIMIT :limit"), {"limit": limit}).mappings().all()
+            result = []
+            for r in rows:
+                r_dict = dict(r)
+                for k, v in r_dict.items():
+                    if hasattr(v, "isoformat"):
+                        r_dict[k] = v.isoformat()
+                result.append(r_dict)
+            return {"success": True, "table": full_table, "count": len(result), "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch records: {str(e)}")
+
+
+@catalog_router.post("/records")
+def create_client_record(payload: Dict[str, Any]):
+    """
+    Generic endpoint to insert a new live record directly into the bound Client Database.
+    """
+    from sqlalchemy import text
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
+
+    conn_id = payload.get("connection_id")
+    raw_table = payload.get("table_name") or payload.get("table") or "leave_requests"
+    values = payload.get("values") or payload.get("data") or {}
+    
+    eng = DynamicEnginePool.get_engine(conn_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(payload.get("schema"), conn_id)
+    clean_table = raw_table
+    if "." in raw_table:
+        parts = raw_table.split(".", 1)
+        target_schema = parts[0]
+        clean_table = parts[1]
+
+    full_table = f"{target_schema}.{clean_table}" if target_schema else clean_table
+    col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema, connection_id=conn_id)
+    pks = col_meta.get("primary_keys") or []
+    primary_key = pks[0] if pks else "id"
+
+    col_names = {c["name"]: c for c in col_meta.get("columns", [])}
+    filtered_vals = {k: v for k, v in values.items() if k in col_names}
+
+    if not filtered_vals:
+        raise HTTPException(status_code=400, detail=f"No valid column values provided for table '{full_table}'")
+
+    cols = list(filtered_vals.keys())
+    placeholders = [f":val_{c}" for c in cols]
+    binds = {f"val_{c}": v for c, v in filtered_vals.items()}
+
+    insert_sql = f"INSERT INTO {full_table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING {primary_key}"
+
+    try:
+        with eng.begin() as conn:
+            res = conn.execute(text(insert_sql), binds).first()
+            new_id = res[0] if res else None
+
+        return {"success": True, "table": full_table, "id": new_id, "primary_key": primary_key}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create record in '{full_table}': {str(e)}")
+
+

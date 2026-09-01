@@ -739,7 +739,7 @@ class ClientDatabaseAdapter:
         based on structured configuration without raw SQL strings.
         Returns execution metadata (e.g. affectedRows).
         """
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = cls._resolve_target_schema(schema, connection_id)
         clean_table = table_name
         if "." in table_name:
             parts = table_name.split(".", 1)
@@ -863,11 +863,17 @@ class ClientDatabaseAdapter:
         based on structured configuration without raw SQL strings.
         Returns created record / generated key information where supported.
         """
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = cls._resolve_target_schema(schema, connection_id)
+        clean_table = table_name
+        if "." in table_name:
+            parts = table_name.split(".", 1)
+            target_schema = parts[0]
+            clean_table = parts[1]
+
         context_vars = variables or {}
 
         # 1. Validate table & inspect columns
-        table_info = cls.get_table_columns(table_name, schema=target_schema, connection_id=connection_id)
+        table_info = cls.get_table_columns(clean_table, schema=target_schema, connection_id=connection_id)
         valid_cols = {c["name"]: c for c in table_info["columns"]}
         pk_cols = table_info.get("primary_keys") or []
 
