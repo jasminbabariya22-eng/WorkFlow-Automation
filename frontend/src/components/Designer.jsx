@@ -480,9 +480,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       }
       // 2. Notification / Email Node
       else if (currentType === 'communication' || currentType === 'notification' || currentType === 'email') {
-        const to = currentNode.data?.to || currentNode.data?.recipient || '{{risk_owner_email}}'
-        const subject = currentNode.data?.subject || `Risk #{{workflow.entity_id}} Approved by Function Head`
-        const body = currentNode.data?.body || 'Your risk record has been successfully approved by the Function Head.'
+        const to = currentNode.data?.to || currentNode.data?.recipient || '{{employee_email}}'
+        const subject = currentNode.data?.subject || `Notification for Record #{{workflow.entity_id}}`
+        const body = currentNode.data?.body || 'Your request #{{workflow.entity_id}} has been processed successfully.'
 
         const res = await fetch('/workflow-studio/test/execute-generic-node', {
           method: 'POST',

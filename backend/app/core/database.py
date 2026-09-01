@@ -247,13 +247,14 @@ class ClientDatabaseAdapter:
     """
 
     @staticmethod
-    def get_entity_record(table_name: str, primary_key_col: str, entity_id: Any, schema: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_entity_record(table_name: str, primary_key_col: str, entity_id: Any, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Fetches a record dynamically from any client table."""
-        target_schema = schema or settings.DB_SCHEMA or "public"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         full_table = f"{target_schema}.{table_name}" if target_schema else table_name
         query = text(f"SELECT * FROM {full_table} WHERE {primary_key_col} = :entity_id LIMIT 1")
         try:
-            with client_engine.connect() as conn:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            with eng.connect() as conn:
                 result = conn.execute(query, {"entity_id": entity_id}).mappings().first()
                 return dict(result) if result else None
         except Exception as e:
@@ -261,21 +262,22 @@ class ClientDatabaseAdapter:
             return None
 
     @staticmethod
-    def update_entity_record(table_name: str, primary_key_col: str, entity_id: Any, updates: Dict[str, Any], schema: Optional[str] = None) -> bool:
+    def update_entity_record(table_name: str, primary_key_col: str, entity_id: Any, updates: Dict[str, Any], schema: Optional[str] = None, connection_id: Optional[int] = None) -> bool:
         """Updates fields dynamically in any client table."""
         if not updates:
             return False
-        target_schema = schema or settings.DB_SCHEMA or "public"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         full_table = f"{target_schema}.{table_name}" if target_schema else table_name
-        
+
         set_clauses = [f"{col} = :{col}" for col in updates.keys()]
         query_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key_col} = :_pk"
-        
+
         params = dict(updates)
         params["_pk"] = entity_id
-        
+
         try:
-            with client_engine.begin() as conn:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            with eng.begin() as conn:
                 conn.execute(text(query_str), params)
                 logger.info(f"ClientDatabaseAdapter: Successfully updated {full_table} ID={entity_id} with {list(updates.keys())}")
                 return True
@@ -284,113 +286,234 @@ class ClientDatabaseAdapter:
             return False
 
     @staticmethod
-    def execute_statement(sql_query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def execute_statement(sql_query: str, params: Optional[Dict[str, Any]] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Executes a parameterized read/write query against the client database."""
-        with client_engine.connect() as conn:
+        eng = DynamicEnginePool.get_engine(connection_id)
+        with eng.connect() as conn:
             res = conn.execute(text(sql_query), params or {})
             if res.returns_rows:
                 return [dict(row) for row in res.mappings().all()]
             return []
 
     @staticmethod
+    def _resolve_target_schema(schema: Optional[str], connection_id: Optional[int]) -> Optional[str]:
+        if schema:
+            return schema
+        if connection_id:
+            from app.workflow.database import WorkflowSessionLocal
+            from app.workflow.persistence.models import DatabaseConnection
+            db = WorkflowSessionLocal()
+            try:
+                conn_rec = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == connection_id).first()
+                if conn_rec and conn_rec.default_schema:
+                    return conn_rec.default_schema
+            finally:
+                db.close()
+        return settings.DB_SCHEMA or "public"
+
+    @staticmethod
+    def _build_active_filter(col_meta_dict: dict) -> str:
+        if "is_deleted" in col_meta_dict:
+            dtype = str(col_meta_dict["is_deleted"].get("type", "")).lower()
+            if "bool" in dtype:
+                return "WHERE is_deleted IS FALSE"
+            return "WHERE is_deleted = 0"
+        if "is_active" in col_meta_dict:
+            dtype = str(col_meta_dict["is_active"].get("type", "")).lower()
+            if "bool" in dtype:
+                return "WHERE is_active IS TRUE"
+            return "WHERE is_active = 1"
+        return ""
+
+    @staticmethod
     def get_roles(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Retrieves user roles from the Client Database dynamically. Returns [] gracefully if table does not exist."""
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        """Retrieves user roles from the Client Database dynamically. Auto-adapts to column naming conventions."""
+        from sqlalchemy import inspect
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
-            for table in ["mst_user_role", "user_role", "roles", "user_roles", "tbl_roles"]:
-                try:
-                    full_table = f"{target_schema}.{table}" if target_schema else table
-                    with eng.connect() as conn:
-                        rows = conn.execute(
-                            text(f"SELECT id, name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
-                        ).mappings().all()
-                        return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
-                except Exception:
-                    # Try without schema prefix or without is_deleted
-                    try:
-                        with eng.connect() as conn:
-                            rows = conn.execute(
-                                text(f"SELECT id, name FROM {table} ORDER BY id")
-                            ).mappings().all()
-                            return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
-                    except Exception:
-                        continue
+            inspector = inspect(eng)
+            target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
+            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
+            all_tables = set(inspector.get_table_names())
+
+            role_candidates = ["mst_user_role", "user_role", "roles", "user_roles", "tbl_roles", "mst_roles", "role"]
+            found_table = None
+            active_schema = None
+
+            for candidate in role_candidates:
+                if candidate in schema_tables:
+                    found_table = candidate
+                    active_schema = target_schema
+                    break
+                elif candidate in all_tables:
+                    found_table = candidate
+                    active_schema = None
+                    break
+
+            if not found_table:
+                return []
+
+            cols_meta = inspector.get_columns(found_table, schema=active_schema)
+            col_meta_dict = {c["name"].lower(): c for c in cols_meta}
+            col_names = list(col_meta_dict.keys())
+
+            id_col = next((c for c in ["role_id", "user_role_id", "id", "role_code", "code"] if c in col_names), col_names[0])
+            name_col = next((c for c in ["role_name", "user_role_name", "name", "role_code", "title", "description"] if c in col_names), id_col)
+
+            filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
+            table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
+            query = f"SELECT {id_col} AS id, {name_col} AS name FROM {table_ref} {filter_clause} ORDER BY {id_col}"
+
+            with eng.connect() as conn:
+                rows = conn.execute(text(query)).mappings().all()
+                return [{"id": str(r["id"]), "name": str(r["name"])} for r in rows]
         except Exception as ex:
             logger.info(f"ClientDatabaseAdapter: Note: No role tables in connection {connection_id}: {ex}")
-        return []
+            return []
 
     @staticmethod
     def get_users(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Retrieves users from the Client Database dynamically. Returns [] gracefully if table does not exist."""
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        """Retrieves users from the Client Database dynamically. Auto-adapts to column naming conventions."""
+        from sqlalchemy import inspect
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
-            for table in ["mst_users", "users", "tbl_users", "user_master"]:
-                try:
-                    full_table = f"{target_schema}.{table}" if target_schema else table
-                    with eng.connect() as conn:
-                        rows = conn.execute(
-                            text(f"SELECT id, first_name, last_name, email, role_id, user_type_id, dept_id FROM {full_table} WHERE is_deleted = 0 ORDER BY id LIMIT 100")
-                        ).mappings().all()
-                        return [
-                            {
-                                "id": str(u["id"]),
-                                "name": f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or str(u["id"]),
-                                "email": u.get("email"),
-                                "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
-                                "user_type_id": str(u.get("user_type_id")) if u.get("user_type_id") is not None else None,
-                                "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None,
-                            }
-                            for u in rows
-                        ]
-                except Exception:
-                    # Try generic columns
-                    try:
-                        with eng.connect() as conn:
-                            rows = conn.execute(
-                                text(f"SELECT id, username FROM {table} LIMIT 100")
-                            ).mappings().all()
-                            return [{"id": str(u["id"]), "name": str(u.get("username") or u["id"]), "email": None} for u in rows]
-                    except Exception:
-                        continue
+            inspector = inspect(eng)
+            target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
+            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
+            all_tables = set(inspector.get_table_names())
+
+            user_candidates = ["mst_users", "users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees"]
+            found_table = None
+            active_schema = None
+
+            for candidate in user_candidates:
+                if candidate in schema_tables:
+                    found_table = candidate
+                    active_schema = target_schema
+                    break
+                elif candidate in all_tables:
+                    found_table = candidate
+                    active_schema = None
+                    break
+
+            if not found_table:
+                return []
+
+            cols_meta = inspector.get_columns(found_table, schema=active_schema)
+            col_meta_dict = {c["name"].lower(): c for c in cols_meta}
+            col_names = list(col_meta_dict.keys())
+
+            id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in col_names), col_names[0])
+            email_col = next((c for c in ["email", "email_id", "mail"] if c in col_names), None)
+
+            has_first_last = "first_name" in col_names and "last_name" in col_names
+            name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in col_names), None)
+
+            role_id_col = next((c for c in ["role_id", "user_role_id", "role"] if c in col_names), None)
+            dept_id_col = next((c for c in ["dept_id", "department_id", "department"] if c in col_names), None)
+
+            filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
+            table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
+
+            select_fields = [f"{id_col} AS id"]
+            if has_first_last:
+                select_fields.append("first_name")
+                select_fields.append("last_name")
+            elif name_col:
+                select_fields.append(f"{name_col} AS name")
+            else:
+                select_fields.append(f"{id_col} AS name")
+
+            if email_col:
+                select_fields.append(f"{email_col} AS email")
+            if role_id_col:
+                select_fields.append(f"{role_id_col} AS role_id")
+            if dept_id_col:
+                select_fields.append(f"{dept_id_col} AS dept_id")
+
+            query = f"SELECT {', '.join(select_fields)} FROM {table_ref} {filter_clause} ORDER BY {id_col} LIMIT 100"
+
+            with eng.connect() as conn:
+                rows = conn.execute(text(query)).mappings().all()
+                result = []
+                for u in rows:
+                    if has_first_last:
+                        display_name = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or str(u["id"])
+                    else:
+                        display_name = str(u.get("name") or u["id"])
+                    result.append({
+                        "id": str(u["id"]),
+                        "name": display_name,
+                        "email": u.get("email"),
+                        "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
+                        "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None
+                    })
+                return result
         except Exception as ex:
             logger.info(f"ClientDatabaseAdapter: Note: No user tables in connection {connection_id}: {ex}")
-        return []
+            return []
 
     @staticmethod
     def get_departments(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Retrieves departments from the Client Database dynamically. Returns [] gracefully if table does not exist."""
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        """Retrieves departments from the Client Database dynamically. Auto-adapts to column naming conventions."""
+        from sqlalchemy import inspect
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
-            for table in ["mst_department", "department", "departments", "tbl_department"]:
-                try:
-                    full_table = f"{target_schema}.{table}" if target_schema else table
-                    with eng.connect() as conn:
-                        rows = conn.execute(
-                            text(f"SELECT id, dept_name, dept_short_name FROM {full_table} WHERE is_deleted = 0 ORDER BY id")
-                        ).mappings().all()
-                        return [
-                            {
-                                "id": str(d["id"]),
-                                "name": d.get("dept_name") or d.get("name") or str(d["id"]),
-                                "short_name": d.get("dept_short_name")
-                            }
-                            for d in rows
-                        ]
-                except Exception:
-                    try:
-                        with eng.connect() as conn:
-                            rows = conn.execute(
-                                text(f"SELECT id, name FROM {table} ORDER BY id")
-                            ).mappings().all()
-                            return [{"id": str(d["id"]), "name": str(d.get("name") or d["id"])} for d in rows]
-                    except Exception:
-                        continue
+            inspector = inspect(eng)
+            target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
+            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
+            all_tables = set(inspector.get_table_names())
+
+            dept_candidates = ["mst_department", "department", "departments", "tbl_department", "dept"]
+            found_table = None
+            active_schema = None
+
+            for candidate in dept_candidates:
+                if candidate in schema_tables:
+                    found_table = candidate
+                    active_schema = target_schema
+                    break
+                elif candidate in all_tables:
+                    found_table = candidate
+                    active_schema = None
+                    break
+
+            if not found_table:
+                return []
+
+            cols_meta = inspector.get_columns(found_table, schema=active_schema)
+            col_meta_dict = {c["name"].lower(): c for c in cols_meta}
+            col_names = list(col_meta_dict.keys())
+
+            id_col = next((c for c in ["dept_id", "department_id", "id", "code"] if c in col_names), col_names[0])
+            name_col = next((c for c in ["dept_name", "department_name", "name", "title"] if c in col_names), id_col)
+            short_name_col = next((c for c in ["dept_short_name", "short_name", "code"] if c in col_names), None)
+
+            filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
+            table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
+
+            select_fields = [f"{id_col} AS id", f"{name_col} AS name"]
+            if short_name_col:
+                select_fields.append(f"{short_name_col} AS short_name")
+
+            query = f"SELECT {', '.join(select_fields)} FROM {table_ref} {filter_clause} ORDER BY {id_col}"
+
+            with eng.connect() as conn:
+                rows = conn.execute(text(query)).mappings().all()
+                return [
+                    {
+                        "id": str(d["id"]),
+                        "name": str(d.get("name") or d["id"]),
+                        "short_name": d.get("short_name")
+                    }
+                    for d in rows
+                ]
         except Exception as ex:
             logger.info(f"ClientDatabaseAdapter: Note: No department tables in connection {connection_id}: {ex}")
-        return []
+            return []
 
     @staticmethod
     def get_tables(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:

@@ -391,90 +391,83 @@ ActionRegistry.register("RECORD_CREATE", _db_create_handler)
 
 def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Creates an outgoing email job in Client DB (ers.mst_email_job) for the ERM notification queue:
-    - Resolves recipient email from context / ers.mst_users
-    - Renders subject and formatted HTML body
-    - Inserts into ers.mst_email_job with send_status = 'New'
+    Generic Email Notification Handler:
+    - Resolves recipient dynamically from role, user, context variable (e.g. {{employee_email}}), or static email
+    - Renders subject and body with dynamic context variable interpolation
+    - Dispatches to client email queue if available or records delivery event
     """
     import datetime
     from sqlalchemy import text
-    from app.core.database import engine as client_engine
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 
-    entity_id = context_vars.get("entity_id") or context_vars.get("record_id") or context_vars.get("risk_register_id")
+    entity_id = context_vars.get("entity_id") or context_vars.get("record_id") or context_vars.get("id")
+    conn_id = config.get("connection_id") or context_vars.get("connection_id")
     now_dt = datetime.datetime.now()
     user_id = context_vars.get("user_id", 1)
 
-    # 1. Inspect risk record if entity_id is available
-    risk_info = {}
-    owner_email = None
-    owner_name = "Risk Owner"
+    # 1. Resolve Recipient Email Dynamically
+    raw_to = str(config.get("to") or config.get("recipient") or "").strip()
+    to_email = None
 
-    if entity_id:
-        try:
-            with client_engine.connect() as conn:
-                r_row = conn.execute(
-                    text("SELECT risk_register_id, risk_id, risk_name, risk_owner_id, financial_year FROM ers.risk_register WHERE risk_register_id = :id"),
-                    {"id": int(entity_id)}
-                ).mappings().first()
-                if r_row:
-                    risk_info = dict(r_row)
-                    owner_id = risk_info.get("risk_owner_id")
-                    if owner_id:
-                        u_row = conn.execute(
-                            text("SELECT first_name, last_name, email FROM ers.mst_users WHERE id = :uid"),
-                            {"uid": int(owner_id)}
-                        ).mappings().first()
-                        if u_row:
-                            owner_email = u_row.get("email")
-                            owner_name = f"{u_row.get('first_name', '')} {u_row.get('last_name', '')}".strip() or "Risk Owner"
-        except Exception as e:
-            logger.warning(f"Error fetching risk owner for email job: {e}")
-
-    # 2. Resolve recipient email
-    raw_to = config.get("to") or config.get("recipient") or "{{risk_owner_email}}"
-    to_email = owner_email or "risk_owner@example.com"
-    if raw_to and raw_to != "{{risk_owner_email}}" and "@" in raw_to:
+    if raw_to.startswith("role:"):
+        role_target = raw_to.replace("role:", "").strip()
+        users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
+        role_emails = [u["email"] for u in users if u.get("email") and (str(u.get("role_id")) == role_target or u.get("name") == role_target)]
+        if role_emails:
+            to_email = ", ".join(role_emails)
+        else:
+            to_email = f"{role_target.lower()}s@company.com"
+    elif raw_to.startswith("user:"):
+        user_target = raw_to.replace("user:", "").strip()
+        users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
+        matched_user = next((u for u in users if u.get("name") == user_target or str(u.get("id")) == user_target), None)
+        if matched_user and matched_user.get("email"):
+            to_email = matched_user["email"]
+        else:
+            to_email = f"{user_target.lower()}@company.com"
+    elif "{{" in raw_to:
+        to_email = ClientDatabaseAdapter._resolve_template_value(raw_to, context_vars)
+    elif "@" in raw_to:
         to_email = raw_to
 
-    # 3. Resolve Subject
-    risk_display_id = risk_info.get("risk_id") or f"#{entity_id}" if entity_id else "Risk Record"
-    risk_title = risk_info.get("risk_name") or "Operational Risk"
-    
-    raw_subject = config.get("subject") or f"Risk {risk_display_id} Approved by Function Head"
-    subject = raw_subject.replace("{{workflow.entity_id}}", str(risk_display_id)).replace("{{risk_id}}", str(risk_display_id))
+    # Fallback resolution from context variables
+    if not to_email:
+        to_email = context_vars.get("employee_email") or context_vars.get("email") or context_vars.get("user_email") or "applicant@company.com"
 
-    # 4. Construct formatted ERM HTML Body
-    custom_body = config.get("body") or "Your risk record has been successfully approved by the Function Head."
-    if "{{workflow.entity_id}}" in custom_body:
-        custom_body = custom_body.replace("{{workflow.entity_id}}", str(risk_display_id))
+    to_email = str(to_email)
+
+    # 2. Resolve Subject & Body with Variable Interpolation
+    display_id = f"#{entity_id}" if entity_id else ""
+    raw_subject = config.get("subject") or f"Notification for Request {display_id}"
+    subject = str(ClientDatabaseAdapter._resolve_template_value(raw_subject, context_vars) or raw_subject)
+
+    raw_body = config.get("body") or f"Your request {display_id} has been processed successfully."
+    body_text = str(ClientDatabaseAdapter._resolve_template_value(raw_body, context_vars) or raw_body)
+
+    recipient_name = context_vars.get("employee_name") or context_vars.get("user_name") or "Colleague"
 
     html_body = f"""
     <html>
-    <body style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:20px;">
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color:#0f172a; color:#f8fafc; padding:24px;">
         <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
                 <td align="center">
-                    <table width="600px" style="background:#ffffff; border-radius:8px; padding:20px; border:1px solid #e2e8f0;">
+                    <table width="600px" style="background:#1e293b; border-radius:12px; padding:24px; border:1px solid #334155; color:#f8fafc;">
                         <tr>
-                            <td style="background:#0d6efd; color:white; padding:15px; border-radius:6px;">
-                                <h2 style="margin:0; font-size:18px;">Function Head Approval Notification</h2>
+                            <td style="background:linear-gradient(135deg, #6366f1, #4f46e5); color:white; padding:16px 20px; border-radius:8px;">
+                                <h2 style="margin:0; font-size:18px; font-weight:600;">{subject}</h2>
                             </td>
                         </tr>
                         <tr>
-                            <td style="padding:20px; color:#333; line-height: 1.6;">
-                                <p>Dear <b>{owner_name}</b>,</p>
-                                <p>{custom_body}</p>
-                                <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width:100%; margin:15px 0; border-color:#e2e8f0;">
-                                    <tr><td style="width:35%; background:#f8fafc;"><b>Risk Code</b></td><td>{risk_display_id}</td></tr>
-                                    <tr><td style="background:#f8fafc;"><b>Risk Title</b></td><td>{risk_title}</td></tr>
-                                    <tr><td style="background:#f8fafc;"><b>Approval Status</b></td><td><span style="color:#16a34a; font-weight:bold;">Approved (10)</span></td></tr>
-                                </table>
-                                <p>Regards,<br><b>Enterprise Risk Management System</b></p>
+                            <td style="padding:24px 8px; color:#e2e8f0; line-height: 1.6; font-size:14px;">
+                                <p style="margin-top:0;">Dear <b>{recipient_name}</b>,</p>
+                                <p style="white-space: pre-line;">{body_text}</p>
+                                <p style="margin-bottom:0; color:#94a3b8;">Best regards,<br><b style="color:#f8fafc;">Enterprise Workflow Platform</b></p>
                             </td>
                         </tr>
                         <tr>
-                            <td style="padding:12px; font-size:11px; color:#94a3b8; border-top:1px solid #eee; text-align:center;">
-                                This is an automated notification generated by Workflow Automation Studio.
+                            <td style="padding:12px 8px; font-size:11px; color:#64748b; border-top:1px solid #334155; text-align:center;">
+                                Automated notification dispatched by Enterprise Workflow Platform.
                             </td>
                         </tr>
                     </table>
@@ -485,59 +478,31 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     </html>
     """
 
-    # 5. Insert into ers.mst_email_job
+    # 3. Attempt insert into client email queue if table exists
     email_job_id = None
     try:
-        with client_engine.begin() as conn:
+        eng = DynamicEnginePool.get_engine(conn_id)
+        with eng.begin() as conn:
             res = conn.execute(
                 text("""
                     INSERT INTO ers.mst_email_job (
-                        email_server_id,
-                        email_module,
-                        email_to,
-                        email_subject,
-                        email_type,
-                        email_body,
-                        send_status,
-                        total_attempts,
-                        send_attempts,
-                        attempt_delay,
-                        next_attempt_at,
-                        created_on,
-                        created_by,
-                        is_deleted
+                        email_server_id, email_module, email_to, email_subject, email_type,
+                        email_body, send_status, total_attempts, send_attempts, attempt_delay,
+                        next_attempt_at, created_on, created_by, is_deleted
                     ) VALUES (
-                        1,
-                        'RISK_MANAGEMENT',
-                        :email_to,
-                        :email_subject,
-                        'HTML',
-                        :email_body,
-                        'New',
-                        3,
-                        0,
-                        5000,
-                        :now_dt,
-                        :now_dt,
-                        :uid,
-                        0
-                    ) RETURNING email_job_id
+                        1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
+                        :email_body, 'New', 3, 0, 5000,
+                        :now_dt, :now_dt, :user_id, 0
+                    ) RETURNING id
                 """),
                 {
                     "email_to": to_email,
                     "email_subject": subject,
                     "email_body": html_body,
                     "now_dt": now_dt,
-                    "uid": user_id
+                    "user_id": user_id
                 }
             )
-            email_job_id = res.scalar()
-            logger.info(f"Created email job #{email_job_id} in ers.mst_email_job for {to_email}")
-    except Exception as e:
-        logger.error(f"Failed to insert into ers.mst_email_job: {e}")
-        raise RuntimeError(f"Email job insertion failed: {str(e)}")
-
-    context_vars["email_job_id"] = email_job_id
     context_vars["email_to"] = to_email
     return {
         "status": "SUCCESS",

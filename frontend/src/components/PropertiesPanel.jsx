@@ -507,6 +507,9 @@ export default function PropertiesPanel({
           <NotificationSection
             data={data}
             name={name}
+            backendRoles={backendRoles}
+            backendUsers={backendUsers}
+            availableFields={availableFields}
             handleFieldChange={handleFieldChange}
             handleFieldsChange={handleFieldsChange}
           />
