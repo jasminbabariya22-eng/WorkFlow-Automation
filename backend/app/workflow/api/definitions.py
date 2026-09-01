@@ -122,6 +122,24 @@ def parse_bpmn_to_reactflow(xml_str: Optional[str], wf_key: Optional[str] = None
         return {'nodes': [], 'edges': []}
 
 
+import json as py_json
+
+
+def resolve_workflow_graph(b: BPMNDefinition, db: Optional[Session] = None) -> Dict[str, Any]:
+    """
+    Returns the exact visual JSON design saved by the user if available,
+    otherwise parses the BPMN XML into React Flow format.
+    """
+    if b.json_content:
+        try:
+            parsed = py_json.loads(b.json_content) if isinstance(b.json_content, str) else b.json_content
+            if isinstance(parsed, dict) and ('nodes' in parsed or 'edges' in parsed):
+                return parsed
+        except Exception:
+            pass
+    return parse_bpmn_to_reactflow(b.xml_content, b.spec_id, db)
+
+
 @router.get("")
 def list_workflow_definitions(
     db: Session = Depends(get_workflow_db)
@@ -139,7 +157,7 @@ def list_workflow_definitions(
         result = []
         for b in seen_specs.values():
             name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
-            parsed_graph = parse_bpmn_to_reactflow(b.xml_content, b.spec_id, db)
+            parsed_graph = resolve_workflow_graph(b, db)
             result.append({
                 "id": b.id,
                 "workflow_id": b.id,
@@ -153,7 +171,7 @@ def list_workflow_definitions(
                 "created_on": b.created_on.isoformat() if b.created_on else None,
                 "updated_on": b.created_on.isoformat() if b.created_on else None,
                 "tags": [b.spec_id.split('_')[0].upper()],
-                "nodes_count": len(parsed_graph['nodes']) or 3,
+                "nodes_count": len(parsed_graph.get('nodes', [])) or 3,
                 "xml_content": b.xml_content,
                 "json_content": parsed_graph
             })
@@ -168,7 +186,7 @@ def get_workflow_definition_by_id(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Retrieves workflow definition by ID with complete parsed React Flow graph.
+    Retrieves workflow definition by ID preserving exact original design layout.
     """
     try:
         b = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
@@ -177,7 +195,7 @@ def get_workflow_definition_by_id(
 
         if b:
             name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
-            parsed_graph = parse_bpmn_to_reactflow(b.xml_content, b.spec_id, db)
+            parsed_graph = resolve_workflow_graph(b, db)
             return success_response(data={
                 "id": b.id,
                 "workflow_id": b.id,
