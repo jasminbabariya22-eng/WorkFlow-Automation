@@ -483,26 +483,36 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     try:
         eng = DynamicEnginePool.get_engine(conn_id)
         with eng.begin() as conn:
-            res = conn.execute(
-                text("""
-                    INSERT INTO ers.mst_email_job (
-                        email_server_id, email_module, email_to, email_subject, email_type,
-                        email_body, send_status, total_attempts, send_attempts, attempt_delay,
-                        next_attempt_at, created_on, created_by, is_deleted
-                    ) VALUES (
-                        1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
-                        :email_body, 'New', 3, 0, 5000,
-                        :now_dt, :now_dt, :user_id, 0
-                    ) RETURNING id
-                """),
-                {
-                    "email_to": to_email,
-                    "email_subject": subject,
-                    "email_body": html_body,
-                    "now_dt": now_dt,
-                    "user_id": user_id
-                }
-            )
+            for mail_tbl in ["ers.mst_email_job", "mst_email_job", "email_jobs"]:
+                try:
+                    res = conn.execute(
+                        text(f"""
+                            INSERT INTO {mail_tbl} (
+                                email_server_id, email_module, email_to, email_subject, email_type,
+                                email_body, send_status, total_attempts, send_attempts, attempt_delay,
+                                next_attempt_at, created_on, created_by, is_deleted
+                            ) VALUES (
+                                1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
+                                :email_body, 'New', 3, 0, 5000,
+                                :now_dt, :now_dt, :user_id, 0
+                            ) RETURNING id
+                        """),
+                        {
+                            "email_to": to_email,
+                            "email_subject": subject,
+                            "email_body": html_body,
+                            "now_dt": now_dt,
+                            "user_id": user_id
+                        }
+                    ).first()
+                    if res:
+                        email_job_id = res[0]
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
     context_vars["email_to"] = to_email
     return {
         "status": "SUCCESS",
