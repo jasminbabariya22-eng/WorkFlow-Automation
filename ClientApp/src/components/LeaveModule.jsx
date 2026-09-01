@@ -284,6 +284,28 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     }
   }
 
+  const handleRequestCancellation = async (req, e) => {
+    if (e) e.stopPropagation()
+    try {
+      await genericWorkflowApi.submit('leave_cancellation', {
+        employee_id: Number(currentUser.id),
+        leave_type_id: req.leaveTypeId || 1,
+        start_date: req.startDate,
+        end_date: req.endDate,
+        reason: `Cancellation requested for Leave #LR-${req.id}`,
+        status: 'PENDING_CANCELLATION'
+      }, currentUser)
+
+      setFeedbackBanner({
+        type: 'success',
+        message: `✓ Leave cancellation requested! Launched 2nd Workflow (Leave_Cancellation_Request #1122).`
+      })
+      await loadRecords()
+    } catch (err) {
+      setFeedbackBanner({ type: 'error', message: err.message })
+    }
+  }
+
   const handleViewDetails = (req, e) => {
     if (e) e.stopPropagation()
     const item = leavesList.find(x => x.id === req.id)
@@ -651,13 +673,24 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                       </td>
                       <td>{getStatusBadge(req.status)}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <button
-                          className="btn btn-outline text-xs"
-                          onClick={(e) => handleViewDetails(req, e)}
-                        >
-                          <Eye size={12} />
-                          <span>View Details</span>
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            className="btn btn-outline text-xs"
+                            onClick={(e) => handleViewDetails(req, e)}
+                          >
+                            <Eye size={12} />
+                            <span>View Details</span>
+                          </button>
+                          {req.status === 'APPROVED' && (
+                            <button
+                              className="btn btn-danger-outline text-xs"
+                              title="Trigger 2nd Workflow: Leave Cancellation"
+                              onClick={(e) => handleRequestCancellation(req, e)}
+                            >
+                              <span>Cancel Leave</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))

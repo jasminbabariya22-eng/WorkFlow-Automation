@@ -25,6 +25,17 @@ WORKFLOW_BINDINGS: Dict[str, Dict[str, Any]] = {
             {"name": "end_date", "type": "str", "required": True},
             {"name": "reason", "type": "str", "required": False}
         ]
+    },
+    "leave_cancellation": {
+        "module_key": "leave_cancellation",
+        "title": "Leave Cancellation Request",
+        "workflow_id": 1122,
+        "connection_id": 4,
+        "table_name": "leave_requests",
+        "primary_key": "leave_request_id",
+        "status_column": "status",
+        "default_status": "PENDING_CANCELLATION",
+        "approval_roles": ["MANAGER", "FUNCTION_HEAD", "APPROVER", "HR"]
     }
 }
 
