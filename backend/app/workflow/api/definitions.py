@@ -25,6 +25,103 @@ class PublishDefinitionRequest(BaseModel):
     description: Optional[str] = None
 
 
+import xml.etree.ElementTree as ET
+
+
+def parse_bpmn_to_reactflow(xml_str: Optional[str], wf_key: Optional[str] = None, db: Optional[Session] = None) -> Dict[str, Any]:
+    """
+    Parses BPMN XML and/or GenericWorkflow database definitions into React Flow compatible nodes & edges.
+    """
+    # 1. Check if matching GenericWorkflow exists in wf_definition
+    if db and wf_key:
+        gw = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == wf_key) | 
+            (GenericWorkflow.name.ilike(f"%{wf_key}%")) |
+            (GenericWorkflow.workflow_id == (int(wf_key) if str(wf_key).isdigit() else -1))
+        ).first()
+        if gw and gw.versions:
+            v = gw.versions[-1]
+            nodes = []
+            for i, n in enumerate(v.nodes):
+                raw_type = str(n.node_type).lower()
+                rf_type = 'start' if 'start' in raw_type else ('end' if 'end' in raw_type else ('userTask' if 'approval' in raw_type or 'user' in raw_type else ('condition' if 'cond' in raw_type or 'gate' in raw_type else ('email' if 'email' in raw_type else ('record' if 'rec' in raw_type or 'action' in raw_type else 'generic')))))
+                px = n.position_x if n.position_x and n.position_x != 0 else (200 + (i % 2) * 260)
+                py = n.position_y if n.position_y and n.position_y != 0 else (50 + i * 130)
+                nodes.append({
+                    'id': n.node_key,
+                    'type': rf_type,
+                    'position': {'x': px, 'y': py},
+                    'data': {'label': n.name or n.node_key, 'name': n.name or n.node_key, 'actions': ['APPROVE', 'REJECT']}
+                })
+            edges = []
+            node_map = {n.node_id: n.node_key for n in v.nodes}
+            for c in v.connections:
+                edges.append({
+                    'id': c.connection_key or f"e-{c.source_node_id}-{c.target_node_id}",
+                    'source': node_map.get(c.source_node_id, str(c.source_node_id)),
+                    'target': node_map.get(c.target_node_id, str(c.target_node_id)),
+                    'type': 'workflow',
+                    'data': {'label': c.label or c.condition or '', 'action': c.condition or c.label or ''}
+                })
+            if len(nodes) > 0:
+                return {'nodes': nodes, 'edges': edges}
+
+    # 2. Parse standard BPMN XML
+    if not xml_str:
+        return {'nodes': [], 'edges': []}
+    try:
+        root = ET.fromstring(xml_str)
+        ns = {
+            'bpmn': 'http://www.omg.org/spec/BPMN/20100524/MODEL',
+            'bpmndi': 'http://www.omg.org/spec/BPMN/20100524/DI',
+            'dc': 'http://www.omg.org/spec/DD/20100524/DC'
+        }
+        process = root.find('.//bpmn:process', ns)
+        if process is None:
+            for elem in root.iter():
+                if elem.tag.endswith('process'):
+                    process = elem
+                    break
+        if process is None:
+            return {'nodes': [], 'edges': []}
+
+        bounds = {}
+        for shape in root.findall('.//bpmndi:BPMNShape', ns):
+            bpmn_el = shape.attrib.get('bpmnElement')
+            b = shape.find('.//dc:Bounds', ns)
+            if bpmn_el and b is not None:
+                bounds[bpmn_el] = {'x': float(b.attrib.get('x', 200)), 'y': float(b.attrib.get('y', 100))}
+
+        nodes = []
+        edges = []
+        idx = 0
+        for child in process:
+            tag = child.tag.split('}')[-1]
+            cid = child.attrib.get('id')
+            cname = child.attrib.get('name') or cid
+            if tag in ['startEvent', 'userTask', 'serviceTask', 'sendTask', 'exclusiveGateway', 'inclusiveGateway', 'parallelGateway', 'endEvent', 'task', 'callActivity']:
+                rf_type = 'start' if tag == 'startEvent' else ('end' if tag == 'endEvent' else ('userTask' if tag in ['userTask', 'task', 'callActivity'] else ('condition' if 'Gateway' in tag else ('email' if tag == 'sendTask' else ('record' if tag == 'serviceTask' else 'generic')))))
+                pos = bounds.get(cid, {'x': 200 + (idx % 2) * 260, 'y': 50 + idx * 130})
+                nodes.append({
+                    'id': cid,
+                    'type': rf_type,
+                    'position': pos,
+                    'data': {'label': cname, 'name': cname, 'actions': ['APPROVE', 'REJECT']}
+                })
+                idx += 1
+            elif tag == 'sequenceFlow':
+                edges.append({
+                    'id': cid,
+                    'source': child.attrib.get('sourceRef'),
+                    'target': child.attrib.get('targetRef'),
+                    'type': 'workflow',
+                    'data': {'label': cname if cname != cid else '', 'action': cname or ''}
+                })
+        return {'nodes': nodes, 'edges': edges}
+    except Exception as e:
+        return {'nodes': [], 'edges': []}
+
+
 @router.get("")
 def list_workflow_definitions(
     db: Session = Depends(get_workflow_db)
@@ -42,6 +139,7 @@ def list_workflow_definitions(
         result = []
         for b in seen_specs.values():
             name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+            parsed_graph = parse_bpmn_to_reactflow(b.xml_content, b.spec_id, db)
             result.append({
                 "id": b.id,
                 "workflow_id": b.id,
@@ -55,7 +153,9 @@ def list_workflow_definitions(
                 "created_on": b.created_on.isoformat() if b.created_on else None,
                 "updated_on": b.created_on.isoformat() if b.created_on else None,
                 "tags": [b.spec_id.split('_')[0].upper()],
-                "xml_content": b.xml_content
+                "nodes_count": len(parsed_graph['nodes']) or 3,
+                "xml_content": b.xml_content,
+                "json_content": parsed_graph
             })
         return success_response(data=result)
     except Exception as e:
@@ -68,7 +168,7 @@ def get_workflow_definition_by_id(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Retrieves workflow definition by ID from workflow.bpmn_definition.
+    Retrieves workflow definition by ID with complete parsed React Flow graph.
     """
     try:
         b = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
@@ -77,6 +177,7 @@ def get_workflow_definition_by_id(
 
         if b:
             name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+            parsed_graph = parse_bpmn_to_reactflow(b.xml_content, b.spec_id, db)
             return success_response(data={
                 "id": b.id,
                 "workflow_id": b.id,
@@ -87,7 +188,8 @@ def get_workflow_definition_by_id(
                 "version": b.version or 1,
                 "status": "Active" if b.is_active or b.status == "Active" else (b.status or "Draft"),
                 "is_active": bool(b.is_active),
-                "xml_content": b.xml_content
+                "xml_content": b.xml_content,
+                "json_content": parsed_graph
             })
 
         raise HTTPException(status_code=404, detail="Workflow definition not found")
