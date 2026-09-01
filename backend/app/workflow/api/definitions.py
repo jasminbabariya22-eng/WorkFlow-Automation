@@ -30,32 +30,32 @@ def list_workflow_definitions(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Returns recent active and draft workflow definitions for the dashboard in a single fast query.
+    Returns all workflow definitions directly from workflow.bpmn_definition table.
     """
     try:
-        from sqlalchemy.orm import selectinload
-        wfs = (
-            db.query(GenericWorkflow)
-            .options(selectinload(GenericWorkflow.versions))
-            .order_by(GenericWorkflow.updated_at.desc().nullslast(), GenericWorkflow.workflow_id.desc())
-            .limit(50)
-            .all()
-        )
+        bpmn_defs = db.query(BPMNDefinition).order_by(BPMNDefinition.id.desc()).all()
+        seen_specs = {}
+        for b in bpmn_defs:
+            if b.spec_id not in seen_specs or (b.is_active and not seen_specs[b.spec_id].is_active):
+                seen_specs[b.spec_id] = b
+
         result = []
-        for w in wfs:
-            latest_v = max([v.version_number for v in w.versions]) if w.versions else 1
+        for b in seen_specs.values():
+            name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
             result.append({
-                "id": w.workflow_id,
-                "spec_id": w.workflow_key or f"workflow_{w.workflow_id}",
-                "name": w.name,
-                "description": w.description or "",
-                "connection_id": w.connection_id,
-                "version": latest_v,
-                "status": "Active" if w.status == "ACTIVE" else "Draft",
-                "is_active": (w.status == "ACTIVE"),
-                "created_on": w.created_at.isoformat() if w.created_at else None,
-                "updated_on": w.updated_at.isoformat() if w.updated_at else None,
-                "tags": [w.entity_type] if w.entity_type else []
+                "id": b.id,
+                "workflow_id": b.id,
+                "spec_id": b.spec_id,
+                "name": name_label if len(name_label) < 60 else b.spec_id.replace('_', ' ').title(),
+                "description": b.description or "",
+                "connection_id": 4 if 'leave' in b.spec_id else None,
+                "version": b.version or 1,
+                "status": "Active" if b.is_active or b.status == "Active" else (b.status or "Draft"),
+                "is_active": bool(b.is_active),
+                "created_on": b.created_on.isoformat() if b.created_on else None,
+                "updated_on": b.created_on.isoformat() if b.created_on else None,
+                "tags": [b.spec_id.split('_')[0].upper()],
+                "xml_content": b.xml_content
             })
         return success_response(data=result)
     except Exception as e:
@@ -68,71 +68,29 @@ def get_workflow_definition_by_id(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Retrieves workflow definition by ID from wf_definition with React Flow compatible nodes and edges.
+    Retrieves workflow definition by ID from workflow.bpmn_definition.
     """
     try:
-        from app.workflow_studio.services import WorkflowStudioService
-        wf_resp = WorkflowStudioService.get_workflow_definition(db, id)
+        b = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
+        if not b:
+            b = db.query(BPMNDefinition).filter(BPMNDefinition.spec_id == str(id)).first()
 
-        rf_nodes = []
-        for i, n in enumerate(wf_resp.nodes):
-            raw_type = str(n.type).lower()
-            if 'start' in raw_type:
-                rf_type = 'start'
-            elif 'end' in raw_type:
-                rf_type = 'end'
-            elif 'approval' in raw_type or 'user' in raw_type:
-                rf_type = 'userTask'
-            elif 'condition' in raw_type or 'router' in raw_type or 'gateway' in raw_type:
-                rf_type = 'condition'
-            elif 'email' in raw_type or 'notification' in raw_type:
-                rf_type = 'email'
-            elif 'record' in raw_type or 'action' in raw_type or 'db' in raw_type:
-                rf_type = 'record'
-            else:
-                rf_type = 'generic'
-
-            px = n.position_x if (n.position_x and n.position_x != 0) else (250 + (i % 2) * 200)
-            py = n.position_y if (n.position_y and n.position_y != 0) else (50 + i * 120)
-
-            rf_nodes.append({
-                "id": n.id,
-                "type": rf_type,
-                "position": {"x": px, "y": py},
-                "data": {
-                    "label": n.name or n.id,
-                    "name": n.name or n.id,
-                    **(n.config or {})
-                }
+        if b:
+            name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+            return success_response(data={
+                "id": b.id,
+                "workflow_id": b.id,
+                "spec_id": b.spec_id,
+                "name": name_label if len(name_label) < 60 else b.spec_id.replace('_', ' ').title(),
+                "description": b.description or "",
+                "connection_id": 4 if 'leave' in b.spec_id else None,
+                "version": b.version or 1,
+                "status": "Active" if b.is_active or b.status == "Active" else (b.status or "Draft"),
+                "is_active": bool(b.is_active),
+                "xml_content": b.xml_content
             })
 
-        rf_edges = []
-        for e in wf_resp.edges:
-            rf_edges.append({
-                "id": e.id or f"e-{e.source}-{e.target}",
-                "source": e.source,
-                "target": e.target,
-                "type": "workflow",
-                "data": {
-                    "label": e.label or e.condition or "",
-                    "action": e.condition or e.label or ""
-                }
-            })
-
-        return success_response(data={
-            "id": wf_resp.workflow_id,
-            "spec_id": wf_resp.workflow_key,
-            "name": wf_resp.name,
-            "description": wf_resp.description,
-            "connection_id": wf_resp.connection_id,
-            "version": wf_resp.version_number,
-            "status": "Active" if wf_resp.status == "ACTIVE" else "Draft",
-            "is_active": (wf_resp.status == "ACTIVE"),
-            "json_content": {
-                "nodes": rf_nodes,
-                "edges": rf_edges
-            }
-        })
+        raise HTTPException(status_code=404, detail="Workflow definition not found")
     except Exception as e:
         return error_response(message=str(e), status_code=404)
 
