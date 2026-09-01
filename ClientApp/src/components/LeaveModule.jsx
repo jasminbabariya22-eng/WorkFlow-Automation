@@ -67,52 +67,6 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     return clientDb.getManagerForUser(currentUser?.id)
   }, [currentUser])
 
-  // Direct Live PostgreSQL Fetching
-  const fetchLeaves = async () => {
-    try {
-      setIsLoading(true)
-      const liveRows = await workflowClient.fetchRecords('leave_requests', 4)
-      if (Array.isArray(liveRows)) {
-        const users = clientDb.getUsers()
-        const types = clientDb.getLeaveTypes()
-        const mapped = liveRows.map(r => {
-          const u = users.find(x => String(x.id) === String(r.employee_id))
-          const mgr = u ? clientDb.getManagerForUser(u.id) : null
-          const lt = types.find(t => Number(t.id) === Number(r.leave_type_id))
-          const statusUpper = String(r.status || 'PENDING').toUpperCase()
-
-          return {
-            id: r.leave_request_id,
-            employeeId: String(r.employee_id),
-            employeeName: u ? u.name : `Employee #${r.employee_id}`,
-            employeeEmail: u ? u.email : 'employee@company.com',
-            managerId: mgr ? String(mgr.id) : (u?.manager_id ? String(u.manager_id) : '3'),
-            managerName: mgr ? mgr.name : 'Rajesh Kumar',
-            leaveTypeId: r.leave_type_id,
-            leaveType: lt ? lt.name : 'Leave',
-            startDate: r.start_date,
-            endDate: r.end_date || r.start_date,
-            days: 2,
-            status: statusUpper,
-            reason: r.reason || 'Leave Request',
-            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'Recent'
-          }
-        })
-        setLeavesList(mapped)
-      } else {
-        setLeavesList([])
-      }
-    } catch (_err) {
-      setLeavesList([])
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchLeaves()
-  }, [currentUser])
-
   // Data Slices
   const myRequests = useMemo(() => {
     return leavesList.filter(r => String(r.employeeId) === String(currentUser?.id))
@@ -167,8 +121,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     })
   }, [myRequests, searchQuery, statusFilter, typeFilter])
 
-  // --- Handlers ---
-
+  // Handlers
   const handleOpenApplyModal = () => {
     setShowApplyModal(true)
     setSubmissionResult(null)
@@ -178,7 +131,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setLeaveTypeId(1)
   }
 
-  const handleSubmitLeave = async (e) => {
+  const handleSubmitLeave = (e) => {
     e.preventDefault()
     if (isSubmitting) return
     setIsSubmitting(true)
@@ -188,62 +141,29 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      // 1. Insert directly into PostgreSQL (Connection #4)
-      const recRes = await workflowClient.createRecord('leave_requests', {
-        employee_id: Number(currentUser.id) || 5,
-        leave_type_id: Number(leaveTypeId) || 1,
-        start_date: startDate,
-        end_date: endDate,
-        reason: reason || 'Leave Request',
-        status: 'PENDING'
-      }, 4)
-
-      const targetEntityId = recRes?.id
-      if (!targetEntityId) {
-        throw new Error('Failed to obtain new record ID from database.')
-      }
-
-      // 2. Trigger Workflow Engine (Emp_Leave_Request #112)
-      try {
-        await workflowClient.startWorkflow(112, {
-          entityType: 'leave_requests',
-          entityId: targetEntityId,
-          userId: currentUser.id,
-          variables: {
-            entity_id: targetEntityId,
-            employee_id: currentUser.id,
-            employee_name: currentUser.name,
-            employee_email: currentUser.email,
-            manager_id: reportingManager ? reportingManager.id : 3,
-            manager_name: reportingManager ? reportingManager.name : 'Rajesh Kumar',
-            manager_email: reportingManager?.email || 'rajesh.kumar@example.com',
-            leave_type: typeName,
-            days: calculatedDays,
-            start_date: startDate,
-            end_date: endDate,
-            reason: reason
-          }
-        })
-      } catch (wfErr) {
-        console.warn('Workflow start notice:', wfErr.message)
-      }
-
-      // 3. Refresh live records from PostgreSQL
-      await fetchLeaves()
-
-      setSubmissionResult({
-        id: targetEntityId,
+      const newLeave = {
+        id: leavesList.length + 1,
+        employeeId: String(currentUser.id),
+        employeeName: currentUser.name,
+        employeeEmail: currentUser.email,
+        managerId: reportingManager ? String(reportingManager.id) : '3',
+        managerName: reportingManager ? reportingManager.name : 'Rajesh Kumar',
+        leaveTypeId: Number(leaveTypeId),
         leaveType: typeName,
         startDate,
         endDate,
         days: calculatedDays,
-        managerName: reportingManager ? reportingManager.name : 'Rajesh Kumar',
-        reason
-      })
+        status: 'PENDING',
+        reason: reason || 'Leave Application',
+        submittedAt: new Date().toLocaleString()
+      }
+
+      setLeavesList(prev => [newLeave, ...prev])
+      setSubmissionResult(newLeave)
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
-        message: err.message || 'Unable to submit leave request. Please try again.'
+        message: err.message || 'Unable to submit leave request.'
       })
     } finally {
       setIsSubmitting(false)
@@ -256,43 +176,22 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setApprovalComment('')
   }
 
-  const handleConfirmApprove = async () => {
+  const handleConfirmApprove = () => {
     if (!approveConfirmItem || actionLoadingId) return
     const requestId = approveConfirmItem.id
     setActionLoadingId(requestId)
 
-    try {
-      // 1. Generic Workflow Action Execution (Emp_Leave_Request #112)
-      await workflowClient.executeAction(112, {
-        entityType: 'leave_requests',
-        entityId: requestId,
-        action: 'APPROVE',
-        userId: currentUser.id,
-        remarks: approvalComment || 'Approved by manager',
-        variables: {
-          status: 'APPROVED',
-          approved_by: currentUser.name,
-          user_role: currentUser.role || 'MANAGER',
-          connection_id: 4,
-          employee_email: approveConfirmItem.employeeEmail || `${(approveConfirmItem.employeeName || 'employee').toLowerCase().replace(/\s+/g, '')}@company.com`
-        }
-      })
+    setLeavesList(prev =>
+      prev.map(item => (item.id === requestId ? { ...item, status: 'APPROVED' } : item))
+    )
 
-      setFeedbackBanner({
-        type: 'success',
-        message: `✓ Leave request #LR-${requestId} approved successfully. Notification email dispatched to ${approveConfirmItem.employeeName || 'employee'}.`
-      })
+    setFeedbackBanner({
+      type: 'success',
+      message: `✓ Leave request #LR-${requestId} approved successfully.`
+    })
 
-      setApproveConfirmItem(null)
-      await fetchLeaves()
-    } catch (err) {
-      setFeedbackBanner({
-        type: 'error',
-        message: err.message || 'Unable to approve this request.'
-      })
-    } finally {
-      setActionLoadingId(null)
-    }
+    setApproveConfirmItem(null)
+    setActionLoadingId(null)
   }
 
   const handleOpenRejectModal = (req, e) => {
@@ -302,7 +201,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setRejectionError('')
   }
 
-  const handleConfirmReject = async () => {
+  const handleConfirmReject = () => {
     if (!rejectConfirmItem || actionLoadingId) return
     if (!rejectionReason.trim()) {
       setRejectionError('Rejection reason is mandatory.')
@@ -312,38 +211,17 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const requestId = rejectConfirmItem.id
     setActionLoadingId(requestId)
 
-    try {
-      // 1. Generic Workflow Action Execution (Emp_Leave_Request #112)
-      await workflowClient.executeAction(112, {
-        entityType: 'leave_requests',
-        entityId: requestId,
-        action: 'REJECT',
-        userId: currentUser.id,
-        remarks: rejectionReason,
-        variables: {
-          status: 'REJECTED',
-          rejected_by: currentUser.name,
-          user_role: currentUser.role || 'MANAGER',
-          connection_id: 4,
-          employee_email: rejectConfirmItem.employeeEmail || `${(rejectConfirmItem.employeeName || 'employee').toLowerCase().replace(/\s+/g, '')}@company.com`
-        }
-      })
+    setLeavesList(prev =>
+      prev.map(item => (item.id === requestId ? { ...item, status: 'REJECTED' } : item))
+    )
 
-      setFeedbackBanner({
-        type: 'success',
-        message: `✓ Leave request #LR-${requestId} rejected. Notification email with reason dispatched to ${rejectConfirmItem.employeeName || 'employee'}.`
-      })
+    setFeedbackBanner({
+      type: 'success',
+      message: `✓ Leave request #LR-${requestId} rejected.`
+    })
 
-      setRejectConfirmItem(null)
-      await fetchLeaves()
-    } catch (err) {
-      setFeedbackBanner({
-        type: 'error',
-        message: err.message || 'Unable to reject this request.'
-      })
-    } finally {
-      setActionLoadingId(null)
-    }
+    setRejectConfirmItem(null)
+    setActionLoadingId(null)
   }
 
   const handleViewDetails = (req, e) => {
