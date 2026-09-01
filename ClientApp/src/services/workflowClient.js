@@ -135,6 +135,20 @@ class WorkflowClient {
     }
     return await res.json()
   }
+
+  // 7. Get Assigned Tasks across ALL Workflows for Active User
+  async fetchMyTasks(userId) {
+    try {
+      const res = await fetch(`${this.serverUrl}/workflow-studio/tasks/my-tasks?user_id=${userId}`, {
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      return Array.isArray(data) ? data : []
+    } catch (_err) {
+      return []
+    }
+  }
 }
 
 export const workflowClient = new WorkflowClient()

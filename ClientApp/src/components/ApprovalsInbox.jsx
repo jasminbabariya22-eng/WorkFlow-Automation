@@ -1,77 +1,67 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Inbox, CheckCircle2, XCircle, AlertCircle, ArrowRight, User, Clock, Check } from 'lucide-react'
-import { clientDb } from '../services/clientDb'
 import { workflowClient } from '../services/workflowClient'
 
 export default function ApprovalsInbox({ currentUser, onDataChanged }) {
-  const [tasks, setTasks] = useState(clientDb.getPendingApprovalsForUser(currentUser))
+  const [tasks, setTasks] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
   const [remarksMap, setRemarksMap] = useState({})
   const [actionLoading, setActionLoading] = useState(null)
   const [feedback, setFeedback] = useState(null)
 
-  const reloadTasks = () => {
-    const list = clientDb.getPendingApprovalsForUser(currentUser)
-    setTasks(list)
-    if (onDataChanged) onDataChanged()
+  const reloadTasks = async () => {
+    if (!currentUser?.id) return
+    try {
+      setIsLoading(true)
+      const liveTasks = await workflowClient.fetchMyTasks(currentUser.id)
+      setTasks(Array.isArray(liveTasks) ? liveTasks : [])
+      if (onDataChanged) onDataChanged()
+    } catch (_e) {
+      setTasks([])
+    } finally {
+      setIsLoading(false)
+    }
   }
 
+  useEffect(() => {
+    reloadTasks()
+  }, [currentUser])
+
   const handleAction = async (task, actionType) => {
-    const actionKey = `${task.entityType}_${task.entityId}_${actionType}`
+    const actionKey = `${task.entity_type || 'task'}_${task.entity_id || task.task_id}_${actionType}`
     setActionLoading(actionKey)
     setFeedback(null)
-    const remarks = remarksMap[`${task.entityType}_${task.entityId}`] || ''
+    const itemKey = `${task.entity_type || 'task'}_${task.entity_id || task.task_id}`
+    const remarks = remarksMap[itemKey] || ''
 
-    // 1. Submit Action to Centralized Workflow Engine over the Network
     try {
-      await workflowClient.executeAction(task.workflowId, {
-        entityType: task.entityType,
-        entityId: task.entityId,
+      await workflowClient.executeAction(112, {
+        entityType: task.entity_type || 'leave_requests',
+        entityId: task.entity_id,
         action: actionType,
         userId: currentUser.id,
-        remarks: remarks || `Action ${actionType} submitted by ${currentUser.name}`
+        remarks: remarks || `Action ${actionType} submitted by ${currentUser.name}`,
+        variables: {
+          status: actionType === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          approved_by: currentUser.name,
+          user_role: currentUser.role || 'MANAGER',
+          connection_id: 4
+        }
       })
 
       setFeedback({
         success: true,
-        message: `Workflow #${task.workflowId} updated! Action '${actionType}' completed successfully.`
+        message: `✓ Task '${task.task_name || 'Approval'}' (${actionType}) completed successfully.`
       })
+      await reloadTasks()
     } catch (err) {
       setFeedback({
         success: false,
-        message: `Workflow Server message: ${err.message}. (Updated locally in ClientDB)`
+        message: `Action execution error: ${err.message}`
       })
+    } finally {
+      setActionLoading(null)
     }
-
-    // 2. Synchronize Status in Local clientDB
-    try {
-      if (task.entityType === 'LeaveRequest') {
-        if (actionType === 'APPROVE') {
-          clientDb.approveLeave(task.entityId, currentUser, remarks)
-        } else {
-          clientDb.rejectLeave(task.entityId, currentUser, remarks || 'Rejected by manager in inbox')
-        }
-      } else if (task.entityType === 'ExpenseClaim') {
-        const newStatus = actionType === 'APPROVE' ? 'APPROVED' : 'REJECTED'
-        clientDb.updateExpenseStatus(task.entityId, newStatus, remarks)
-      } else if (task.entityType === 'PurchaseOrder') {
-        const newStatus = actionType === 'APPROVE' ? 'APPROVED' : 'REJECTED'
-        clientDb.updatePOStatus(task.entityId, newStatus, remarks)
-      } else if (task.entityType === 'ItRequest') {
-        const newStatus = actionType === 'APPROVE' ? 'APPROVED' : 'REJECTED'
-        clientDb.updateItStatus(task.entityId, newStatus, remarks)
-      } else if (task.entityType === 'CustomerKyc') {
-        const newStatus = actionType === 'APPROVE' ? 'APPROVED' : 'REJECTED'
-        clientDb.updateKycStatus(task.entityId, newStatus, remarks)
-      }
-    } catch (dbErr) {
-      setFeedback({
-        success: false,
-        message: dbErr.message
-      })
-    }
-
-    setActionLoading(null)
-    reloadTasks()
   }
 
   return (
@@ -110,7 +100,9 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
         /* Task Cards List */
         <div className="tasks-grid">
           {tasks.map((t) => {
-            const itemKey = `${t.entityType}_${t.entityId}`
+            const entityType = t.entity_type || 'leave_requests'
+            const entityId = t.entity_id || t.task_id
+            const itemKey = `${entityType}_${entityId}`
             const isApproving = actionLoading === `${itemKey}_APPROVE`
             const isRejecting = actionLoading === `${itemKey}_REJECT`
 
@@ -119,23 +111,22 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
                 <div className="task-card-header">
                   <div className="flex items-center gap-2">
                     <span className="badge badge-workflow font-mono">
-                      {t.entityType} #{t.entityId}
+                      {entityType} #{entityId}
                     </span>
                     <span className="badge badge-neutral">
-                      Bound to WF #{t.workflowId}
+                      Role: {t.role_code || currentUser.role}
                     </span>
                   </div>
                   <div className="text-xs text-muted flex items-center gap-1">
                     <Clock size={12} />
-                    <span>{t.createdOn}</span>
+                    <span>{t.created_on ? new Date(t.created_on).toLocaleString() : 'Just now'}</span>
                   </div>
                 </div>
 
                 <div className="task-card-body">
-                  <div className="task-title">{t.title}</div>
-                  <div className="task-subtitle" dangerouslySetInnerHTML={{ __html: t.subtitle }} />
-                  <div className="text-xs text-muted mt-2">
-                    Submitted by: <strong className="text-slate-300">{t.submittedBy}</strong>
+                  <div className="task-title font-semibold text-white">{t.task_name || 'Manager Approval'}</div>
+                  <div className="text-xs text-muted mt-1">
+                    Requires action for <strong>{entityType}</strong> record #{entityId}.
                   </div>
 
                   {/* Remarks input */}
