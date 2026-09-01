@@ -68,11 +68,57 @@ def get_workflow_definition_by_id(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Retrieves workflow definition by ID from wf_definition with full nodes and connections.
+    Retrieves workflow definition by ID from wf_definition with React Flow compatible nodes and edges.
     """
     try:
         from app.workflow_studio.services import WorkflowStudioService
         wf_resp = WorkflowStudioService.get_workflow_definition(db, id)
+
+        rf_nodes = []
+        for i, n in enumerate(wf_resp.nodes):
+            raw_type = str(n.type).lower()
+            if 'start' in raw_type:
+                rf_type = 'start'
+            elif 'end' in raw_type:
+                rf_type = 'end'
+            elif 'approval' in raw_type or 'user' in raw_type:
+                rf_type = 'userTask'
+            elif 'condition' in raw_type or 'router' in raw_type or 'gateway' in raw_type:
+                rf_type = 'condition'
+            elif 'email' in raw_type or 'notification' in raw_type:
+                rf_type = 'email'
+            elif 'record' in raw_type or 'action' in raw_type or 'db' in raw_type:
+                rf_type = 'record'
+            else:
+                rf_type = 'generic'
+
+            px = n.position_x if (n.position_x and n.position_x != 0) else (250 + (i % 2) * 200)
+            py = n.position_y if (n.position_y and n.position_y != 0) else (50 + i * 120)
+
+            rf_nodes.append({
+                "id": n.id,
+                "type": rf_type,
+                "position": {"x": px, "y": py},
+                "data": {
+                    "label": n.name or n.id,
+                    "name": n.name or n.id,
+                    **(n.config or {})
+                }
+            })
+
+        rf_edges = []
+        for e in wf_resp.edges:
+            rf_edges.append({
+                "id": e.id or f"e-{e.source}-{e.target}",
+                "source": e.source,
+                "target": e.target,
+                "type": "workflow",
+                "data": {
+                    "label": e.label or e.condition or "",
+                    "action": e.condition or e.label or ""
+                }
+            })
+
         return success_response(data={
             "id": wf_resp.workflow_id,
             "spec_id": wf_resp.workflow_key,
@@ -83,8 +129,8 @@ def get_workflow_definition_by_id(
             "status": "Active" if wf_resp.status == "ACTIVE" else "Draft",
             "is_active": (wf_resp.status == "ACTIVE"),
             "json_content": {
-                "nodes": [n.dict() for n in wf_resp.nodes],
-                "edges": [e.dict() for e in wf_resp.edges]
+                "nodes": rf_nodes,
+                "edges": rf_edges
             }
         })
     except Exception as e:

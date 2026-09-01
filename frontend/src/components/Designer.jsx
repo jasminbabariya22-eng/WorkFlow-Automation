@@ -656,8 +656,27 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           if (data.json_content) {
             try {
               const parsed = typeof data.json_content === 'string' ? JSON.parse(data.json_content) : data.json_content
-              loadedNodes = parsed.nodes || []
-              loadedEdges = parsed.edges || parsed.connections || []
+              const rawNodes = parsed.nodes || []
+              loadedNodes = rawNodes.map((n, idx) => ({
+                id: String(n.id || `node-${idx}`),
+                type: n.type || 'generic',
+                position: {
+                  x: n.position?.x ?? (n.position_x ?? 250 + (idx % 2) * 200),
+                  y: n.position?.y ?? (n.position_y ?? 50 + idx * 120)
+                },
+                data: {
+                  label: n.data?.label || n.name || n.id,
+                  name: n.data?.name || n.name || n.id,
+                  ...(n.data || n.config || {})
+                }
+              }))
+              loadedEdges = (parsed.edges || parsed.connections || []).map((e, idx) => ({
+                id: e.id || `e-${e.source}-${e.target}-${idx}`,
+                source: String(e.source),
+                target: String(e.target),
+                type: e.type || 'workflow',
+                data: e.data || { label: e.label || e.condition || '' }
+              }))
             } catch (e) {
               console.error('Failed to parse json_content:', e)
             }
