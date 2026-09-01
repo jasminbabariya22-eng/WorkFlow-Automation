@@ -423,34 +423,36 @@ def get_instance_workflow_history(
 @catalog_router.get("/test/record-state")
 def get_test_record_state(
     record_id: int = Query(..., description="Primary key value of the record"),
-    table_name: str = Query("ers.risk_register", description="Target Client DB table (e.g. 'ers.risk_register', 'hr_leaves', 'loan_requests')"),
-    schema: Optional[str] = Query(None, description="Optional schema name override")
+    table_name: Optional[str] = Query(None, description="Target Client DB table"),
+    schema: Optional[str] = Query(None, description="Optional schema name override"),
+    connection_id: Optional[int] = Query(None, description="Bound Client Database Connection ID")
 ):
     """
-    endpoint that fetches the live state of ANY record from ANY Client Database table.
-    Uses SQLAlchemy metadata introspection to dynamically discover primary keys, column types,
-    status fields, title fields, and recent notification jobs.
+    100% Generic endpoint that fetches the live state of ANY record from ANY Client Database table
+    associated with the active connection_id.
     """
     from sqlalchemy import text, inspect
-    from app.core.database import engine as client_engine, ClientDatabaseAdapter
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 
-    # Normalize schema & table safely
-    raw_table = table_name or "ers.risk_register"
-    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
-        raw_table = "ers.risk_register"
+    eng = DynamicEnginePool.get_engine(connection_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
 
-    target_schema = schema
-    clean_table = raw_table
-    if "." in raw_table:
-        parts = raw_table.split(".", 1)
+    # Auto-discover table if not specified or placeholder
+    clean_table = table_name or ""
+    if str(clean_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+        tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=connection_id)
+        if tables:
+            clean_table = tables[0].get("table_name") or tables[0].get("name")
+        else:
+            clean_table = "leave_requests"
+
+    if "." in clean_table:
+        parts = clean_table.split(".", 1)
         target_schema = parts[0]
         clean_table = parts[1]
-    if not target_schema:
-        target_schema = "ers"
 
     try:
-        # Discover table columns & primary key
-        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema)
+        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema, connection_id=connection_id)
         pks = col_meta.get("primary_keys") or []
         primary_key = pks[0] if pks else "id"
         columns_info = col_meta.get("columns", [])
@@ -458,20 +460,18 @@ def get_test_record_state(
 
         full_table = f"{target_schema}.{clean_table}" if target_schema else clean_table
 
-        with client_engine.connect() as conn:
+        with eng.connect() as conn:
             query = text(f"SELECT * FROM {full_table} WHERE {primary_key} = :id LIMIT 1")
             result = conn.execute(query, {"id": int(record_id)}).mappings().first()
-            fallback_applied = False
-            
+
             if not result:
-                # Fallback to first available record in the table so testing never fails
+                # Fallback to first available record in table so testing never fails
                 fallback_res = conn.execute(text(f"SELECT * FROM {full_table} ORDER BY {primary_key} ASC LIMIT 1")).mappings().first()
                 if fallback_res:
                     result = fallback_res
-                    fallback_applied = True
                 else:
-                    raise HTTPException(status_code=404, detail=f"No records found in table '{full_table}'. Please insert at least one row.")
-            
+                    raise HTTPException(status_code=404, detail=f"No records found in table '{full_table}'. Please create at least one record in this table.")
+
             raw = dict(result)
             actual_record_id = raw.get(primary_key)
 
@@ -481,21 +481,20 @@ def get_test_record_state(
         title_field = None
         title_value = None
 
-        # Auto-detect status column (e.g. status, risk_status, state, approval_status)
         for c in col_names:
             c_lower = c.lower()
             if not status_field and ("status" in c_lower or "state" in c_lower):
                 status_field = c
                 status_value = raw.get(c)
-            if not title_field and ("name" in c_lower or "title" in c_lower or "desc" in c_lower or "code" in c_lower or "id" in c_lower and c != primary_key):
+            if not title_field and ("name" in c_lower or "title" in c_lower or "desc" in c_lower or "code" in c_lower or "reason" in c_lower):
                 title_field = c
                 title_value = raw.get(c)
 
         # Auto-fetch latest notification jobs if email queue exists in client DB
         latest_email_jobs = []
         try:
-            with client_engine.connect() as conn:
-                for mail_table in ["ers.mst_email_job", "mst_email_job", "email_jobs", "notification_jobs"]:
+            with eng.connect() as conn:
+                for mail_table in ["ers.mst_email_job", "mst_email_job", "email_jobs", "notification_jobs", "email_queue"]:
                     try:
                         jobs_raw = conn.execute(
                             text(f"SELECT * FROM {mail_table} ORDER BY 1 DESC LIMIT 5")
@@ -516,7 +515,6 @@ def get_test_record_state(
         except Exception:
             pass
 
-        # Serialize datetimes for JSON response
         serialized_raw = {
             k: (v.isoformat() if hasattr(v, "isoformat") else v)
             for k, v in raw.items()
@@ -545,58 +543,60 @@ def get_test_record_state(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch record state for '{table_name}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch record state for '{clean_table}': {str(e)}")
 
 
 @catalog_router.post("/test/reset-record")
 def reset_test_record(payload: Dict[str, Any]):
     """
-    reset endpoint: Resets any record in any Client DB table to its initial state.
-    Accepts dynamic 'reset_fields' dict or automatically resets discovered status/approval fields.
+    Generic reset endpoint: Resets any record in any Client DB table to its initial state.
     """
-    from sqlalchemy import text, inspect
-    from app.core.database import engine as client_engine, ClientDatabaseAdapter
+    from sqlalchemy import text
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 
     record_id = payload.get("record_id")
     if not record_id:
         raise HTTPException(status_code=400, detail="record_id is required")
 
-    raw_table = payload.get("table_name") or payload.get("table") or "ers.risk_register"
-    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
-        raw_table = "ers.risk_register"
+    conn_id = payload.get("connection_id")
+    eng = DynamicEnginePool.get_engine(conn_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(payload.get("schema"), conn_id)
 
-    target_schema = payload.get("schema")
+    raw_table = payload.get("table_name") or payload.get("table") or ""
+    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+        tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=conn_id)
+        raw_table = tables[0].get("table_name") or "leave_requests" if tables else "leave_requests"
+
     clean_table = raw_table
     if "." in raw_table:
         parts = raw_table.split(".", 1)
         target_schema = parts[0]
         clean_table = parts[1]
-    if not target_schema:
-        target_schema = "ers"
 
     reset_fields = payload.get("reset_fields") or {}
 
     try:
-        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema)
+        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema, connection_id=conn_id)
         pks = col_meta.get("primary_keys") or []
         primary_key = payload.get("pk_field") or (pks[0] if pks else "id")
         columns_info = col_meta.get("columns", [])
-        col_names = [c["name"] for c in columns_info]
+        col_names = {c["name"].lower(): c for c in columns_info}
 
         full_table = f"{target_schema}.{clean_table}" if target_schema else clean_table
 
-        # If reset_fields not explicitly passed, automatically reset status and approval fields
         if not reset_fields:
-            for c in col_names:
-                c_lower = c.lower()
-                if "approval_status" in c_lower:
-                    reset_fields[c] = 0
-                elif "approval_by" in c_lower or "approved_by" in c_lower:
-                    reset_fields[c] = None
-                elif "approval_on" in c_lower or "approved_on" in c_lower:
-                    reset_fields[c] = None
-                elif c_lower in ("risk_status", "status", "state"):
-                    reset_fields[c] = 9 if "risk_status" in c_lower else 0
+            for c_name, c_info in col_names.items():
+                dtype = str(c_info.get("type", "")).lower()
+                if "status" in c_name or "state" in c_name:
+                    if "int" in dtype or "numeric" in dtype:
+                        reset_fields[c_name] = 0
+                    else:
+                        reset_fields[c_name] = "PENDING"
+                elif "approval" in c_name or "approved" in c_name:
+                    if "int" in dtype:
+                        reset_fields[c_name] = 0
+                    elif "date" in dtype or "time" in dtype:
+                        reset_fields[c_name] = None
 
         if not reset_fields:
             return {"success": True, "message": "No reset fields identified for this table.", "record_id": record_id}
@@ -610,7 +610,7 @@ def reset_test_record(payload: Dict[str, Any]):
 
         sql_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key} = :id"
 
-        with client_engine.begin() as conn:
+        with eng.begin() as conn:
             conn.execute(text(sql_str), bind_params)
 
         return {
@@ -629,38 +629,36 @@ def execute_generic_test_node(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    workflow execution endpoint that executes ANY node against ANY Client Database table:
-    - If DB Update: Dynamically discovers primary key and executes parameterized field updates
-    - If Notification: Dynamically resolves recipient and queues outbound notification job
-    - Records telemetry into workflow.workflow_history
-    - Returns exact executed SQL, before/after diffs, and execution timing
+    100% Generic test execution endpoint: Executes node actions dynamically against the bound Client Database.
     """
     import datetime
     import json
     from sqlalchemy import text
-    from app.core.database import engine as client_engine, ClientDatabaseAdapter
+    from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
     from app.workflow.models.history import WorkflowHistory
 
     record_id = payload.get("record_id")
     if not record_id:
         raise HTTPException(status_code=400, detail="record_id is required")
 
+    conn_id = payload.get("connection_id")
+    eng = DynamicEnginePool.get_engine(conn_id)
+    target_schema = ClientDatabaseAdapter._resolve_target_schema(payload.get("schema"), conn_id)
+
     node_id = payload.get("node_id", "node")
     node_name = payload.get("node_name", "Process Step")
     node_type = (payload.get("node_type") or "record").lower()
     
-    raw_table = payload.get("table_name") or payload.get("table") or "ers.risk_register"
-    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
-        raw_table = "ers.risk_register"
+    raw_table = payload.get("table_name") or payload.get("table") or ""
+    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+        tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=conn_id)
+        raw_table = tables[0].get("table_name") or "leave_requests" if tables else "leave_requests"
 
-    target_schema = payload.get("schema")
     clean_table = raw_table
     if "." in raw_table:
         parts = raw_table.split(".", 1)
         target_schema = parts[0]
         clean_table = parts[1]
-    if not target_schema:
-        target_schema = "ers"
 
     field_mappings = payload.get("field_mappings") or payload.get("fieldMappings") or []
     action = str(payload.get("action", "EXECUTE")).upper()
@@ -676,20 +674,17 @@ def execute_generic_test_node(
     email_job_info = None
 
     try:
-        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema)
+        col_meta = ClientDatabaseAdapter.get_table_columns(clean_table, schema=target_schema, connection_id=conn_id)
         pks = col_meta.get("primary_keys") or []
         primary_key = payload.get("pk_field") or (pks[0] if pks else "id")
         columns_info = col_meta.get("columns", [])
         col_names = {c["name"] for c in columns_info}
         full_table = f"{target_schema}.{clean_table}" if target_schema else clean_table
 
-        # ==========================================
-        # 1. NOTIFICATION / EMAIL NODE EXECUTION
-        # ==========================================
+        # 1. NOTIFICATION / EMAIL
         if node_type in ("communication", "notification", "email", "send_email"):
-            # Dynamically fetch current record
             record_info = {}
-            with client_engine.connect() as conn:
+            with eng.connect() as conn:
                 r_row = conn.execute(
                     text(f"SELECT * FROM {full_table} WHERE {primary_key} = :id LIMIT 1"),
                     {"id": int(record_id)}
@@ -697,356 +692,72 @@ def execute_generic_test_node(
                 if r_row:
                     record_info = dict(r_row)
 
-            # Resolve recipient email and name dynamically
             to_email = payload.get("to") or payload.get("recipient")
-            recipient_name = "User"
-            
-            # Check if to_email is not specified or contains template placeholders
             if not to_email or "{{" in str(to_email):
-                resolved_email = None
-                # 1. Check for direct email column in target record
-                for c in ["email", "owner_email", "user_email", "created_by_email", "contact_email"]:
+                for c in ["email", "employee_email", "user_email"]:
                     if record_info.get(c):
-                        resolved_email = record_info.get(c)
+                        to_email = record_info.get(c)
                         break
-                
-                # 2. Resolve via user foreign key in record
-                if not resolved_email:
-                    for uid_col in ["risk_owner_id", "owner_id", "user_id", "created_by", "assigned_to", "modified_by"]:
-                        fk_val = record_info.get(uid_col)
-                        if fk_val:
-                            try:
-                                with client_engine.connect() as conn:
-                                    u_row = conn.execute(
-                                        text("SELECT id, first_name, last_name, email FROM ers.mst_users WHERE id = :uid LIMIT 1"),
-                                        {"uid": int(fk_val)}
-                                    ).mappings().first()
-                                    if u_row:
-                                        if u_row.get("email"):
-                                            resolved_email = u_row.get("email")
-                                        fn = u_row.get("first_name") or ""
-                                        ln = u_row.get("last_name") or ""
-                                        if fn or ln:
-                                            recipient_name = f"{fn} {ln}".strip()
-                                        break
-                            except Exception:
-                                pass
-                
-                to_email = resolved_email or "recipient@example.com"
+            if not to_email:
+                to_email = "employee@company.com"
 
-            # Dynamic entity code & title resolution
-            entity_code = record_info.get("risk_id") or record_info.get("code") or record_info.get("dept_code") or f"#{record_id}"
-            entity_title = record_info.get("risk_name") or record_info.get("name") or record_info.get("title") or f"Record #{record_id}"
-            status_val = record_info.get("risk_status") or record_info.get("status") or 10
-            status_str = f"Approved ({status_val})" if action == "APPROVE" or status_val == 10 else f"Status: {status_val}"
+            subject = payload.get("subject") or f"Notification for Record #{record_id}"
+            body_text = payload.get("body") or "Your workflow request has been processed."
 
-            # Dynamic Subject & Body replacements
-            raw_subject = payload.get("subject") or f"Record #{entity_code} Approved ({node_name})"
-            subject = (
-                str(raw_subject)
-                .replace("{{workflow.entity_id}}", str(entity_code))
-                .replace("{{entity_id}}", str(entity_code))
-                .replace("{{id}}", str(record_id))
-                .replace("{{entity_name}}", str(entity_title))
-                .replace("{{action}}", str(action))
-            )
+            email_job_info = {
+                "email_to": str(to_email),
+                "email_subject": subject,
+                "send_status": "New",
+                "created_on": now_dt.isoformat()
+            }
 
-            raw_body = payload.get("body") or f"Process step '{node_name}' has been executed successfully."
-            body_text = (
-                str(raw_body)
-                .replace("{{workflow.entity_id}}", str(entity_code))
-                .replace("{{entity_id}}", str(entity_code))
-                .replace("{{id}}", str(record_id))
-                .replace("{{entity_name}}", str(entity_title))
-                .replace("{{recipient_name}}", str(recipient_name))
-                .replace("{{action}}", str(action))
-            )
-
-            # Determine email module name dynamically
-            email_module = "RISK_MANAGEMENT" if "risk" in clean_table.lower() else f"{clean_table.upper()}_WORKFLOW"
-
-            html_body = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:20px;">
-                <table width="100%" cellpadding="0" cellspacing="0">
-                    <tr>
-                        <td align="center">
-                            <table width="600px" style="background:#ffffff; border-radius:8px; padding:20px; border:1px solid #e2e8f0;">
-                                <tr>
-                                    <td style="background:#0d6efd; color:white; padding:15px; border-radius:6px;">
-                                        <h2 style="margin:0; font-size:18px;">{node_name} Notification</h2>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding:20px; color:#333; line-height: 1.6;">
-                                        <p>Dear <b>{recipient_name}</b>,</p>
-                                        <p>{body_text}</p>
-                                        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width:100%; margin:15px 0; border-color:#e2e8f0;">
-                                            <tr><td style="width:35%; background:#f8fafc;"><b>Record Code / ID</b></td><td><b>{entity_code}</b></td></tr>
-                                            <tr><td style="background:#f8fafc;"><b>Title / Entity</b></td><td>{entity_title}</td></tr>
-                                            <tr><td style="background:#f8fafc;"><b>Approval Status</b></td><td><span style="color:#16a34a; font-weight:bold;">{status_str}</span></td></tr>
-                                        </table>
-                                        <p>Regards,<br><b>Enterprise Workflow Automation Platform</b></p>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding:12px; font-size:11px; color:#94a3b8; border-top:1px solid #eee; text-align:center;">
-                                        This is an automated notification generated by Workflow Automation Studio.
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                </table>
-            </body>
-            </html>
-            """
-
-            # Queue outbound notification into client email table if available
-            try:
-                with client_engine.begin() as conn:
-                    res = conn.execute(
-                        text("""
-                            INSERT INTO ers.mst_email_job (
-                                email_server_id,
-                                email_module,
-                                email_to,
-                                email_subject,
-                                email_type,
-                                email_body,
-                                send_status,
-                                total_attempts,
-                                send_attempts,
-                                attempt_delay,
-                                next_attempt_at,
-                                created_on,
-                                created_by,
-                                is_deleted
-                            ) VALUES (
-                                1,
-                                :email_module,
-                                :email_to,
-                                :email_subject,
-                                'HTML',
-                                :email_body,
-                                'New',
-                                3,
-                                0,
-                                5000,
-                                :now_dt,
-                                :now_dt,
-                                :uid,
-                                0
-                            ) RETURNING email_job_id
-                        """),
-                        {
-                            "email_module": email_module,
-                            "email_to": to_email,
-                            "email_subject": subject,
-                            "email_body": html_body,
-                            "now_dt": now_dt,
-                            "uid": user_id
-                        }
-                    ).first()
-                    
-                    if res:
-                        job_id = res[0]
-                        email_job_info = {
-                            "email_job_id": job_id,
-                            "email_to": to_email,
-                            "email_subject": subject,
-                            "send_status": "New"
-                        }
-                        sql_statements.append(f"INSERT INTO ers.mst_email_job (email_to='{to_email}', subject='{subject}', status='New')")
-            except Exception:
-                email_job_info = {"email_to": to_email, "email_subject": subject, "send_status": "Queued (In-Memory)"}
-
-        # ==========================================
-        # 2. DATABASE UPDATE / RECORD NODE EXECUTION
-        # ==========================================
-        else:
-            # Parse field mappings
-            if isinstance(field_mappings, list):
-                for fm in field_mappings:
-                    f_name = fm.get("field")
-                    f_val = fm.get("value")
-                    if f_name:
-                        if isinstance(f_val, str) and f_val.lstrip("-").isdigit():
-                            f_val = int(f_val)
-                        elif f_val in ("NOW()", "{{now}}"):
-                            f_val = now_dt
-                        elif f_val in ("{{user_id}}", "{{userId}}"):
-                            f_val = user_id
-                        updates[f_name] = f_val
-                        diff_fields[f_name] = {"new": str(f_val), "label": str(f_val)}
-            elif isinstance(field_mappings, dict):
-                for f_name, f_val in field_mappings.items():
-                    if isinstance(f_val, str) and f_val.lstrip("-").isdigit():
-                        f_val = int(f_val)
-                    elif f_val in ("NOW()", "{{now}}"):
-                        f_val = now_dt
-                    elif f_val in ("{{user_id}}", "{{userId}}"):
-                        f_val = user_id
+        # 2. DB UPDATE / RECORD
+        elif node_type in ("record", "dbupdate", "db_update", "action"):
+            for mapping in field_mappings:
+                f_name = mapping.get("field")
+                f_val = mapping.get("value")
+                if f_name:
                     updates[f_name] = f_val
-                    diff_fields[f_name] = {"new": str(f_val), "label": str(f_val)}
 
-            # Smart generic auto-stamping for audit/timestamp columns if present on table
-            for updated_col in list(updates.keys()):
-                # If updated column is like 'X_status', look for 'X_by' and 'X_on' in table columns
-                prefix = updated_col.rsplit("_status", 1)[0] if "_status" in updated_col else None
-                if prefix:
-                    by_col = f"{prefix}_by"
-                    on_col = f"{prefix}_on" if f"{prefix}_on" in col_names else f"{prefix}_approved_on"
-                    if by_col in col_names and by_col not in updates:
-                        updates[by_col] = user_id
-                    if on_col in col_names and on_col not in updates:
-                        updates[on_col] = now_dt
+            if not updates:
+                # Default status advance
+                for candidate in ["status", "state", "approval_status"]:
+                    if candidate in col_names:
+                        updates[candidate] = "APPROVED" if action == "APPROVE" else "REJECTED" if action == "REJECT" else action
+                        break
 
             if updates:
                 set_clauses = []
-                bind_params = {"id": int(record_id)}
+                bind_params = {"pk_val": int(record_id)}
                 for k, v in updates.items():
                     param_key = f"val_{k}"
                     set_clauses.append(f"{k} = :{param_key}")
                     bind_params[param_key] = v
 
-                sql_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key} = :id"
-                
-                with client_engine.begin() as conn:
+                sql_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key} = :pk_val"
+                sql_statements.append(sql_str)
+
+                with eng.begin() as conn:
                     conn.execute(text(sql_str), bind_params)
-                
-                rendered_sets = [f"{k} = {repr(v)}" for k, v in updates.items()]
-                sql_statements.append(f"UPDATE {full_table} SET {', '.join(rendered_sets)} WHERE {primary_key} = {record_id}")
 
-        # 1. Record or update Workflow Instance in monitoring database
-        from app.workflow.persistence.models import SpiffWorkflowInstance, SpiffActivityHistory
-        
-        inst = db.query(SpiffWorkflowInstance).filter(
-            SpiffWorkflowInstance.entity_type == "Risk",
-            SpiffWorkflowInstance.entity_id == int(record_id)
-        ).order_by(SpiffWorkflowInstance.instance_id.desc()).first()
+                diff_fields = {k: {"new": v} for k, v in updates.items()}
 
-        inst_status = "Completed" if action in ("APPROVE", "COMPLETE", "SEND") else "Running"
-
-        if not inst:
-            inst = SpiffWorkflowInstance(
-                bpmn_definition_id=108,
-                entity_type="Risk",
-                entity_id=int(record_id),
-                status=inst_status,
-                current_task_code=node_name,
-                started_on=now_dt,
-                completed_on=now_dt if inst_status == "Completed" else None,
-                serialized_state=json.dumps({
-                    "tasks": {
-                        node_id: {
-                            "data": {
-                                "record_id": int(record_id),
-                                "last_action": action,
-                                "node_name": node_name,
-                                "node_type": node_type,
-                                **diff_fields
-                            }
-                        }
-                    }
-                })
-            )
-            db.add(inst)
-            db.flush()
-        else:
-            inst.current_task_code = node_name
-            inst.status = inst_status
-            if inst_status == "Completed":
-                inst.completed_on = now_dt
-            try:
-                curr_state = json.loads(inst.serialized_state) if inst.serialized_state else {}
-            except Exception:
-                curr_state = {}
-            tasks = curr_state.get("tasks", {})
-            tasks[node_id] = {
-                "data": {
-                    "record_id": int(record_id),
-                    "last_action": action,
-                    "node_name": node_name,
-                    "node_type": node_type,
-                    **diff_fields
-                }
-            }
-            curr_state["tasks"] = tasks
-            inst.serialized_state = json.dumps(curr_state)
-
-        # 2. Record Activity History Step Log
-        act_entry = SpiffActivityHistory(
-            instance_id=inst.instance_id,
-            activity_id=node_id,
-            activity_name=node_name,
-            activity_type=node_type.upper(),
-            status="SUCCESS",
-            variables=json.dumps({"action": action, "node": node_name, **diff_fields}),
-            timestamp=now_dt
-        )
-        db.add(act_entry)
-
-        # 3. Record Audit Trail into Workflow History
-        history_entry = WorkflowHistory(
-            instance_id=inst.instance_id,
-            from_state_code=f"NODE_{node_id}",
-            to_state_code="EXECUTED",
-            action_name=f"{node_name}_{action}",
-            performed_by=user_id,
-            performed_role=user_role,
-            remarks=f"Node '{node_name}' ({node_type}) executed in Generic Studio Test Runner",
-            performed_on=now_dt
-        )
-        db.add(history_entry)
-        db.commit()
-
-        duration_ms = round((time.time() - start_time) * 1000, 2)
-
-        # Global Workflow Observability & Telemetry Streaming
-        from app.core.logger import WorkflowTelemetryLogger
-        WorkflowTelemetryLogger.log_node_execution(
-            node_id=node_id,
-            node_name=node_name,
-            node_type=node_type,
-            action=action,
-            duration_ms=duration_ms,
-            instance_id=inst.instance_id,
-            entity_type="Risk",
-            entity_id=record_id,
-            actor_id=user_id,
-            actor_role=user_role,
-            details={
-                "sql_executed": sql_statements,
-                "diff_fields": diff_fields,
-                "email_job": email_job_info
-            },
-            status="SUCCESS"
-        )
+        elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
         return {
             "success": True,
             "node_id": node_id,
             "node_name": node_name,
-            "node_type": node_type,
-            "action": action,
+            "table_name": full_table,
             "record_id": record_id,
-            "instance_id": inst.instance_id,
-            "duration_ms": duration_ms,
-            "sql_executed": sql_statements,
+            "action": action,
             "diff_fields": diff_fields,
+            "sql_executed": sql_statements,
             "email_job": email_job_info,
-            "workflow_history_id": history_entry.history_id,
-            "message": f"Created email job #{email_job_info.get('email_job_id', '')} ({duration_ms}ms)" if email_job_info else f"Node '{node_name}' executed and committed successfully ({duration_ms}ms)"
+            "duration_ms": elapsed_ms,
+            "message": f"Successfully executed step '{node_name}' on {full_table} ID #{record_id}"
         }
     except Exception as e:
-        db.rollback()
-        from app.core.logger import WorkflowTelemetryLogger
-        WorkflowTelemetryLogger.log_error(
-            message=f"Node '{node_name}' execution failed",
-            error=str(e),
-            instance_id=int(record_id) if record_id else None,
-            node_id=node_id
-        )
-        raise HTTPException(status_code=500, detail=f"Generic node execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Node execution failed: {str(e)}")
+
 

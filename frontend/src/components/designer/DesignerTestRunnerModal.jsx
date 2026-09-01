@@ -107,10 +107,10 @@ export default function DesignerTestRunnerModal({
                 style={{ fontSize: '11px', padding: '5px 10px', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}
                 onClick={handleResetTestRecord}
                 disabled={testLoading}
-                title="Reset risk_status to 9 (Open) and all approval statuses to 0"
+                title="Reset record to initial pending status"
               >
                 <RotateCcw size={12} />
-                <span>Reset to Open (9)</span>
+                <span>Reset Record</span>
               </button>
               <button
                 className="wf-btn wf-btn-outline"
@@ -134,7 +134,7 @@ export default function DesignerTestRunnerModal({
 
                 const nodeType = activeNode.type || 'userTask'
                 const nodeLabel = activeNode.data?.label || activeNode.data?.name || activeNode.id
-                const nodeRole = activeNode.data?.role || activeNode.data?.roleId
+                const nodeRole = activeNode.data?.role || activeNode.data?.roleId || activeNode.data?.roleName
                 const nodeActions = activeNode.data?.actions || activeNode.data?.derivedActions || ['APPROVE', 'REJECT']
 
                 return (
@@ -157,7 +157,7 @@ export default function DesignerTestRunnerModal({
                     <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px' }}>
                       {nodeType === 'userTask' || nodeType === 'approval' ? (
                         <div>
-                          Assigned Reviewer Role: <code style={{ color: '#60a5fa' }}>{nodeRole || 'FUNCTION_HEAD'}</code>. Please select an action to submit this task:
+                          Assigned Reviewer Role: <code style={{ color: '#60a5fa' }}>{nodeRole || 'MANAGER'}</code>. Please select an action to submit this task:
                         </div>
                       ) : nodeType === 'condition' ? (
                         <div>
@@ -165,13 +165,13 @@ export default function DesignerTestRunnerModal({
                         </div>
                       ) : nodeType === 'record' || nodeType === 'dbUpdate' ? (
                         <div>
-                          Target Database: <code>{activeNode.data?.table || 'ers.risk_register'}</code> &bull; Pending Updates: {
+                          Target Database: <code>{activeNode.data?.table || testRecordData?.table_name || 'leave_requests'}</code> &bull; Pending Updates: {
                             (activeNode.data?.fieldMappings || []).map(f => `${f.field} = ${f.value}`).join(', ') || 'status update'
                           }
                         </div>
                       ) : nodeType === 'communication' || nodeType === 'notification' ? (
                         <div>
-                          Email Recipient: <code>{activeNode.data?.to || '{{risk_owner_email}}'}</code> &bull; Subject: <em>{activeNode.data?.subject || 'Risk Notification'}</em>
+                          Email Recipient: <code>{activeNode.data?.to || '{{employee_email}}'}</code> &bull; Subject: <em>{activeNode.data?.subject || 'Workflow Notification'}</em>
                         </div>
                       ) : nodeType === 'end' ? (
                         <div style={{ color: '#4ade80', fontWeight: '600' }}>
@@ -336,7 +336,7 @@ export default function DesignerTestRunnerModal({
                   <div className="flex items-center justify-between mb-1">
                     <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '5px' }}>
                       <FileText size={12} color="#a78bfa" />
-                      <span>Client DB Email Queue: <code style={{ color: '#c084fc' }}>ers.mst_email_job</code></span>
+                      <span>Client DB Dispatched Notification Jobs</span>
                     </span>
                     <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
                       Auto-dispatched by Workflow Notification Node

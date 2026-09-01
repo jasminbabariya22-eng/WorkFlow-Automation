@@ -339,8 +339,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     try {
       const foundNode = nodes.find(n => n.data?.table || n.data?.table_name || n.data?.target_entity || n.data?.entity)
       const rawTbl = foundNode ? (foundNode.data?.table || foundNode.data?.table_name || foundNode.data?.target_entity || foundNode.data?.entity) : ''
-      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'ers.risk_register'
-      const res = await fetch(`/workflow-studio/test/record-state?record_id=${idToFetch}&table_name=${encodeURIComponent(canvasTable)}`)
+      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'leave_requests'
+      const connParam = workflowConnectionId ? `&connection_id=${workflowConnectionId}` : ''
+      const res = await fetch(`/workflow-studio/test/record-state?record_id=${idToFetch}&table_name=${encodeURIComponent(canvasTable)}${connParam}`)
       const data = await res.json()
       if (res.ok && data.success) {
         setTestRecordData(data)
@@ -355,7 +356,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     } finally {
       setTestLoading(false)
     }
-  }, [testRecordId, nodes])
+  }, [testRecordId, nodes, workflowConnectionId])
 
   const handleResetTestRecord = useCallback(async () => {
     if (!testRecordId) return
@@ -363,13 +364,14 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     try {
       const foundNode = nodes.find(n => n.data?.table || n.data?.table_name || n.data?.target_entity || n.data?.entity)
       const rawTbl = foundNode ? (foundNode.data?.table || foundNode.data?.table_name || foundNode.data?.target_entity || foundNode.data?.entity) : ''
-      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'ers.risk_register'
+      const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'leave_requests'
       const res = await fetch('/workflow-studio/test/reset-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           record_id: Number(testRecordId),
-          table_name: canvasTable
+          table_name: canvasTable,
+          connection_id: workflowConnectionId
         })
       })
       const data = await res.json()
@@ -380,7 +382,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           {
             timestamp: new Date().toLocaleTimeString(),
             action: 'RESET_RECORD',
-            sql: `UPDATE ${canvasTable} SET all_statuses=0/initial WHERE primary_key=${testRecordId}`,
+            sql: `UPDATE ${canvasTable} SET status=PENDING WHERE primary_key=${testRecordId}`,
             status: 'COMMITTED',
             duration: '7.2ms',
             message: `Record #${testRecordId} in '${canvasTable}' reset to initial state`
@@ -397,7 +399,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     } finally {
       setTestLoading(false)
     }
-  }, [testRecordId, nodes, fetchRecordState])
+  }, [testRecordId, nodes, workflowConnectionId, fetchRecordState])
 
   // Initialize Generic Workflow Simulation from Start Node
   const startGenericSimulation = useCallback(() => {
@@ -453,7 +455,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       // 1. Database Update Node
       if (currentType === 'record' || currentType === 'dbUpdate') {
         const mappings = currentNode.data?.fieldMappings || []
-        const table = currentNode.data?.table || currentNode.data?.table_name || 'ers.risk_register'
+        const table = currentNode.data?.table || currentNode.data?.table_name || 'leave_requests'
 
         const res = await fetch('/workflow-studio/test/execute-generic-node', {
           method: 'POST',
@@ -465,7 +467,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             node_id: currentNode.id,
             node_name: nodeLabel,
             node_type: currentType,
-            action: actionChosen || 'UPDATE'
+            action: actionChosen || 'UPDATE',
+            connection_id: workflowConnectionId
           })
         })
         const data = await res.json()
@@ -495,15 +498,16 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             to: to,
             subject: subject,
             body: body,
-            action: actionChosen || 'SEND'
+            action: actionChosen || 'SEND',
+            connection_id: workflowConnectionId
           })
         })
         const data = await res.json()
         if (res.ok && data.success) {
           stepLog.sql = data.sql_executed ? data.sql_executed.join('; ') : ''
-          stepLog.status = 'NEW_JOB_CREATED'
+          stepLog.status = 'DISPATCHED'
           stepLog.duration = `${data.duration_ms}ms`
-          stepLog.message = `📧 Created Email Job #${data.email_job?.email_job_id} in ers.mst_email_job (To: ${data.email_job?.email_to})`
+          stepLog.message = `📧 Dispatched Email to: ${data.email_job?.email_to || to} (Subject: "${subject}")`
           await fetchRecordState(testRecordId)
         } else {
           stepLog.message = `📧 Notification to: ${to} (Subject: "${subject}")`
