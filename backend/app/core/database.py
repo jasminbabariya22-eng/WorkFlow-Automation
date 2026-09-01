@@ -1063,38 +1063,53 @@ class ClientDatabaseAdapter:
                 continue
         return []
 
-    @staticmethod
-    def get_user_profile(user_id: int, schema: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    @classmethod
+    def get_user_profile(cls, user_id: int, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Retrieves user metadata (role and department) dynamically from the Client Database.
         """
-        target_schema = schema or settings.DB_SCHEMA or "ers"
         try:
-            with client_engine.connect() as conn:
-                user_table = f"{target_schema}.mst_users" if target_schema else "mst_users"
-                role_table = f"{target_schema}.mst_user_role" if target_schema else "mst_user_role"
-                dept_table = f"{target_schema}.mst_department" if target_schema else "mst_department"
-
-                query = text(f"""
-                    SELECT u.id, u.first_name, u.last_name, u.email, 
-                           u.role_id, r.name as role_name,
-                           u.dept_id, d.dept_name as department_name
-                    FROM {user_table} u
-                    LEFT JOIN {role_table} r ON u.role_id = r.id
-                    LEFT JOIN {dept_table} d ON u.dept_id = d.id
-                    WHERE u.id = :user_id AND u.is_deleted = 0
-                """)
-                row = conn.execute(query, {"user_id": user_id}).mappings().first()
-                if row:
+            # 1. Search through generic get_users on the active connection
+            all_users = cls.get_users(schema=schema, connection_id=connection_id)
+            for u in all_users:
+                if str(u.get("id") or u.get("user_id")) == str(user_id):
                     return {
-                        "id": str(row["id"]),
-                        "name": f"{row.get('first_name', '')} {row.get('last_name', '')}".strip() or str(row["id"]),
-                        "email": row.get("email"),
-                        "role_id": str(row["role_id"]) if row.get("role_id") is not None else None,
-                        "role_name": row.get("role_name"),
-                        "dept_id": str(row["dept_id"]) if row.get("dept_id") is not None else None,
-                        "department_name": row.get("department_name")
+                        "id": str(u.get("id") or u.get("user_id")),
+                        "name": u.get("name") or u.get("full_name") or str(user_id),
+                        "email": u.get("email"),
+                        "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
+                        "role_name": u.get("role_name") or u.get("role") or "USER",
+                        "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None,
+                        "department_name": u.get("department_name") or u.get("department")
                     }
+        except Exception:
+            pass
+
+        # 2. Direct fallback
+        target_schema = cls._resolve_target_schema(schema, connection_id)
+        eng = DynamicEnginePool.get_engine(connection_id)
+        try:
+            with eng.connect() as conn:
+                for u_tbl in ["users", "mst_users", "tbl_users"]:
+                    full_u = f"{target_schema}.{u_tbl}" if target_schema else u_tbl
+                    try:
+                        row = conn.execute(
+                            text(f"SELECT * FROM {full_u} WHERE id = :uid OR user_id = :uid LIMIT 1"),
+                            {"uid": user_id}
+                        ).mappings().first()
+                        if row:
+                            r_dict = dict(row)
+                            return {
+                                "id": str(r_dict.get("id") or r_dict.get("user_id")),
+                                "name": r_dict.get("full_name") or r_dict.get("name") or str(user_id),
+                                "email": r_dict.get("email"),
+                                "role_id": str(r_dict.get("role_id")) if r_dict.get("role_id") is not None else None,
+                                "role_name": r_dict.get("role_name") or "MANAGER",
+                                "dept_id": None,
+                                "department_name": None
+                            }
+                    except Exception:
+                        continue
         except Exception as e:
             logger.warning(f"ClientDatabaseAdapter: Error fetching user profile for user_id={user_id}: {e}")
         return None

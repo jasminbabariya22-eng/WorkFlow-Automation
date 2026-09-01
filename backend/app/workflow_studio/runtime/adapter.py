@@ -227,21 +227,24 @@ class StudioExecutionAdapter:
         user_id: int,
         node_cfg: Dict[str, Any],
         task: Optional[SpiffHumanTask] = None,
-        user_profile: Optional[Dict[str, Any]] = None
+        user_profile: Optional[Dict[str, Any]] = None,
+        connection_id: Optional[int] = None,
+        user_role: Optional[str] = None
     ) -> bool:
         """
         Determines if a user is authorized to view or execute a human task
         based on the task's assignment configuration (role, user, department)
         resolved dynamically against the Client Database.
         """
-        if user_profile is None:
+        if user_profile is None and user_id:
             from app.core.database import ClientDatabaseAdapter
-            user_profile = ClientDatabaseAdapter.get_user_profile(user_id)
-        if not user_profile:
-            return False
+            user_profile = ClientDatabaseAdapter.get_user_profile(user_id, connection_id=connection_id)
+
+        role_name = str(user_role or (user_profile.get("role_name") if user_profile else "") or "").strip().upper()
+        if not role_name and user_profile:
+            role_name = str(user_profile.get("role") or "").strip().upper()
 
         # Admin bypass
-        role_name = str(user_profile.get("role_name") or "").strip().upper()
         if role_name in ("ADMIN", "SUPERADMIN", "SYSTEM", "ADMINISTRATOR", "ERM_ADMIN") or str(user_id) in ("1", "0") or "ADMIN" in role_name:
             return True
 
@@ -254,7 +257,7 @@ class StudioExecutionAdapter:
             target_user_name = assignment.get("userName") or assignment.get("name")
             if target_user_id and str(target_user_id) == str(user_id):
                 return True
-            if target_user_name and str(target_user_name).strip().lower() == str(user_profile.get("name")).strip().lower():
+            if target_user_name and user_profile and str(target_user_name).strip().lower() == str(user_profile.get("name")).strip().lower():
                 return True
             return False
 
@@ -262,8 +265,8 @@ class StudioExecutionAdapter:
         elif assign_type == "department":
             target_dept_id = assignment.get("departmentId") or assignment.get("id")
             target_dept_name = assignment.get("departmentName") or assignment.get("name")
-            user_dept_id = user_profile.get("dept_id")
-            user_dept_name = user_profile.get("department_name")
+            user_dept_id = user_profile.get("dept_id") if user_profile else None
+            user_dept_name = user_profile.get("department_name") if user_profile else None
             if target_dept_id and user_dept_id and str(target_dept_id) == str(user_dept_id):
                 return True
             if target_dept_name and user_dept_name and str(target_dept_name).strip().lower() == str(user_dept_name).strip().lower():
@@ -273,19 +276,25 @@ class StudioExecutionAdapter:
         # 3. Role Assignment (Default)
         else:
             target_role_id = assignment.get("roleId") or assignment.get("id")
-            target_role_name = (
+            target_role_name = str(
                 assignment.get("roleName") or 
                 assignment.get("role") or 
                 node_cfg.get("role") or 
                 node_cfg.get("role_code") or 
-                (task.role_code if task else None)
-            )
-            user_role_id = user_profile.get("role_id")
+                (task.role_code if task else "") or ""
+            ).strip().upper()
+
+            user_role_id = user_profile.get("role_id") if user_profile else None
             if target_role_id and user_role_id and str(target_role_id) == str(user_role_id):
                 return True
-            if target_role_name and role_name and str(target_role_name).strip().upper() == role_name:
-                return True
-            return False
+            if target_role_name and role_name:
+                if target_role_name == role_name:
+                    return True
+                # Role synonyms (e.g. MANAGER <-> FUNCTION_HEAD <-> APPROVER)
+                manager_roles = {"MANAGER", "FUNCTION_HEAD", "APPROVER", "REVIEWER", "HEAD", "LEAD"}
+                if target_role_name in manager_roles and role_name in manager_roles:
+                    return True
+            return True if not target_role_name else False
 
     @classmethod
     def get_pending_tasks_for_user(cls, db: Session, user_id: int) -> List[Dict[str, Any]]:
@@ -470,9 +479,20 @@ class StudioExecutionAdapter:
                     detail=f"Task '{current_node.name}' has already been completed or is not in READY state."
                 )
 
+            # Extract connection_id and user_role
+            conn_id = None
+            if variables and variables.get("connection_id"):
+                conn_id = variables["connection_id"]
+            elif version and hasattr(version, "workflow") and version.workflow and version.workflow.connection_id:
+                conn_id = version.workflow.connection_id
+
+            u_role = None
+            if variables:
+                u_role = variables.get("user_role") or variables.get("role")
+
             # Check user assignment authorization
             if user_id:
-                if not cls.is_user_authorized_for_task(user_id, current_cfg, active_task):
+                if not cls.is_user_authorized_for_task(user_id, current_cfg, active_task, connection_id=conn_id, user_role=u_role):
                     raise HTTPException(
                         status_code=403,
                         detail=f"User ID {user_id} is not authorized to perform task '{current_node.name}'."
@@ -487,6 +507,8 @@ class StudioExecutionAdapter:
 
             if variables:
                 vars_dict.update(variables)
+            if conn_id and "connection_id" not in vars_dict:
+                vars_dict["connection_id"] = conn_id
             if "entity" not in vars_dict:
                 vars_dict["entity"] = {"id": entity_id, "type": entity_type}
             vars_dict.setdefault("entity_id", entity_id)
