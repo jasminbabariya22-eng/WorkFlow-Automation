@@ -30,10 +30,17 @@ def list_workflow_definitions(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Returns all active and draft workflow definitions for the dashboard.
+    Returns recent active and draft workflow definitions for the dashboard in a single fast query.
     """
     try:
-        wfs = db.query(GenericWorkflow).order_by(GenericWorkflow.workflow_id.desc()).all()
+        from sqlalchemy.orm import selectinload
+        wfs = (
+            db.query(GenericWorkflow)
+            .options(selectinload(GenericWorkflow.versions))
+            .order_by(GenericWorkflow.updated_at.desc().nullslast(), GenericWorkflow.workflow_id.desc())
+            .limit(50)
+            .all()
+        )
         result = []
         for w in wfs:
             latest_v = max([v.version_number for v in w.versions]) if w.versions else 1
@@ -53,6 +60,35 @@ def list_workflow_definitions(
         return success_response(data=result)
     except Exception as e:
         return error_response(message=str(e), status_code=500)
+
+
+@router.get("/{id}")
+def get_workflow_definition_by_id(
+    id: int,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Retrieves workflow definition by ID from wf_definition with full nodes and connections.
+    """
+    try:
+        from app.workflow_studio.services import WorkflowStudioService
+        wf_resp = WorkflowStudioService.get_workflow_definition(db, id)
+        return success_response(data={
+            "id": wf_resp.workflow_id,
+            "spec_id": wf_resp.workflow_key,
+            "name": wf_resp.name,
+            "description": wf_resp.description,
+            "connection_id": wf_resp.connection_id,
+            "version": wf_resp.version_number,
+            "status": "Active" if wf_resp.status == "ACTIVE" else "Draft",
+            "is_active": (wf_resp.status == "ACTIVE"),
+            "json_content": {
+                "nodes": [n.dict() for n in wf_resp.nodes],
+                "edges": [e.dict() for e in wf_resp.edges]
+            }
+        })
+    except Exception as e:
+        return error_response(message=str(e), status_code=404)
 
 
 @router.post("/save")
