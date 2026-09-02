@@ -95,6 +95,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
             days: 2,
             status: String(r.status || 'PENDING').toUpperCase(),
             reason: r.reason || 'Leave Request',
+            moduleKey: Number(r.leave_type_id) === 5 ? 'wfh_requests' : MODULE_KEY,
             submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'Recent'
           }
         })
@@ -187,13 +188,14 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      // 1. Generic submission through Python Gateway
-      const res = await genericWorkflowApi.submit(MODULE_KEY, {
+      // 1. Generic submission through Python Gateway (routes to wfh_requests if leave_type_id is 5)
+      const targetKey = Number(leaveTypeId) === 5 ? 'wfh_requests' : MODULE_KEY
+      const res = await genericWorkflowApi.submit(targetKey, {
         employee_id: Number(currentUser.id) || 5,
         leave_type_id: Number(leaveTypeId) || 1,
         start_date: startDate,
         end_date: endDate,
-        reason: reason || 'Leave Request',
+        reason: reason || (Number(leaveTypeId) === 5 ? 'Work From Home' : 'Leave Request'),
         status: 'PENDING'
       }, currentUser)
 
@@ -228,9 +230,10 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     if (!approveConfirmItem || actionLoadingId) return
     const requestId = approveConfirmItem.id
     setActionLoadingId(requestId)
+    const targetKey = approveConfirmItem.moduleKey || MODULE_KEY
 
     try {
-      await genericWorkflowApi.executeAction(MODULE_KEY, requestId, 'APPROVE', approvalComment, currentUser, {
+      await genericWorkflowApi.executeAction(targetKey, requestId, 'APPROVE', approvalComment, currentUser, {
         employee_email: approveConfirmItem.employeeEmail
       })
 
@@ -264,9 +267,10 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
     const requestId = rejectConfirmItem.id
     setActionLoadingId(requestId)
+    const targetKey = rejectConfirmItem.moduleKey || MODULE_KEY
 
     try {
-      await genericWorkflowApi.executeAction(MODULE_KEY, requestId, 'REJECT', rejectionReason, currentUser, {
+      await genericWorkflowApi.executeAction(targetKey, requestId, 'REJECT', rejectionReason, currentUser, {
         employee_email: rejectConfirmItem.employeeEmail
       })
 

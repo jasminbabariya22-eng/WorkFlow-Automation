@@ -17,7 +17,7 @@ export const LEAVE_TYPES = [
   { id: 2, code: 'CASUAL', name: 'Casual Leave', maxDays: 10 },
   { id: 3, code: 'SICK', name: 'Sick Leave', maxDays: 12 },
   { id: 4, code: 'UNPAID', name: 'Unpaid Leave', maxDays: 60 },
-  { id: 5, code: 'PARENTAL', name: 'Maternity / Paternity Leave', maxDays: 90 }
+  { id: 5, code: 'WFH', name: 'Work From Home (WFH)', maxDays: 30 }
 ]
 
 class ClientDatabase {
