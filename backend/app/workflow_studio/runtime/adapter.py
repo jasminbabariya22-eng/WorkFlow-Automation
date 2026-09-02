@@ -303,9 +303,6 @@ class StudioExecutionAdapter:
         is authorized to view/execute according to generic assignment rules.
         """
         from app.core.database import ClientDatabaseAdapter
-        user_profile = ClientDatabaseAdapter.get_user_profile(user_id)
-        if not user_profile:
-            return []
 
         active_items = (
             db.query(SpiffHumanTask, SpiffWorkflowInstance)
@@ -331,6 +328,20 @@ class StudioExecutionAdapter:
             if not version:
                 continue
 
+            conn_id = None
+            if version and hasattr(version, "workflow") and version.workflow:
+                conn_id = version.workflow.connection_id
+            if not conn_id:
+                try:
+                    s_data = json.loads(instance.serialized_state) if instance.serialized_state else {}
+                    conn_id = s_data.get("variables", {}).get("connection_id")
+                except Exception:
+                    pass
+            if not conn_id:
+                conn_id = 4
+
+            user_profile = ClientDatabaseAdapter.get_user_profile(user_id, connection_id=conn_id)
+
             # Find corresponding node
             matching_node = None
             for n in version.nodes:
@@ -353,8 +364,11 @@ class StudioExecutionAdapter:
             except Exception:
                 node_cfg = {}
 
-            if cls.is_user_authorized_for_task(user_id, node_cfg, task, user_profile=user_profile):
-                raw_actions = node_cfg.get("actions") or node_cfg.get("allowed_actions") or []
+            if cls.is_user_authorized_for_task(user_id, node_cfg, task, user_profile=user_profile, connection_id=conn_id):
+                raw_actions = node_cfg.get("actions") or node_cfg.get("allowed_actions") or [
+                    {"action_code": "APPROVE", "name": "Approve", "color": "#10b981"},
+                    {"action_code": "REJECT", "name": "Reject", "color": "#ef4444"}
+                ]
                 results.append({
                     "task_id": task.task_id,
                     "instance_id": task.instance_id,
@@ -398,20 +412,42 @@ class StudioExecutionAdapter:
 
             if not instance:
                 instance = db_to_use.query(SpiffWorkflowInstance).filter(
+                    SpiffWorkflowInstance.entity_type == entity_type,
                     SpiffWorkflowInstance.entity_id == entity_id,
                     SpiffWorkflowInstance.status.in_(["Running", "WAITING", "Waiting"])
                 ).order_by(SpiffWorkflowInstance.instance_id.desc()).first()
 
             if not instance:
                 instance = db_to_use.query(SpiffWorkflowInstance).filter(
+                    SpiffWorkflowInstance.entity_type == entity_type,
                     SpiffWorkflowInstance.entity_id == entity_id
                 ).order_by(SpiffWorkflowInstance.instance_id.desc()).first()
 
             if not instance:
-                raise HTTPException(status_code=404, detail=f"No workflow instance found for ID {entity_id}.")
+                # Auto-initialize workflow instance for this entity so legacy/existing records progress seamlessly
+                logger.info(f"StudioEngine: Auto-initializing workflow instance for {entity_type} #{entity_id}")
+                init_res = cls.start_workflow(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    user_id=user_id,
+                    variables=variables,
+                    db=db_to_use
+                )
+                inst_id = init_res.get("instance_id")
+                instance = db_to_use.query(SpiffWorkflowInstance).filter(SpiffWorkflowInstance.instance_id == inst_id).first()
+
+            if not instance:
+                raise HTTPException(status_code=404, detail=f"No workflow instance found for {entity_type} ID {entity_id}.")
 
             if instance.status not in ("Running", "WAITING", "Waiting"):
-                raise HTTPException(status_code=400, detail=f"Workflow instance is in '{instance.status}' state and cannot accept actions. Please click 'Start Test Execution' to start a new run.")
+                return {
+                    "instance_id": instance.instance_id,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "status": instance.status,
+                    "current_task_code": instance.current_task_code,
+                    "message": f"Workflow is already in '{instance.status}' state."
+                }
 
             # Load pinned version
             version = db_to_use.query(WorkflowVersion).filter(

@@ -1068,48 +1068,75 @@ class ClientDatabaseAdapter:
         """
         Retrieves user metadata (role and department) dynamically from the Client Database.
         """
-        try:
-            # 1. Search through generic get_users on the active connection
-            all_users = cls.get_users(schema=schema, connection_id=connection_id)
-            for u in all_users:
-                if str(u.get("id") or u.get("user_id")) == str(user_id):
-                    return {
-                        "id": str(u.get("id") or u.get("user_id")),
-                        "name": u.get("name") or u.get("full_name") or str(user_id),
-                        "email": u.get("email"),
-                        "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
-                        "role_name": u.get("role_name") or u.get("role") or "USER",
-                        "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None,
-                        "department_name": u.get("department_name") or u.get("department")
-                    }
-        except Exception:
-            pass
-
-        # 2. Direct fallback
+        from sqlalchemy import inspect
         target_schema = cls._resolve_target_schema(schema, connection_id)
         eng = DynamicEnginePool.get_engine(connection_id)
         try:
-            with eng.connect() as conn:
-                for u_tbl in ["users", "mst_users", "tbl_users"]:
-                    full_u = f"{target_schema}.{u_tbl}" if target_schema else u_tbl
+            insp = inspect(eng)
+            existing_tables = set(insp.get_table_names(schema=target_schema) if target_schema else insp.get_table_names())
+            
+            for u_tbl in ["users", "mst_users", "tbl_users", "employees", "mst_employee"]:
+                if u_tbl not in existing_tables:
+                    continue
+                
+                full_u = f"{target_schema}.{u_tbl}" if target_schema else u_tbl
+                cols = {c["name"] for c in insp.get_columns(u_tbl, schema=target_schema)}
+                pk_col = "user_id" if "user_id" in cols else ("id" if "id" in cols else "employee_id")
+                if pk_col not in cols:
+                    continue
+                
+                # Check if user_roles and roles tables exist
+                has_roles = ("user_roles" in existing_tables or "mst_user_role" in existing_tables) and ("roles" in existing_tables or "mst_role" in existing_tables)
+                ur_tbl = "user_roles" if "user_roles" in existing_tables else "mst_user_role"
+                r_tbl = "roles" if "roles" in existing_tables else "mst_role"
+                
+                with eng.connect() as conn:
+                    if has_roles:
+                        try:
+                            ur_full = f"{target_schema}.{ur_tbl}" if target_schema else ur_tbl
+                            r_full = f"{target_schema}.{r_tbl}" if target_schema else r_tbl
+                            sql_join = f"""
+                                SELECT u.*, r.role_id as joined_role_id, r.role_name as joined_role_name 
+                                FROM {full_u} u 
+                                LEFT JOIN {ur_full} ur ON u.{pk_col} = ur.{pk_col} 
+                                LEFT JOIN {r_full} r ON ur.role_id = r.role_id 
+                                WHERE u.{pk_col} = :uid
+                                LIMIT 1
+                            """
+                            row = conn.execute(text(sql_join), {"uid": user_id}).mappings().first()
+                            if row:
+                                r_dict = dict(row)
+                                role_n = r_dict.get("joined_role_name") or r_dict.get("role_name") or r_dict.get("role") or "USER"
+                                return {
+                                    "id": str(r_dict.get(pk_col)),
+                                    "name": r_dict.get("full_name") or r_dict.get("name") or str(user_id),
+                                    "email": r_dict.get("email"),
+                                    "role_id": str(r_dict.get("joined_role_id") or r_dict.get("role_id") or ""),
+                                    "role_name": str(role_n).upper(),
+                                    "dept_id": str(r_dict.get("dept_id") or ""),
+                                    "department_name": r_dict.get("department_name") or r_dict.get("department")
+                                }
+                        except Exception:
+                            pass
+                    
+                    # Simple single table fallback
                     try:
-                        row = conn.execute(
-                            text(f"SELECT * FROM {full_u} WHERE id = :uid OR user_id = :uid LIMIT 1"),
-                            {"uid": user_id}
-                        ).mappings().first()
+                        sql_simple = f"SELECT * FROM {full_u} WHERE {pk_col} = :uid LIMIT 1"
+                        row = conn.execute(text(sql_simple), {"uid": user_id}).mappings().first()
                         if row:
                             r_dict = dict(row)
+                            role_n = r_dict.get("role_name") or r_dict.get("role") or "USER"
                             return {
-                                "id": str(r_dict.get("id") or r_dict.get("user_id")),
+                                "id": str(r_dict.get(pk_col)),
                                 "name": r_dict.get("full_name") or r_dict.get("name") or str(user_id),
                                 "email": r_dict.get("email"),
-                                "role_id": str(r_dict.get("role_id")) if r_dict.get("role_id") is not None else None,
-                                "role_name": r_dict.get("role_name") or "MANAGER",
-                                "dept_id": None,
-                                "department_name": None
+                                "role_id": str(r_dict.get("role_id") or ""),
+                                "role_name": str(role_n).upper(),
+                                "dept_id": str(r_dict.get("dept_id") or ""),
+                                "department_name": r_dict.get("department_name") or r_dict.get("department")
                             }
                     except Exception:
-                        continue
+                        pass
         except Exception as e:
             logger.warning(f"ClientDatabaseAdapter: Error fetching user profile for user_id={user_id}: {e}")
         return None

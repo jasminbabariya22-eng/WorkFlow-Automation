@@ -64,6 +64,8 @@ class GenericWorkflowApi {
         record_id: recordId,
         action: action.toUpperCase(),
         user_id: currentUser?.id ? Number(currentUser.id) : 3,
+        role: currentUser?.role || 'MANAGER',
+        user_role: currentUser?.role || 'MANAGER',
         remarks: remarks || '',
         variables: {
           ...extraVariables,

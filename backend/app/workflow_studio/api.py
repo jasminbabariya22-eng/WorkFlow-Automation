@@ -957,31 +957,31 @@ def submit_bound_workflow_record(
         res = conn.execute(text(insert_sql), binds).first()
         new_record_id = res[0] if res else None
 
-    # 2. Trigger SpiffWorkflow
+    # 2. Trigger Workflow Engine
     instance_id = None
     try:
         wf_variables = {
             **values,
-            "entity_id": new_record_id,
-            "user_id": user_id,
+            "entity_id": int(new_record_id),
+            "user_id": int(user_id) if str(user_id).isdigit() else 5,
             "user_name": user_name,
             "user_email": user_email,
-            "employee_id": user_id,
+            "employee_id": int(user_id) if str(user_id).isdigit() else 5,
             "employee_name": user_name,
             "employee_email": user_email,
             "connection_id": conn_id
         }
-        wf_res = StudioExecutionAdapter.start_workflow_instance(
-            db=db,
-            workflow_id=workflow_id,
+        wf_res = StudioExecutionAdapter.start_workflow(
             entity_type=table_name,
-            entity_id=str(new_record_id),
-            user_id=user_id,
-            initial_variables=wf_variables
+            entity_id=int(new_record_id),
+            user_id=int(user_id) if str(user_id).isdigit() else 5,
+            variables=wf_variables,
+            db=db,
+            definition_id=workflow_id
         )
         instance_id = wf_res.get("instance_id")
     except Exception as wf_err:
-        pass
+        logger.error(f"Error launching bound workflow instance: {wf_err}")
 
     return {
         "success": True,
@@ -1009,26 +1009,26 @@ def execute_bound_workflow_action(
     if not binding:
         raise HTTPException(status_code=404, detail=f"No workflow binding registered for module '{module_key}'")
 
-    workflow_id = binding["workflow_id"]
     table_name = binding["table_name"]
     entity_id = payload.get("record_id") or payload.get("entity_id")
-    action = payload.get("action") or "APPROVE"
+    action = (payload.get("action") or "APPROVE").upper()
     user_id = payload.get("user_id") or 3
+    user_role = payload.get("role") or payload.get("user_role") or "MANAGER"
     remarks = payload.get("remarks") or ""
     variables = payload.get("variables") or {}
 
     variables["connection_id"] = binding.get("connection_id", 4)
-    variables["status"] = "APPROVED" if action.upper() == "APPROVE" else "REJECTED"
+    variables["user_role"] = user_role
+    variables["status"] = "APPROVED" if action == "APPROVE" else "REJECTED"
 
     res = StudioExecutionAdapter.execute_action(
-        db=db,
-        workflow_id=workflow_id,
         entity_type=table_name,
-        entity_id=str(entity_id),
+        entity_id=int(entity_id),
         action=action,
-        user_id=user_id,
+        user_id=int(user_id) if str(user_id).isdigit() else 3,
         remarks=remarks,
-        variables=variables
+        variables=variables,
+        db=db
     )
     return res
 
