@@ -40,16 +40,21 @@ export default function DesignerHeader({
       setDbName('')
       return
     }
-    workflowStorage.getConnections().then(conns => {
-      const found = (conns || []).find(c => c.connection_id === Number(workflowConnectionId))
-      if (found) {
-        setDbName(found.connection_name)
-      } else if (Number(workflowConnectionId) === 4) {
-        setDbName('test_emp_leave')
-      }
-    }).catch(() => {
-      if (Number(workflowConnectionId) === 4) setDbName('test_emp_leave')
-    })
+    const fetcher = workflowStorage.getDatabaseConnections || workflowStorage.getConnections
+    if (typeof fetcher === 'function') {
+      fetcher.call(workflowStorage).then(conns => {
+        const found = (conns || []).find(c => c.connection_id === Number(workflowConnectionId))
+        if (found) {
+          setDbName(found.connection_name)
+        } else if (Number(workflowConnectionId) === 4) {
+          setDbName('test_emp_leave')
+        }
+      }).catch(() => {
+        if (Number(workflowConnectionId) === 4) setDbName('test_emp_leave')
+      })
+    } else if (Number(workflowConnectionId) === 4) {
+      setDbName('test_emp_leave')
+    }
   }, [workflowConnectionId])
 
   return (

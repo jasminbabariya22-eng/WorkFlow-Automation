@@ -812,6 +812,10 @@ export const workflowStorage = {
     return Array.isArray(data) ? data : (data.data || [])
   },
 
+  getConnections: async () => {
+    return await workflowStorage.getDatabaseConnections()
+  },
+
   createDatabaseConnection: async (payload) => {
     const res = await fetch('/workflow-studio/connections', {
       method: 'POST',
