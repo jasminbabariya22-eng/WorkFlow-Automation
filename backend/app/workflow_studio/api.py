@@ -854,10 +854,46 @@ def create_client_record(payload: Dict[str, Any]):
 # ==========================================
 
 @catalog_router.get("/bindings")
-def get_workflow_bindings():
-    """Lists all registered Python workflow bindings."""
+def get_workflow_bindings(db: Session = Depends(get_workflow_db)):
+    """Lists all registered dynamic workflow bindings from the database."""
     from app.workflow_studio.bindings import list_bindings
-    return list_bindings()
+    return list_bindings(db=db)
+
+
+@catalog_router.get("/bindings/{module_key}")
+def get_single_workflow_binding(
+    module_key: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """Retrieves a specific dynamic workflow binding."""
+    from app.workflow_studio.bindings import get_binding
+    b = get_binding(module_key, db=db)
+    if not b:
+        raise HTTPException(status_code=404, detail=f"Workflow binding '{module_key}' not found.")
+    return b
+
+
+@catalog_router.post("/bindings")
+def save_workflow_binding(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_workflow_db)
+):
+    """Creates or updates a dynamic workflow binding in the database without code changes."""
+    from app.workflow_studio.bindings import upsert_binding
+    if not payload.get("module_key") or not payload.get("workflow_id") or not payload.get("table_name"):
+        raise HTTPException(status_code=400, detail="module_key, workflow_id, and table_name are required.")
+    return upsert_binding(payload, db=db)
+
+
+@catalog_router.delete("/bindings/{module_key}")
+def remove_workflow_binding(
+    module_key: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """Deactivates a dynamic workflow binding."""
+    from app.workflow_studio.bindings import delete_binding
+    ok = delete_binding(module_key, db=db)
+    return {"success": ok, "module_key": module_key}
 
 
 @catalog_router.get("/bindings/{module_key}/records")
