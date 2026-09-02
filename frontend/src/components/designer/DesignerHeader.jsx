@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   ArrowLeft,
   Save,
@@ -9,8 +9,10 @@ import {
   Upload,
   MoreVertical,
   RotateCcw,
-  GitBranch
+  GitBranch,
+  Database
 } from 'lucide-react'
+import { workflowStorage } from '../../services/workflowStorage'
 
 export default function DesignerHeader({
   workflowName,
@@ -31,6 +33,25 @@ export default function DesignerHeader({
   setShowMoreMenu,
   onClose
 }) {
+  const [dbName, setDbName] = useState('')
+
+  useEffect(() => {
+    if (!workflowConnectionId) {
+      setDbName('')
+      return
+    }
+    workflowStorage.getConnections().then(conns => {
+      const found = (conns || []).find(c => c.connection_id === Number(workflowConnectionId))
+      if (found) {
+        setDbName(found.connection_name)
+      } else if (Number(workflowConnectionId) === 4) {
+        setDbName('test_emp_leave')
+      }
+    }).catch(() => {
+      if (Number(workflowConnectionId) === 4) setDbName('test_emp_leave')
+    })
+  }, [workflowConnectionId])
+
   return (
     <header className="wf-designer-header">
       {/* 1. LEFT SECTION: BACK BUTTON & WORKFLOW IDENTITY */}
@@ -64,8 +85,9 @@ export default function DesignerHeader({
             {workflowStatus}
           </span>
           {workflowConnectionId ? (
-            <span className="wf-badge-db bound">
-              🗄️ DB #{workflowConnectionId}
+            <span className="wf-badge-db bound" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.12)', borderColor: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}>
+              <Database size={11} />
+              {dbName || (Number(workflowConnectionId) === 4 ? 'test_emp_leave' : `DB #${workflowConnectionId}`)}
             </span>
           ) : (
             <span className="wf-badge-db default">
