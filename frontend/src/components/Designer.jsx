@@ -76,6 +76,10 @@ const nodeTypes = {
   switch: SwitchNode,
   parallel: ParallelNode,
   communication: CommunicationNode,
+  email: CommunicationNode,
+  sendEmail: CommunicationNode,
+  sendTask: CommunicationNode,
+  notification: CommunicationNode,
   record: RecordNode,
   action: ActionNode,
   generic: UserTaskNode

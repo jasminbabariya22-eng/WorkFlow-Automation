@@ -478,7 +478,7 @@ export const ParallelNode = memo(({ id, data, selected }) => {
 // 8. SEND EMAIL & NOTIFICATION NODES (Execution Nodes)
 // =========================================================================
 export const CommunicationNode = memo(({ id, data, selected }) => {
-  const isEmail = data?.subType === 'EMAIL' || data?.type === 'sendEmail'
+  const isEmail = data?.subType === 'EMAIL' || data?.type === 'sendEmail' || data?.type === 'email' || String(data?.label || data?.name || '').toLowerCase().includes('email')
   const title = data?.label || data?.name || (isEmail ? 'Send Email' : 'Notification')
   const recipient = isEmail ? (data?.to || '{{user.email}}') : (data?.recipient || 'Assigned Role')
   const subject = data?.subject || data?.title || ''
