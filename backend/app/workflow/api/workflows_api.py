@@ -14,6 +14,8 @@ from app.workflow_studio.services import WorkflowStudioService
 router = APIRouter(prefix="/workflows", tags=["Workflow Retrieval & Inspection"])
 
 
+from app.workflow.persistence.models import DatabaseConnection
+
 # =========================================================================
 # HELPER: Resolve Workflow by numeric ID or Code / Name
 # =========================================================================
@@ -21,6 +23,7 @@ def _find_workflow_and_version(
     db: Session,
     id_or_code: str,
     version_id: Optional[int] = None,
+    version_number: Optional[int] = None,
     published_only: bool = False
 ):
     workflow = None
@@ -41,13 +44,19 @@ def _find_workflow_and_version(
 
     target_wf_id = workflow.workflow_id
     
-    # Sanitize version_id if not integer
+    # Sanitize version_id / version_number if passed as query objects or non-integers
     v_id = version_id if isinstance(version_id, int) else None
+    v_num = version_number if isinstance(version_number, int) else None
     is_pub = bool(published_only) if not hasattr(published_only, 'default') else False
 
     if v_id is not None:
         version = db.query(WorkflowVersion).filter(
             WorkflowVersion.workflow_version_id == v_id,
+            WorkflowVersion.workflow_id == target_wf_id
+        ).first()
+    elif v_num is not None:
+        version = db.query(WorkflowVersion).filter(
+            WorkflowVersion.version_number == v_num,
             WorkflowVersion.workflow_id == target_wf_id
         ).first()
     elif is_pub:
@@ -64,10 +73,10 @@ def _find_workflow_and_version(
 
 
 # =========================================================================
-# 1. LIST ALL WORKFLOWS (GET /workflows)
+# 1. GET ALL WORKFLOWS (GET /workflows)
 # =========================================================================
-@router.get("", summary="List all workflows with filters")
-def list_workflows(
+@router.get("", summary="1. Get all workflows with optional filters")
+def get_all_workflows(
     entity_type: Optional[str] = Query(None, description="Filter by entity / table name (e.g. leave_requests)"),
     status: Optional[str] = Query(None, description="Filter by status (DRAFT, PUBLISHED, ACTIVE, ARCHIVED)"),
     search: Optional[str] = Query(None, description="Search term for name or key"),
@@ -77,7 +86,7 @@ def list_workflows(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Lists all workflow definitions with metadata, current version, status, and bound entity tables.
+    Retrieves all workflows in the system with metadata, active versions, node/edge counts, and connection details.
     """
     query = db.query(GenericWorkflow)
     if entity_type:
@@ -124,7 +133,137 @@ def list_workflows(
 
 
 # =========================================================================
-# 2. GET ACTIVE WORKFLOW FOR A DATABASE TABLE (GET /workflows/by-table/{table_name})
+# 2. GET WORKFLOWS BASED ON CLIENT DB (GET /workflows/by-client-db/{connection_id_or_name})
+# =========================================================================
+@router.get("/by-client-db/{connection_id_or_name}", summary="2. Get all workflows for a specific Client Database")
+def get_workflows_by_client_db(
+    connection_id_or_name: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Retrieves all workflows linked to a specific client database, queried by either:
+    - Connection ID (e.g. `4` or `1`)
+    - Connection Name / DB Name (e.g. `Production DB`, `ers_db`)
+    """
+    target_conn_id = None
+    conn_info = None
+
+    if connection_id_or_name.isdigit():
+        target_conn_id = int(connection_id_or_name)
+        conn_record = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == target_conn_id).first()
+        if conn_record:
+            conn_info = {
+                "connection_id": conn_record.connection_id,
+                "connection_name": conn_record.connection_name,
+                "db_type": conn_record.db_type,
+                "database_name": conn_record.database_name,
+                "host": conn_record.host
+            }
+    else:
+        term = connection_id_or_name.strip()
+        conn_record = db.query(DatabaseConnection).filter(
+            (DatabaseConnection.connection_name.ilike(term)) |
+            (DatabaseConnection.database_name.ilike(term)) |
+            (DatabaseConnection.connection_name.ilike(f"%{term}%"))
+        ).first()
+
+        if conn_record:
+            target_conn_id = conn_record.connection_id
+            conn_info = {
+                "connection_id": conn_record.connection_id,
+                "connection_name": conn_record.connection_name,
+                "db_type": conn_record.db_type,
+                "database_name": conn_record.database_name,
+                "host": conn_record.host
+            }
+
+    if target_conn_id is None:
+        return error_response(message=f"Client database connection '{connection_id_or_name}' not found.", status_code=404)
+
+    workflows = db.query(GenericWorkflow).filter(
+        GenericWorkflow.connection_id == target_conn_id
+    ).order_by(GenericWorkflow.updated_at.desc()).all()
+
+    results = []
+    for wf in workflows:
+        latest_ver = db.query(WorkflowVersion).filter(
+            WorkflowVersion.workflow_id == wf.workflow_id
+        ).order_by(WorkflowVersion.version_number.desc()).first()
+
+        results.append({
+            "workflow_id": wf.workflow_id,
+            "workflow_code": wf.workflow_key,
+            "name": wf.name,
+            "description": wf.description or "",
+            "entity_type": wf.entity_type or "",
+            "status": wf.status,
+            "version_number": latest_ver.version_number if latest_ver else 1,
+            "version_status": latest_ver.status if latest_ver else "DRAFT",
+            "is_published": latest_ver.status == "PUBLISHED" if latest_ver else False,
+            "total_nodes": len(latest_ver.nodes) if latest_ver else 0,
+            "total_edges": len(latest_ver.connections) if latest_ver else 0,
+            "created_at": wf.created_at.isoformat() if wf.created_at else None,
+            "updated_at": wf.updated_at.isoformat() if wf.updated_at else None
+        })
+
+    return success_response(data={
+        "client_db": conn_info,
+        "total": len(results),
+        "workflows": results
+    })
+
+
+# =========================================================================
+# 3. GET WORKFLOWS BASED ON STATUS (GET /workflows/by-status/{status})
+# =========================================================================
+@router.get("/by-status/{status_val}", summary="3. Get workflows based on status")
+def get_workflows_by_status(
+    status_val: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Retrieves all workflows matching a specific lifecycle status:
+    - `ACTIVE`: Currently active and executable workflows
+    - `PUBLISHED`: Workflows with validated & published versions
+    - `DRAFT`: Workflows currently in design/draft phase
+    - `ARCHIVED`: Deprecated or archived workflows
+    """
+    clean_status = status_val.strip().upper()
+    query = db.query(GenericWorkflow).filter(GenericWorkflow.status == clean_status)
+    workflows = query.order_by(GenericWorkflow.updated_at.desc()).all()
+
+    results = []
+    for wf in workflows:
+        latest_ver = db.query(WorkflowVersion).filter(
+            WorkflowVersion.workflow_id == wf.workflow_id
+        ).order_by(WorkflowVersion.version_number.desc()).first()
+
+        results.append({
+            "workflow_id": wf.workflow_id,
+            "workflow_code": wf.workflow_key,
+            "name": wf.name,
+            "description": wf.description or "",
+            "entity_type": wf.entity_type or "",
+            "connection_id": wf.connection_id,
+            "status": wf.status,
+            "version_number": latest_ver.version_number if latest_ver else 1,
+            "version_status": latest_ver.status if latest_ver else "DRAFT",
+            "is_published": latest_ver.status == "PUBLISHED" if latest_ver else False,
+            "total_nodes": len(latest_ver.nodes) if latest_ver else 0,
+            "total_edges": len(latest_ver.connections) if latest_ver else 0,
+            "created_at": wf.created_at.isoformat() if wf.created_at else None,
+            "updated_at": wf.updated_at.isoformat() if wf.updated_at else None
+        })
+
+    return success_response(data={
+        "status_filter": clean_status,
+        "total": len(results),
+        "workflows": results
+    })
+
+
+# =========================================================================
+# 4. GET ACTIVE WORKFLOW FOR A DATABASE TABLE (GET /workflows/by-table/{table_name})
 # =========================================================================
 @router.get("/by-table/{table_name}", summary="Get active workflow bound to a specific table")
 def get_workflow_by_table(
@@ -260,7 +399,79 @@ def get_workflow_by_id_or_code(
 
 
 # =========================================================================
-# 4. GET WORKFLOW APPROVAL STEPS (GET /workflows/{id_or_code}/steps)
+# 5. GET WORKFLOW VERSION HISTORY (GET /workflows/{id_or_code}/versions)
+# =========================================================================
+@router.get("/{id_or_code}/versions", summary="Get all versions history for a workflow")
+def get_workflow_versions(
+    id_or_code: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Returns the complete version history for a workflow (version numbers, status, node counts, published dates).
+    """
+    workflow, _ = _find_workflow_and_version(db=db, id_or_code=id_or_code)
+    if not workflow:
+        return error_response(message=f"Workflow '{id_or_code}' not found.", status_code=404)
+
+    versions = db.query(WorkflowVersion).filter(
+        WorkflowVersion.workflow_id == workflow.workflow_id
+    ).order_by(WorkflowVersion.version_number.desc()).all()
+
+    version_list = []
+    for v in versions:
+        version_list.append({
+            "version_id": v.workflow_version_id,
+            "version_number": v.version_number,
+            "status": v.status,
+            "is_published": v.status == "PUBLISHED",
+            "total_nodes": len(v.nodes) if v.nodes else 0,
+            "total_edges": len(v.connections) if v.connections else 0,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "published_at": v.published_at.isoformat() if v.published_at else None
+        })
+
+    return success_response(data={
+        "workflow_id": workflow.workflow_id,
+        "workflow_code": workflow.workflow_key,
+        "name": workflow.name,
+        "total_versions": len(version_list),
+        "versions": version_list
+    })
+
+
+# =========================================================================
+# 6. GET WORKFLOW BASED ON SPECIFIC VERSION (GET /workflows/{id_or_code}/versions/{version_number})
+# =========================================================================
+@router.get("/{id_or_code}/versions/{version_number}", summary="Get workflow definition for a specific version number")
+def get_workflow_by_version(
+    id_or_code: str,
+    version_number: int,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Retrieves the complete workflow definition graph specifically for the given version number (e.g. version 1, 2).
+    """
+    workflow, version = _find_workflow_and_version(
+        db=db,
+        id_or_code=id_or_code,
+        version_number=version_number
+    )
+
+    if not workflow:
+        return error_response(message=f"Workflow '{id_or_code}' not found.", status_code=404)
+    if not version:
+        return error_response(message=f"Version {version_number} not found for workflow '{id_or_code}'.", status_code=404)
+
+    return get_workflow_by_id_or_code(
+        id_or_code=str(workflow.workflow_id),
+        version_id=version.workflow_version_id,
+        published_only=False,
+        db=db
+    )
+
+
+# =========================================================================
+# 7. GET WORKFLOW APPROVAL STEPS (GET /workflows/{id_or_code}/steps)
 # =========================================================================
 @router.get("/{id_or_code}/steps", summary="Get simplified workflow approval steps")
 def get_workflow_steps(
@@ -318,7 +529,7 @@ def get_workflow_steps(
 
 
 # =========================================================================
-# 5. GET WORKFLOW NODES ONLY (GET /workflows/{id_or_code}/nodes)
+# 8. GET WORKFLOW NODES ONLY (GET /workflows/{id_or_code}/nodes)
 # =========================================================================
 @router.get("/{id_or_code}/nodes", summary="Get only the nodes list of a workflow")
 def get_workflow_nodes(
