@@ -64,6 +64,7 @@ import {
   CommunicationNode,
   RecordNode,
   ActionNode,
+  TimerNode,
   WorkflowEdge
 } from './nodes/CustomNodes'
 
@@ -76,6 +77,9 @@ const nodeTypes = {
   condition: ConditionNode,
   switch: SwitchNode,
   parallel: ParallelNode,
+  timer: TimerNode,
+  delay: TimerNode,
+  wait: TimerNode,
   communication: CommunicationNode,
   email: CommunicationNode,
   sendEmail: CommunicationNode,

@@ -16,7 +16,9 @@ import {
   FilePlus, 
   FileSearch, 
   Copy, 
-  Trash2
+  Trash2,
+  Clock,
+  Hourglass
 } from 'lucide-react'
 
 // Quick Node Action Bar (Duplicate / Delete)
@@ -459,6 +461,57 @@ export const ParallelNode = memo(({ id, data, selected }) => {
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+})
+
+// =========================================================================
+// 7B. TIMER / DELAY NODE (Control-Flow Node - Execution Pause & Timing)
+// =========================================================================
+export const TimerNode = memo(({ id, data, selected }) => {
+  const title = data?.label || data?.name || 'Timer Delay'
+  const timerType = data?.timerType || 'duration'
+  const durationValue = data?.durationValue !== undefined ? data?.durationValue : (data?.duration || 15)
+  const durationUnit = data?.durationUnit || 'minutes'
+  const targetDate = data?.targetDate || ''
+  const timerExpression = data?.timerExpression || ''
+  const description = data?.description || ''
+
+  let summaryText = `Wait ${durationValue} ${durationUnit}`
+  if (timerType === 'dateTime') {
+    summaryText = targetDate ? `Until ${targetDate.replace('T', ' ')}` : 'Wait until date'
+  } else if (timerType === 'expression') {
+    summaryText = timerExpression || 'Dynamic delay expression'
+  }
+
+  return (
+    <div className={`wf-card wf-card-timer ${selected ? 'wf-selected' : ''}`}>
+      <NodeActionBar nodeId={id} onDuplicate={data?.onDuplicate} onDelete={data?.onDelete} />
+      <Handle type="target" position={Position.Left} id="input" className="wf-handle" />
+
+      <div className="wf-card-header">
+        <div className="wf-icon-badge wf-badge-amber">
+          <Clock size={16} color="#ffffff" strokeWidth={2.5} />
+        </div>
+        <div className="wf-header-texts">
+          <div className="wf-category-tag wf-tag-control">TIMING & DELAY</div>
+          <div className="wf-title">{title}</div>
+          <div className="wf-subtitle-row">
+            <span className="wf-badge-sub font-semibold">{summaryText}</span>
+          </div>
+          {description && <div className="wf-card-desc">{description}</div>}
+        </div>
+      </div>
+
+      <div className="wf-port-list">
+        <div className="wf-port-row wf-port-out wf-port-success">
+          <span className="wf-port-name">Timeout / Elapsed</span>
+          <Handle type="source" position={Position.Right} id="TIMEOUT" className="wf-handle wf-handle-amber" />
+        </div>
+        <Handle type="source" position={Position.Right} id="ELAPSED" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
+        <Handle type="source" position={Position.Right} id="output" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
+        <Handle type="source" position={Position.Right} id="NEXT" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
       </div>
     </div>
   )

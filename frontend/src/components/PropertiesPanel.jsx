@@ -12,6 +12,7 @@ import ApprovalSection from './properties/ApprovalSection'
 import ConditionSection from './properties/ConditionSection'
 import NotificationSection from './properties/NotificationSection'
 import DbActionSection from './properties/DbActionSection'
+import TimerSection from './properties/TimerSection'
 
 export default function PropertiesPanel({
   selectedNode,
@@ -498,6 +499,15 @@ export default function PropertiesPanel({
               </button>
             </div>
           </>
+        )}
+
+        {/* TIMER / DELAY / WAIT */}
+        {(nodeType === 'timer' || nodeType === 'delay' || nodeType === 'wait') && (
+          <TimerSection
+            data={data}
+            handleFieldChange={handleFieldChange}
+            handleFieldsChange={handleFieldsChange}
+          />
         )}
 
         {/* COMMUNICATION */}

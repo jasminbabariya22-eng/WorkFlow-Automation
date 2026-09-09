@@ -20,7 +20,9 @@ import {
   ChevronRight,
   Plus,
   Sparkles,
-  Layers as LayersIcon
+  Layers as LayersIcon,
+  Clock,
+  Hourglass
 } from 'lucide-react'
 
 export const NODE_REGISTRY = [
@@ -231,6 +233,22 @@ export const NODE_REGISTRY = [
           label: 'Parallel Review',
           branches: ['Audit Review', 'Finance Review'],
           completionRule: 'All'
+        }
+      },
+      {
+        id: 'ctrl-timer',
+        type: 'timer',
+        name: 'Timer / Delay',
+        description: 'Pause execution for duration or until specified date',
+        icon: <Clock size={15} color="#f59e0b" />,
+        badgeClass: 'wf-badge-amber',
+        defaultData: {
+          label: 'Timer Delay',
+          timerType: 'duration',
+          durationValue: 15,
+          durationUnit: 'minutes',
+          targetDate: '',
+          description: 'Pause workflow execution for 15 minutes'
         }
       }
     ]

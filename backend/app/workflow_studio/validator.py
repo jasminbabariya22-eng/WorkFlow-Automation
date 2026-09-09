@@ -7,11 +7,16 @@ SUPPORTED_STUDIO_NODE_TYPES = {
     "END",
     "APPROVAL",
     "CONDITION",
+    "SWITCH",
+    "PARALLEL",
     "ACTION",
     "EMAIL",
+    "COMMUNICATION",
+    "RECORD",
     "USER_TASK",
     "DELAY",    
     "WAIT",
+    "TIMER",
     "SUB_WORKFLOW",
     "WEBHOOK"
 }
@@ -119,13 +124,13 @@ class WorkflowStudioValidator:
                         severity="WARNING"
                     ))
 
-            # Rule: DELAY / WAIT node configuration check
-            elif node_type in ("DELAY", "WAIT"):
-                duration = node.config.get("duration") or node.config.get("delay") or node.config.get("timeout")
+            # Rule: TIMER / DELAY / WAIT node configuration check
+            elif node_type in ("TIMER", "DELAY", "WAIT"):
+                duration = node.config.get("duration") or node.config.get("durationValue") or node.config.get("delay") or node.config.get("timeout") or node.config.get("targetDate") or node.config.get("timerExpression")
                 if not duration:
                     warnings.append(StudioValidationError(
-                        code="DELAY_MISSING_DURATION",
-                        message=f"Delay node '{node.name}' ({node_id}) has no delay duration configured.",
+                        code="TIMER_MISSING_DURATION",
+                        message=f"Timer node '{node.name}' ({node_id}) has no duration or target timestamp configured.",
                         node_id=node_id,
                         severity="WARNING"
                     ))

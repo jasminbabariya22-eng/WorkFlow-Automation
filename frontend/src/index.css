@@ -3358,6 +3358,12 @@ textarea.form-control {
   padding: 12px 14px;
 }
 
+.wf-card-timer {
+  border-color: rgba(245, 158, 11, 0.5);
+  border-top: 3.5px solid #f59e0b;
+  padding: 12px 14px;
+}
+
 /* Card Header */
 .wf-card-header {
   display: flex;

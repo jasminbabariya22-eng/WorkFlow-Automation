@@ -173,6 +173,10 @@ export default function DesignerTestRunnerModal({
                         <div>
                           Email Recipient: <code>{activeNode.data?.to || '{{employee_email}}'}</code> &bull; Subject: <em>{activeNode.data?.subject || 'Workflow Notification'}</em>
                         </div>
+                      ) : nodeType === 'timer' || nodeType === 'delay' || nodeType === 'wait' ? (
+                        <div>
+                          Timer Configuration: <code>{activeNode.data?.durationValue || activeNode.data?.duration || 15} {activeNode.data?.durationUnit || 'minutes'} Delay</code>. Click below to simulate timer elapse and advance workflow.
+                        </div>
                       ) : nodeType === 'end' ? (
                         <div style={{ color: '#4ade80', fontWeight: '600' }}>
                           🎉 Workflow process reached terminal state ({nodeLabel}).
@@ -241,6 +245,16 @@ export default function DesignerTestRunnerModal({
                         >
                           <FileText size={13} />
                           <span>Dispatch Notification & Advance</span>
+                        </button>
+                      ) : nodeType === 'timer' || nodeType === 'delay' || nodeType === 'wait' ? (
+                        <button
+                          className="wf-btn wf-btn-primary"
+                          style={{ background: '#d97706', borderColor: '#f59e0b' }}
+                          disabled={testLoading}
+                          onClick={() => handleGenericNodeAction(activeNode, 'TIMEOUT')}
+                        >
+                          <Clock size={13} />
+                          <span>Simulate Timer Elapse & Advance</span>
                         </button>
                       ) : nodeType === 'end' ? (
                         <button

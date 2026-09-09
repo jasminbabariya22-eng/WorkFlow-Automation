@@ -804,6 +804,25 @@ def execute_generic_test_node(
 
                     diff_fields = {k: {"new": v} for k, v in updates.items()}
 
+        # 3. TIMER / DELAY / WAIT
+        elif node_type in ("timer", "delay", "wait"):
+            dur_val = payload.get("durationValue") or payload.get("duration") or 15
+            dur_unit = payload.get("durationUnit") or "minutes"
+            target_date = payload.get("targetDate")
+            t_expr = payload.get("timerExpression")
+            timer_type = payload.get("timerType") or "duration"
+
+            detail_msg = f"Timer simulated: {dur_val} {dur_unit} delay"
+            if timer_type == "dateTime" and target_date:
+                detail_msg = f"Timer simulated: wait until {target_date}"
+            elif timer_type == "expression" and t_expr:
+                detail_msg = f"Timer simulated: dynamic expression '{t_expr}'"
+
+            diff_fields = {
+                "timer_status": {"new": "ELAPSED"},
+                "timer_config": {"new": detail_msg}
+            }
+
         elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
         return {
