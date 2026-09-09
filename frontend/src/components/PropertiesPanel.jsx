@@ -54,7 +54,14 @@ export default function PropertiesPanel({
           const actions = results[5].status === 'fulfilled' && Array.isArray(results[5].value) ? results[5].value : []
 
           setBackendRoles(roles.map(r => ({ id: String(r.id), name: r.name })))
-          setBackendUsers(users.map(u => ({ id: String(u.id), name: u.name || `User ${u.id}` })))
+          setBackendUsers(users.map(u => ({
+            id: String(u.id),
+            name: u.name || `User ${u.id}`,
+            email: u.email || '',
+            role_id: u.role_id,
+            role_name: u.role_name,
+            roles: u.roles || []
+          })))
           setBackendDepartments(depts.map(d => ({ id: String(d.id), name: d.name || `Department ${d.id}` })))
           setBackendEntities(entities.map(e => ({ name: e.name || e.table_name })))
           setBackendStatuses(statuses.map(s => ({ id: String(s.id), name: s.name, type: s.type })))
@@ -172,8 +179,8 @@ export default function PropertiesPanel({
   // 3. Node Properties Helpers
   const nodeType = selectedNode.type || 'generic'
   const data = selectedNode.data || {}
-  const name = data.name || data.label || 'Node'
-  const description = data.description || ''
+  const name = data.name !== undefined ? data.name : (data.label !== undefined ? data.label : '')
+  const description = data.description !== undefined ? data.description : ''
 
   const handleFieldChange = (field, value) => {
     onUpdateNodeData(selectedNode.id, { ...data, [field]: value })
@@ -184,7 +191,11 @@ export default function PropertiesPanel({
   }
 
   const handleNameChange = (val) => {
-    onUpdateNodeData(selectedNode.id, { ...data, name: val, label: val })
+    onUpdateNodeData(selectedNode.id, {
+      ...data,
+      name: val,
+      label: val
+    })
   }
 
   const handleDescriptionChange = (val) => {
@@ -246,25 +257,14 @@ export default function PropertiesPanel({
     })
   }
 
-  const activeVisibility = Array.isArray(data.visibility) && data.visibility.length > 0
-    ? data.visibility
-    : ['APPROVER']
-
-  const handleToggleVisibility = (visId) => {
-    let next
-    if (activeVisibility.includes(visId)) {
-      next = activeVisibility.filter(v => v !== visId)
-      if (next.length === 0) next = [visId]
-    } else {
-      next = [...activeVisibility, visId]
-    }
-    handleFieldChange('visibility', next)
-  }
-
   const rawActions = Array.isArray(data.actions) && data.actions.length > 0
     ? data.actions
     : ['APPROVE', 'REJECT']
-  const activeActions = rawActions.map(a => typeof a === 'string' ? a.toUpperCase() : (a.id || a.label).toUpperCase())
+  const activeActions = rawActions.map(a => {
+    if (typeof a === 'string') return a.toUpperCase()
+    const val = a?.id || a?.action_code || a?.action || a?.name || a?.label || ''
+    return String(val).toUpperCase()
+  })
 
   const handleToggleAction = (actionId) => {
     let next
@@ -439,8 +439,6 @@ export default function PropertiesPanel({
             onUpdateNodeData={onUpdateNodeData}
             selectedNode={selectedNode}
             data={data}
-            activeVisibility={activeVisibility}
-            handleToggleVisibility={handleToggleVisibility}
           />
         )}
 
@@ -521,20 +519,9 @@ export default function PropertiesPanel({
             nodeType={nodeType}
             data={data}
             name={name}
+            connectionId={workflowConnectionId}
             backendEntities={backendEntities}
             availableFields={availableFields}
-            fieldMappings={fieldMappings}
-            newFieldKey={newFieldKey}
-            setNewFieldKey={setNewFieldKey}
-            newFieldValue={newFieldValue}
-            setNewFieldValue={setNewFieldValue}
-            handleAddFieldMapping={handleAddFieldMapping}
-            handleRemoveFieldMapping={handleRemoveFieldMapping}
-            retrieveFields={retrieveFields}
-            newRetrieveField={newRetrieveField}
-            setNewRetrieveField={setNewRetrieveField}
-            handleAddRetrieveField={handleAddRetrieveField}
-            handleRemoveRetrieveField={handleRemoveRetrieveField}
             handleFieldChange={handleFieldChange}
             handleFieldsChange={handleFieldsChange}
           />

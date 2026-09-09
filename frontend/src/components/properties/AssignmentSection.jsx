@@ -1,11 +1,3 @@
-import React from 'react'
-
-const VISIBILITY_OPTIONS = [
-  { id: 'OWNER', label: 'Owner' },
-  { id: 'DEPARTMENT', label: 'Department' },
-  { id: 'APPROVER', label: 'Approver' }
-]
-
 export default function AssignmentSection({
   assignmentType,
   handleAssignmentTypeChange,
@@ -18,9 +10,7 @@ export default function AssignmentSection({
   handleDepartmentSelect,
   onUpdateNodeData,
   selectedNode,
-  data,
-  activeVisibility,
-  handleToggleVisibility
+  data
 }) {
   return (
     <>
@@ -158,23 +148,6 @@ export default function AssignmentSection({
           )}
         </div>
       )}
-
-      <div className="wf-section-divider">VISIBILITY</div>
-      <div className="wf-visibility-buttons-row">
-        {VISIBILITY_OPTIONS.map(v => {
-          const isSelected = activeVisibility.includes(v.id)
-          return (
-            <button
-              key={v.id}
-              type="button"
-              className={`wf-vis-btn ${isSelected ? 'active' : ''}`}
-              onClick={() => handleToggleVisibility(v.id)}
-            >
-              {v.label}
-            </button>
-          )
-        })}
-      </div>
     </>
   )
 }

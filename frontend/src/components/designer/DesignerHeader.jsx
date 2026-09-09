@@ -10,7 +10,8 @@ import {
   MoreVertical,
   RotateCcw,
   GitBranch,
-  Database
+  Database,
+  Link2
 } from 'lucide-react'
 import { workflowStorage } from '../../services/workflowStorage'
 
@@ -26,6 +27,7 @@ export default function DesignerHeader({
   handleResetCanvas,
   handleValidateGraph,
   handleOpenTestModal,
+  handleOpenBindingModal,
   handleExportJSON,
   fileInputRef,
   handleImportFile,
@@ -142,6 +144,19 @@ export default function DesignerHeader({
           <Play size={14} />
           <span>Test Flow</span>
         </button>
+
+        {/* Bind to ClientApp Button */}
+        {handleOpenBindingModal && (
+          <button
+            className="wf-btn wf-btn-outline"
+            onClick={handleOpenBindingModal}
+            style={{ borderColor: 'rgba(99, 102, 241, 0.4)', color: '#a5b4fc', background: 'rgba(99, 102, 241, 0.08)' }}
+            title="Connect / Bind this workflow to ClientApp"
+          >
+            <Link2 size={14} />
+            <span>Bind to ClientApp</span>
+          </button>
+        )}
 
         {/* Save Button */}
         <button

@@ -149,9 +149,6 @@ export const UserTaskNode = memo(({ id, data, selected }) => {
   const assignmentTarget = assignment.roleName || assignment.userName || assignment.departmentName || 
                            data?.role || data?.user || data?.department || 'Unassigned'
 
-  // Visibility tags (Everyone, Owner, Approver)
-  const visibility = Array.isArray(data?.visibility) ? data.visibility : ['APPROVER']
-
   // 5 Standard Actions
   const rawActions = Array.isArray(data?.actions) && data.actions.length > 0
     ? data.actions
@@ -168,7 +165,9 @@ export const UserTaskNode = memo(({ id, data, selected }) => {
       if (id === 'FORCE_APPROVE') label = 'Force Approve'
       return { id, label }
     }
-    return { id: a.id || a.label, label: a.label || a.id }
+    const actId = a?.id || a?.action_code || a?.action || a?.label || a?.name || 'ACTION'
+    const actLabel = a?.label || a?.name || a?.action_code || a?.id || 'Action'
+    return { id: actId, label: actLabel }
   })
 
   return (
@@ -191,15 +190,6 @@ export const UserTaskNode = memo(({ id, data, selected }) => {
         <span className="wf-assign-mode">{assignmentType}:</span>
         <span className="wf-assign-value font-semibold">{String(assignmentTarget)}</span>
       </div>
-
-      {visibility.length > 0 && (
-        <div className="wf-visibility-tag-row">
-          <span className="wf-vis-label">Visibility:</span>
-          {visibility.map(v => (
-            <span key={v} className="wf-vis-pill">{v}</span>
-          ))}
-        </div>
-      )}
 
       <div className="wf-node-section-label">CONFIGURED ACTIONS:</div>
 
@@ -495,14 +485,62 @@ export const CommunicationNode = memo(({ id, data, selected }) => {
         <div className="wf-header-texts">
           <div className="wf-category-tag wf-tag-execution">EXECUTION NODE</div>
           <div className="wf-title">{title}</div>
-          <div className="wf-info-pill-row">
-            <span className="wf-pill-label">To:</span>
-            <span className="wf-pill-value truncate max-w-[150px]">{recipient}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
+            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, flexShrink: 0 }}>To:</span>
+            <span
+              style={{
+                fontSize: '11px',
+                color: '#cbd5e1',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+                minWidth: 0,
+                display: 'block'
+              }}
+              title={recipient}
+            >
+              {recipient}
+            </span>
           </div>
+          {isEmail && data?.cc && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, flexShrink: 0 }}>CC:</span>
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: '#cbd5e1',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  minWidth: 0,
+                  display: 'block'
+                }}
+                title={data.cc}
+              >
+                {data.cc}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {subject && <div className="wf-card-desc truncate font-medium">"{subject}"</div>}
+      {subject && (
+        <div
+          className="wf-card-desc font-medium"
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '100%',
+            display: 'block'
+          }}
+          title={subject}
+        >
+          "{subject}"
+        </div>
+      )}
 
       <div className="wf-port-list">
         <div className="wf-port-row wf-port-out wf-port-success">
@@ -523,21 +561,22 @@ export const CommunicationNode = memo(({ id, data, selected }) => {
 // =========================================================================
 export const RecordNode = memo(({ id, data, selected }) => {
   const title = data?.label || data?.name || 'Record Operation'
-  const opType = (data?.subType || 
-    (String(title).toLowerCase().includes('create') ? 'CREATE_RECORD' :
-     String(title).toLowerCase().includes('read') ? 'READ_RECORD' :
-     data?.type || data?.actionType || 'UPDATE_RECORD')).toUpperCase()
+  const subTypeUpper = String(data?.subType || data?.actionType || '').toUpperCase()
+  const opType = subTypeUpper || 'UPDATE_RECORD'
   const entity = data?.entity || data?.table || 'Entity'
   const recordId = data?.recordId || data?.record || '{{workflow.entity_id}}'
 
   let icon = <RefreshCw size={15} color="#ffffff" />
   let opBadge = 'UPDATE RECORD'
-  if (opType.includes('CREATE')) {
+  if (opType.includes('CREATE') || opType.includes('INSERT')) {
     icon = <FilePlus size={15} color="#ffffff" />
     opBadge = 'CREATE RECORD'
-  } else if (opType.includes('READ')) {
+  } else if (opType.includes('READ') || opType.includes('SELECT') || opType.includes('GET')) {
     icon = <FileSearch size={15} color="#ffffff" />
     opBadge = 'READ RECORD'
+  } else if (opType.includes('DELETE')) {
+    icon = <Trash2 size={15} color="#ffffff" />
+    opBadge = 'DELETE RECORD'
   }
 
   return (
@@ -586,10 +625,19 @@ export const RecordNode = memo(({ id, data, selected }) => {
 // 10. ACTION NODES (API Call / Database Action) (Execution Nodes)
 // =========================================================================
 export const ActionNode = memo(({ id, data, selected }) => {
-  const isApi = data?.subType === 'API' || data?.type === 'apiCall' || data?.type === 'action'
+  const subTypeUpper = String(data?.subType || '').toUpperCase()
+  const isExplicitDb = subTypeUpper === 'DATABASE' || Boolean(data?.table || data?.entity || data?.queryOperation)
+  const isApi = !isExplicitDb && (
+    subTypeUpper === 'API' || 
+    subTypeUpper === 'REST_API' || 
+    data?.type === 'apiCall' || 
+    data?.type === 'api' ||
+    Boolean(data?.endpoint || data?.url) ||
+    String(data?.label || data?.name || '').toLowerCase().includes('api')
+  )
   const title = data?.label || data?.name || (isApi ? 'API Call' : 'Database Action')
-  const methodOrOp = isApi ? (data?.method || 'POST') : (data?.operation || 'Stored Procedure')
-  const target = isApi ? (data?.url || 'https://api.internal/v1/event') : (data?.procedure || data?.entity || data?.table || 'update_status')
+  const methodOrOp = isApi ? (data?.method || 'POST') : (data?.queryOperation || data?.operation || 'DATABASE')
+  const target = isApi ? (data?.endpoint || data?.url || 'https://api.internal/v1/event') : (data?.table || data?.entity || data?.procedure || 'Database Query')
 
   return (
     <div className={`wf-card wf-card-action ${selected ? 'wf-selected' : ''}`}>
@@ -603,9 +651,9 @@ export const ActionNode = memo(({ id, data, selected }) => {
         <div className="wf-header-texts">
           <div className="wf-category-tag wf-tag-execution">EXECUTION NODE</div>
           <div className="wf-title">{title}</div>
-          <div className="wf-api-method-row">
+          <div className="wf-api-method-row" title={target}>
             <span className="wf-method-badge">{methodOrOp}</span>
-            <span className="wf-api-url-text truncate">{target}</span>
+            <span className="wf-api-url-text">{target}</span>
           </div>
         </div>
       </div>

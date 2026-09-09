@@ -18,6 +18,8 @@ from app.core.exception_handler import (
 from app.workflow.api.definitions import router as workflow_definitions_router
 from app.workflow.api.human_tasks import router as workflow_tasks_router
 from app.workflow.api.monitoring import router as workflow_monitoring_router
+from app.workflow.api.jobs import router as workflow_jobs_router
+from app.workflow.api.executor import router as workflow_executor_router
 
 # --- 2. Workflow Management, Platform Lifecycle & Migrations API ---
 from app.workflow_management.api import router as workflow_management_router
@@ -31,6 +33,7 @@ from app.workflow_studio.api import (
     catalog_router as workflow_studio_catalog_router
 )
 from app.workflow_studio.connections_api import router as workflow_connections_router
+from app.workflow.api.client_gateway import router as client_gateway_router
 
 # Trigger dynamic registration of custom & generic workflow service tasks
 import app.workflow.activities.generic_activities
@@ -68,11 +71,41 @@ def health():
 app.include_router(workflow_definitions_router)
 app.include_router(workflow_tasks_router)
 app.include_router(workflow_monitoring_router)
+app.include_router(workflow_jobs_router)
+app.include_router(workflow_executor_router)
 app.include_router(workflow_management_router)
 app.include_router(workflow_definition_router)
 app.include_router(workflow_studio_router)
 app.include_router(workflow_studio_catalog_router)
 app.include_router(workflow_connections_router)
+app.include_router(client_gateway_router)
+
+# --- Real-Time Workflow WebSocket Gateway ---
+from fastapi import WebSocket, WebSocketDisconnect
+from app.core.websocket import ws_manager
+
+@app.on_event("startup")
+async def on_startup():
+    import asyncio
+    try:
+        ws_manager.set_event_loop(asyncio.get_running_loop())
+    except Exception as e:
+        logger.warning(f"Could not bind WebSocket event loop on startup: {e}")
+    logger.info("Workflow WebSocket Gateway active at /ws/workflow")
+
+@app.websocket("/ws/workflow")
+async def workflow_websocket_endpoint(websocket: WebSocket, user_id: str = None):
+    await ws_manager.connect(websocket, user_id=user_id)
+    try:
+        while True:
+            text = await websocket.receive_text()
+            if text == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
 
 # --- Global Exception Handlers ---
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)

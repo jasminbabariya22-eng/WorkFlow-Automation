@@ -29,6 +29,123 @@ class StudioExecutionAdapter:
     """
 
     @classmethod
+    def _sync_bpmn_definition_to_version(cls, db: Session, bpmn_def) -> Optional[WorkflowVersion]:
+        """
+        Synchronizes a BPMNDefinition record (Studio JSON canvas) into GenericWorkflow + WorkflowVersion graph
+        so runtime execution uses the actual configured node graph.
+        """
+        if not bpmn_def or not bpmn_def.json_content:
+            return None
+        try:
+            raw_data = json.loads(bpmn_def.json_content) if isinstance(bpmn_def.json_content, str) else bpmn_def.json_content
+            nodes_data = raw_data.get("nodes", [])
+            edges_data = raw_data.get("edges", [])
+            if not nodes_data:
+                return None
+
+            wf_key = bpmn_def.spec_id or f"wf_{bpmn_def.id}"
+            gw = db.query(GenericWorkflow).filter(
+                (GenericWorkflow.workflow_key == wf_key) | (GenericWorkflow.name == bpmn_def.name)
+            ).order_by(GenericWorkflow.workflow_id.desc()).first()
+
+            if not gw:
+                gw = GenericWorkflow(
+                    workflow_key=wf_key,
+                    name=bpmn_def.name or wf_key,
+                    description=bpmn_def.description or f"Compiled from BPMNDefinition #{bpmn_def.id}",
+                    entity_type="test" if "test" in wf_key.lower() else "generic",
+                    connection_id=getattr(bpmn_def, "connection_id", None),
+                    status="ACTIVE",
+                    created_by=bpmn_def.created_by or 1,
+                    updated_by=bpmn_def.created_by or 1,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                db.add(gw)
+                db.flush()
+            else:
+                if getattr(bpmn_def, "connection_id", None):
+                    gw.connection_id = bpmn_def.connection_id
+                gw.updated_at = datetime.now()
+
+            ver = db.query(WorkflowVersion).filter(
+                WorkflowVersion.workflow_id == gw.workflow_id
+            ).order_by(WorkflowVersion.version_number.desc()).first()
+
+            if not ver:
+                ver = WorkflowVersion(
+                    workflow_id=gw.workflow_id,
+                    version_number=bpmn_def.version or 1,
+                    status="PUBLISHED",
+                    definition_metadata=json.dumps({"source_bpmn_id": bpmn_def.id}),
+                    created_by=bpmn_def.created_by or 1,
+                    created_at=datetime.now(),
+                    published_at=datetime.now()
+                )
+                db.add(ver)
+                db.flush()
+            else:
+                ver.status = "PUBLISHED"
+                ver.published_at = datetime.now()
+
+            # Clean existing nodes and connections for this version
+            db.query(WorkflowConnection).filter(WorkflowConnection.workflow_version_id == ver.workflow_version_id).delete()
+            db.query(WorkflowNode).filter(WorkflowNode.workflow_version_id == ver.workflow_version_id).delete()
+            db.flush()
+
+            key_to_id = {}
+            for n in nodes_data:
+                nid = str(n.get("id"))
+                ntype = str(n.get("type") or "ACTION").upper()
+                ndata = n.get("data", {})
+                nname = ndata.get("label") or ndata.get("name") or nid
+                pos = n.get("position", {})
+                db_n = WorkflowNode(
+                    workflow_version_id=ver.workflow_version_id,
+                    node_key=nid,
+                    node_type=ntype,
+                    name=nname,
+                    position_x=float(pos.get("x", 0.0)),
+                    position_y=float(pos.get("y", 0.0)),
+                    configuration=json.dumps(ndata),
+                    is_active=True,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                db.add(db_n)
+                db.flush()
+                key_to_id[nid] = db_n.node_id
+
+            for e in edges_data:
+                src_key = str(e.get("source"))
+                tgt_key = str(e.get("target"))
+                src_id = key_to_id.get(src_key)
+                tgt_id = key_to_id.get(tgt_key)
+                if not src_id or not tgt_id:
+                    continue
+                edata = e.get("data", {})
+                db_c = WorkflowConnection(
+                    workflow_version_id=ver.workflow_version_id,
+                    source_node_id=src_id,
+                    target_node_id=tgt_id,
+                    connection_key=str(e.get("id") or ""),
+                    condition=edata.get("condition") or edata.get("action"),
+                    label=edata.get("label") or edata.get("action"),
+                    metadata_json=json.dumps(edata),
+                    created_at=datetime.now()
+                )
+                db.add(db_c)
+
+            db.flush()
+            db.commit()
+            db.refresh(ver)
+            return ver
+        except Exception as e:
+            logger.error(f"StudioEngine: Failed to sync BPMNDefinition {bpmn_def.id} to WorkflowVersion: {e}")
+            db.rollback()
+            return None
+
+    @classmethod
     def resolve_published_version(
         cls,
         db: Session,
@@ -39,11 +156,18 @@ class StudioExecutionAdapter:
         Resolves the active PUBLISHED WorkflowVersion for a given entity_type or explicit definition_id (workflow_id or version_id).
         """
         if definition_id:
-            # 1. Map BPMNDefinition ID -> GenericWorkflow / WorkflowVersion
+            # 1. Map BPMNDefinition ID / spec_id -> GenericWorkflow / WorkflowVersion
             try:
                 from app.workflow.persistence.models import BPMNDefinition
-                bpmn_def = db.query(BPMNDefinition).filter(BPMNDefinition.id == int(definition_id)).first()
+                bpmn_def = None
+                if str(definition_id).isdigit():
+                    bpmn_def = db.query(BPMNDefinition).filter(BPMNDefinition.id == int(definition_id)).first()
+                if not bpmn_def:
+                    bpmn_def = db.query(BPMNDefinition).filter(BPMNDefinition.spec_id == str(definition_id)).order_by(BPMNDefinition.id.desc()).first()
                 if bpmn_def:
+                    synced_v = cls._sync_bpmn_definition_to_version(db, bpmn_def)
+                    if synced_v:
+                        return synced_v
                     gw = db.query(GenericWorkflow).filter(
                         (GenericWorkflow.workflow_key == bpmn_def.spec_id) | 
                         (GenericWorkflow.name == bpmn_def.name)
@@ -59,30 +183,31 @@ class StudioExecutionAdapter:
                             ).order_by(WorkflowVersion.version_number.desc()).first()
                         if v:
                             return v
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"resolve_published_version BPMNDefinition error: {e}")
 
             # 2. Check by workflow_id with status PUBLISHED
-            version = db.query(WorkflowVersion).filter(
-                WorkflowVersion.workflow_id == definition_id,
-                WorkflowVersion.status == "PUBLISHED"
-            ).order_by(WorkflowVersion.version_number.desc()).first()
-            if version:
-                return version
+            if str(definition_id).isdigit():
+                version = db.query(WorkflowVersion).filter(
+                    WorkflowVersion.workflow_id == int(definition_id),
+                    WorkflowVersion.status == "PUBLISHED"
+                ).order_by(WorkflowVersion.version_number.desc()).first()
+                if version:
+                    return version
 
-            # 3. Check by workflow_id (latest draft/validated)
-            version = db.query(WorkflowVersion).filter(
-                WorkflowVersion.workflow_id == definition_id
-            ).order_by(WorkflowVersion.version_number.desc()).first()
-            if version:
-                return version
+                # 3. Check by workflow_id (latest draft/validated)
+                version = db.query(WorkflowVersion).filter(
+                    WorkflowVersion.workflow_id == int(definition_id)
+                ).order_by(WorkflowVersion.version_number.desc()).first()
+                if version:
+                    return version
 
-            # 4. Check by workflow_version_id directly
-            version = db.query(WorkflowVersion).filter(
-                WorkflowVersion.workflow_version_id == definition_id
-            ).first()
-            if version:
-                return version
+                # 4. Check by workflow_version_id directly (only if version belongs to entity_type or definition)
+                version = db.query(WorkflowVersion).filter(
+                    WorkflowVersion.workflow_version_id == int(definition_id)
+                ).first()
+                if version and (not entity_type or (version.workflow and version.workflow.entity_type == entity_type)):
+                    return version
 
 
         # 1. Check WorkflowEntityConfig mapping
@@ -212,6 +337,21 @@ class StudioExecutionAdapter:
             )
 
             db_to_use.commit()
+
+            # Broadcast WebSocket event
+            try:
+                from app.core.websocket import ws_manager
+                ws_manager.broadcast_event("WORKFLOW_STARTED", {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "instance_id": instance.instance_id,
+                    "user_id": user_id,
+                    "status": instance.status,
+                    "current_task": instance.current_task_code
+                })
+            except Exception as ws_ex:
+                logger.warning(f"WebSocket broadcast error: {ws_ex}")
+
             return res
 
         except Exception as e:
@@ -245,7 +385,12 @@ class StudioExecutionAdapter:
             role_name = str(user_profile.get("role") or "").strip().upper()
 
         # Admin bypass
-        if role_name in ("ADMIN", "SUPERADMIN", "SYSTEM", "ADMINISTRATOR", "ERM_ADMIN") or str(user_id) in ("1", "0") or "ADMIN" in role_name:
+        is_admin_user = (
+            role_name in ("ADMIN", "SUPERADMIN", "SYSTEM", "ADMINISTRATOR", "ERM_ADMIN")
+            or "ADMIN" in role_name
+            or (user_profile and bool(user_profile.get("is_admin")))
+        )
+        if is_admin_user:
             return True
 
         assignment = node_cfg.get("assignment", {}) if isinstance(node_cfg.get("assignment"), dict) else {}
@@ -323,6 +468,7 @@ class StudioExecutionAdapter:
         version_map = {v.workflow_version_id: v for v in versions}
 
         results = []
+        user_profiles_cache = {}
         for task, instance in active_items:
             version = version_map.get(instance.bpmn_definition_id)
             if not version:
@@ -337,10 +483,11 @@ class StudioExecutionAdapter:
                     conn_id = s_data.get("variables", {}).get("connection_id")
                 except Exception:
                     pass
-            if not conn_id:
-                conn_id = 4
 
-            user_profile = ClientDatabaseAdapter.get_user_profile(user_id, connection_id=conn_id)
+            cache_key = (user_id, conn_id)
+            if cache_key not in user_profiles_cache:
+                user_profiles_cache[cache_key] = ClientDatabaseAdapter.get_user_profile(user_id, connection_id=conn_id)
+            user_profile = user_profiles_cache[cache_key]
 
             # Find corresponding node
             matching_node = None
@@ -576,6 +723,21 @@ class StudioExecutionAdapter:
             )
 
             db_to_use.commit()
+
+            # Broadcast WebSocket event
+            try:
+                from app.core.websocket import ws_manager
+                ws_manager.broadcast_event("TASK_COMPLETED", {
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "action": action,
+                    "user_id": user_id,
+                    "status": res.get("status") or instance.status,
+                    "current_task": instance.current_task_code
+                })
+            except Exception as ws_ex:
+                logger.warning(f"WebSocket broadcast error: {ws_ex}")
+
             return res
 
         except Exception as e:
@@ -644,16 +806,33 @@ class StudioExecutionAdapter:
                 except Exception:
                     c_meta = {}
                 source_handle = str(c_meta.get("sourceHandle") or "").strip().upper()
-                if source_handle and source_handle == action:
+                c_lbl = str(conn.label or "").strip().upper()
+                c_act = str(c_meta.get("action") or "").strip().upper()
+
+                if source_handle and (
+                    source_handle == action or 
+                    (action in ("DEFAULT", "SUCCESS", "SUBMIT") and source_handle in ("SUCCESS", "OUTPUT", "DEFAULT"))
+                ):
                     matched_conn = conn
                     break
 
-                # 2. Match label (e.g. "TRUE", "FALSE")
-                if conn.label and conn.label.strip().upper() == action:
+                # 2. Match label (e.g. "TRUE", "FALSE", "SUCCESS", "NEXT")
+                if c_lbl and (
+                    c_lbl == action or 
+                    (action in ("DEFAULT", "SUCCESS", "SUBMIT") and c_lbl in ("SUCCESS", "NEXT", "OUTPUT", "DEFAULT"))
+                ):
                     matched_conn = conn
                     break
 
-                # 3. Check condition expression matching
+                # 3. Match action field in edge metadata
+                if c_act and (
+                    c_act == action or 
+                    (action in ("DEFAULT", "SUCCESS", "SUBMIT") and c_act in ("SUCCESS", "OUTPUT", "DEFAULT"))
+                ):
+                    matched_conn = conn
+                    break
+
+                # 4. Check condition expression matching
                 if conn.condition and ConditionEvaluator.evaluate(conn.condition, action, variables):
                     matched_conn = conn
                     break
@@ -727,6 +906,22 @@ class StudioExecutionAdapter:
                 # Log activity history
                 cls._log_history(db, instance, target_node, "READY", user_id, variables)
 
+                # Broadcast WebSocket event
+                try:
+                    from app.core.websocket import ws_manager
+                    ws_manager.broadcast_event("TASK_READY", {
+                        "instance_id": instance.instance_id,
+                        "entity_type": instance.entity_type,
+                        "entity_id": instance.entity_id,
+                        "task_id": human_task.task_id,
+                        "task_name": target_node.name,
+                        "task_code": task_code,
+                        "role_code": role_code,
+                        "assignment": assignment_cfg
+                    })
+                except Exception as ws_ex:
+                    logger.warning(f"WebSocket broadcast error: {ws_ex}")
+
                 return {
                     "instance_id": instance.instance_id,
                     "entity_type": instance.entity_type,
@@ -738,15 +933,15 @@ class StudioExecutionAdapter:
                     "message": f"Workflow paused at user task '{target_node.name}' ({task_code})"
                 }
 
-            elif target_type == "EMAIL":
+            elif target_type in ("EMAIL", "COMMUNICATION") or (target_type == "ACTION" and ("to" in node_cfg or "recipient" in node_cfg)):
                 # Execute automated email notification
                 cls._execute_email_node(instance, node_cfg, variables)
                 cls._log_history(db, instance, target_node, "COMPLETED", user_id, variables)
                 current_node = target_node
-                action = "DEFAULT"
+                action = "SUCCESS"
                 continue
 
-            elif target_type in ("ACTION", "RECORD", "API", "COMMUNICATION"):
+            elif target_type in ("ACTION", "RECORD", "API"):
                 # Execute automated action handler
                 action_type = (
                     node_cfg.get("actionType") or 
@@ -755,9 +950,19 @@ class StudioExecutionAdapter:
                     node_cfg.get("subType") or
                     node_cfg.get("subtype") or
                     node_cfg.get("operation") or
-                    node_cfg.get("opType") or
-                    ("DB_UPDATE" if target_type == "RECORD" else "GENERIC_ACTION")
+                    node_cfg.get("opType")
                 )
+                if not action_type:
+                    if target_type == "RECORD":
+                        sql_text = str(node_cfg.get("sql") or "").strip().upper()
+                        lbl = str(node_cfg.get("label") or node_cfg.get("name") or "").lower()
+                        if sql_text.startswith("SELECT") or "read" in lbl or "select" in lbl:
+                            action_type = "DB_READ"
+                        else:
+                            action_type = "DB_UPDATE"
+                    else:
+                        action_type = "GENERIC_ACTION"
+
                 ctx = {**variables, "entity_id": instance.entity_id, "record_id": instance.entity_id, "entity_type": instance.entity_type}
                 try:
                     ActionRegistry.execute(action_type, node_cfg, ctx)
@@ -769,7 +974,7 @@ class StudioExecutionAdapter:
 
                 cls._log_history(db, instance, target_node, "COMPLETED", user_id, variables)
                 current_node = target_node
-                action = "DEFAULT"
+                action = "SUCCESS"
                 continue
 
             elif target_type == "CONDITION":
@@ -794,6 +999,18 @@ class StudioExecutionAdapter:
                 # Log activity history
                 cls._log_history(db, instance, target_node, "COMPLETED", user_id, variables)
 
+                # Broadcast WebSocket event
+                try:
+                    from app.core.websocket import ws_manager
+                    ws_manager.broadcast_event("WORKFLOW_COMPLETED", {
+                        "instance_id": instance.instance_id,
+                        "entity_type": instance.entity_type,
+                        "entity_id": instance.entity_id,
+                        "status": "Completed"
+                    })
+                except Exception as ws_ex:
+                    logger.warning(f"WebSocket broadcast error: {ws_ex}")
+
                 return {
                     "instance_id": instance.instance_id,
                     "entity_type": instance.entity_type,
@@ -814,6 +1031,16 @@ class StudioExecutionAdapter:
         """Dispatches generic automated workflow notifications into Client DB ers.mst_email_job."""
         from app.workflow_studio.runtime.actions import ActionRegistry
         ctx = {**variables, "entity_id": instance.entity_id, "record_id": instance.entity_id, "entity_type": instance.entity_type}
+        conn_id = ctx.get("connection_id") or config.get("connection_id")
+        if not conn_id and instance:
+            if getattr(instance, "connection_id", None):
+                conn_id = instance.connection_id
+            elif hasattr(instance, "version") and instance.version and hasattr(instance.version, "workflow") and instance.version.workflow:
+                conn_id = instance.version.workflow.connection_id
+        if conn_id:
+            ctx["connection_id"] = conn_id
+            config["connection_id"] = conn_id
+
         try:
             ActionRegistry.execute("SEND_EMAIL", config, ctx)
             variables.update(ctx)

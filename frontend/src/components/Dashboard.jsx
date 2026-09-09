@@ -13,10 +13,12 @@ import {
   Globe,
   Loader,
   X,
-  Database
+  Database,
+  Link2
 } from 'lucide-react'
 import ExecutionModal from './ExecutionModal'
 import DatabaseConnectionsModal from './DatabaseConnectionsModal'
+import ClientAppBindingModal from './ClientAppBindingModal'
 import { workflowStorage } from '../services/workflowStorage'
 
 function Dashboard({ onOpenDesigner, showToast }) {
@@ -33,7 +35,9 @@ function Dashboard({ onOpenDesigner, showToast }) {
   const [showImportModal, setShowImportModal] = useState(false)
   const [showDbModal, setShowDbModal] = useState(false)
   const [executingWorkflow, setExecutingWorkflow] = useState(null)
+  const [bindingModalWorkflow, setBindingModalWorkflow] = useState(null)
   const [dbConnections, setDbConnections] = useState([])
+  const [activeBindings, setActiveBindings] = useState({})
 
   // Form payloads
   const [newDraft, setNewDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '' })
@@ -44,12 +48,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
   const fetchWorkflows = async () => {
     setLoading(true)
     try {
-      const [wfData, connData] = await Promise.allSettled([
+      const [wfData, connData, bindingsData] = await Promise.allSettled([
         workflowStorage.getWorkflows(),
-        workflowStorage.getDatabaseConnections()
+        workflowStorage.getDatabaseConnections(),
+        workflowStorage.getWorkflowBindings()
       ])
       if (wfData.status === 'fulfilled') setWorkflows(wfData.value || [])
       if (connData.status === 'fulfilled') setDbConnections(connData.value || [])
+      if (bindingsData.status === 'fulfilled') setActiveBindings(bindingsData.value || {})
     } catch (error) {
       showToast('Error while loading definitions', 'error')
     } finally {
@@ -268,6 +274,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 <th>Database</th>
                 <th>Version</th>
                 <th>Status</th>
+                <th>ClientApp</th>
                 <th>Tags</th>
                 <th>Last Updated</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -303,6 +310,45 @@ function Dashboard({ onOpenDesigner, showToast }) {
                       {wf.status}
                     </span>
                   </td>
+                  <td>
+                    {(() => {
+                      const wfId = Number(wf.id || wf.workflow_id)
+                      let boundKey = null
+                      for (const [key, b] of Object.entries(activeBindings || {})) {
+                        if (Number(b.workflow_id) === wfId) {
+                          boundKey = key
+                          break
+                        }
+                      }
+                      if (boundKey) {
+                        return (
+                          <span 
+                            style={{ 
+                              fontSize: '11px', 
+                              color: '#4ade80', 
+                              background: 'rgba(34, 197, 94, 0.1)', 
+                              padding: '2px 8px', 
+                              borderRadius: '999px', 
+                              border: '1px solid rgba(34, 197, 94, 0.25)', 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '4px',
+                              fontWeight: '600'
+                            }}
+                            title={`Bound to ClientApp module: ${boundKey}`}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }} />
+                            <span>{boundKey}</span>
+                          </span>
+                        )
+                      }
+                      return (
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          —
+                        </span>
+                      )
+                    })()}
+                  </td>
                   <td>{(() => {
                     const tagsList = Array.isArray(wf.tags) ? wf.tags : (typeof wf.tags === 'string' ? wf.tags.split(',').map(t => t.trim()).filter(Boolean) : [])
                     return tagsList.length > 0 ? tagsList.map((tag, idx) => (
@@ -311,11 +357,36 @@ function Dashboard({ onOpenDesigner, showToast }) {
                       </span>
                     )) : <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>—</span>
                   })()}</td>
-                  <td style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
-                    {wf.updated_at || wf.updated_on || wf.created_on || '—'}
+                  <td style={{ color: 'var(--color-text-muted)', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const rawDate = wf.updated_at || wf.updated_on || wf.created_on || wf.created_at
+                      if (!rawDate) return '—'
+                      const d = new Date(rawDate)
+                      if (isNaN(d.getTime())) return String(rawDate)
+                      return d.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                      })
+                    })()}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', justifyItems: 'flex-end', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ borderColor: 'rgba(99, 102, 241, 0.4)', color: '#818cf8', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        title="Connect / Bind to ClientApp"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setBindingModalWorkflow(wf)
+                        }}
+                      >
+                        <Link2 size={12} />
+                        <span>Bind</span>
+                      </button>
                       {ENABLE_DASHBOARD_TEST_RUN && (
                         <button 
                           className="btn btn-secondary btn-sm" 
@@ -550,6 +621,18 @@ function Dashboard({ onOpenDesigner, showToast }) {
       {showDbModal && (
         <DatabaseConnectionsModal 
           onClose={() => setShowDbModal(false)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* ClientApp Declarative Binding Modal */}
+      {bindingModalWorkflow && (
+        <ClientAppBindingModal
+          isOpen={Boolean(bindingModalWorkflow)}
+          workflow={bindingModalWorkflow}
+          dbConnections={dbConnections}
+          onClose={() => setBindingModalWorkflow(null)}
+          onBindingUpdated={fetchWorkflows}
           showToast={showToast}
         />
       )}

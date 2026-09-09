@@ -51,6 +51,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const [rejectionError, setRejectionError] = useState('')
 
   // Form State
+  const [selectedWorkflowKey, setSelectedWorkflowKey] = useState('emp_leave_request')
   const [leaveTypeId, setLeaveTypeId] = useState(1)
   const [startDate, setStartDate] = useState('2026-09-10')
   const [endDate, setEndDate] = useState('2026-09-12')
@@ -60,6 +61,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [actionLoadingId, setActionLoadingId] = useState(null)
   const [feedbackBanner, setFeedbackBanner] = useState(null)
+  const [userBalances, setUserBalances] = useState([])
 
   // Leave types from directory
   const leaveTypes = useMemo(() => clientDb.getLeaveTypes(), [])
@@ -92,17 +94,35 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
             leaveType: lt ? lt.name : 'Annual Leave',
             startDate: r.start_date,
             endDate: r.end_date || r.start_date,
-            days: 2,
+            days: Number(r.days) || 1,
             status: String(r.status || 'PENDING').toUpperCase(),
             reason: r.reason || 'Leave Request',
             moduleKey: Number(r.leave_type_id) === 5 ? 'wfh_requests' : MODULE_KEY,
-            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'Recent'
+            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : 'Recent'
           }
         })
         setLeavesList(mapped)
       } else {
         setLeavesList([])
       }
+
+      // Also fetch live leave balances from clientDB
+      try {
+        const bData = await genericWorkflowApi.fetchRecords('leave_balances')
+        if (Array.isArray(bData)) {
+          const types = clientDb.getLeaveTypes()
+          const myB = bData
+            .filter(b => String(b.employee_id) === String(currentUser?.id))
+            .map(b => {
+              const lt = types.find(t => Number(t.id) === Number(b.leave_type_id))
+              return {
+                ...b,
+                leaveTypeName: lt ? lt.name : `Type #${b.leave_type_id}`
+              }
+            })
+          setUserBalances(myB)
+        }
+      } catch (_bErr) { }
     } catch (_e) {
       setLeavesList([])
     } finally {
@@ -121,7 +141,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
   const pendingApprovals = useMemo(() => {
     return canApprove
-      ? leavesList.filter(r => (r.status === 'PENDING' || r.status === 'PENDING_MANAGER') && String(r.managerId) === String(currentUser?.id))
+      ? leavesList.filter(r => (r.status === 'PENDING' || r.status === 'PENDING_MANAGER' || r.status === 'PENDING_CANCELLATION') && String(r.managerId) === String(currentUser?.id))
       : []
   }, [leavesList, currentUser, canApprove])
 
@@ -188,13 +208,14 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      // 1. Generic submission through Python Gateway (routes to wfh_requests if leave_type_id is 5)
-      const targetKey = Number(leaveTypeId) === 5 ? 'wfh_requests' : MODULE_KEY
+      // 1. Generic submission through Python Gateway (routes to wfh_requests if leave_type_id is 5, else selectedWorkflowKey)
+      const targetKey = Number(leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey
       const res = await genericWorkflowApi.submit(targetKey, {
         employee_id: Number(currentUser.id) || 5,
         leave_type_id: Number(leaveTypeId) || 1,
         start_date: startDate,
         end_date: endDate,
+        days: Number(calculatedDays) || 1,
         reason: reason || (Number(leaveTypeId) === 5 ? 'Work From Home' : 'Leave Request'),
         status: 'PENDING'
       }, currentUser)
@@ -230,16 +251,24 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     if (!approveConfirmItem || actionLoadingId) return
     const requestId = approveConfirmItem.id
     setActionLoadingId(requestId)
-    const targetKey = approveConfirmItem.moduleKey || MODULE_KEY
+    const targetKey = approveConfirmItem.status === 'PENDING_CANCELLATION'
+      ? 'leave_cancellation'
+      : (approveConfirmItem.moduleKey || (Number(approveConfirmItem.leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey))
 
     try {
       await genericWorkflowApi.executeAction(targetKey, requestId, 'APPROVE', approvalComment, currentUser, {
+        employee_id: Number(approveConfirmItem.employeeId),
+        leave_type_id: Number(approveConfirmItem.leaveTypeId),
+        days: Number(approveConfirmItem.days) || 1,
+        approved_by: currentUser?.name || 'Manager',
         employee_email: approveConfirmItem.employeeEmail
       })
 
       setFeedbackBanner({
         type: 'success',
-        message: `✓ Leave request #LR-${requestId} approved successfully.`
+        message: approveConfirmItem.status === 'PENDING_CANCELLATION'
+          ? `✓ Leave cancellation for #LR-${requestId} has been approved. Status is now CANCELLED.`
+          : `✓ Leave request #LR-${requestId} approved successfully.`
       })
 
       setApproveConfirmItem(null)
@@ -267,16 +296,23 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
     const requestId = rejectConfirmItem.id
     setActionLoadingId(requestId)
-    const targetKey = rejectConfirmItem.moduleKey || MODULE_KEY
+    const targetKey = rejectConfirmItem.status === 'PENDING_CANCELLATION'
+      ? 'leave_cancellation'
+      : (rejectConfirmItem.moduleKey || (Number(rejectConfirmItem.leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey))
 
     try {
       await genericWorkflowApi.executeAction(targetKey, requestId, 'REJECT', rejectionReason, currentUser, {
+        employee_id: Number(rejectConfirmItem.employeeId),
+        leave_type_id: Number(rejectConfirmItem.leaveTypeId),
+        days: Number(rejectConfirmItem.days) || 1,
         employee_email: rejectConfirmItem.employeeEmail
       })
 
       setFeedbackBanner({
         type: 'success',
-        message: `✓ Leave request #LR-${requestId} rejected.`
+        message: rejectConfirmItem.status === 'PENDING_CANCELLATION'
+          ? `✓ Leave cancellation for #LR-${requestId} was rejected. Status remains APPROVED.`
+          : `✓ Leave request #LR-${requestId} rejected.`
       })
 
       setRejectConfirmItem(null)
@@ -302,7 +338,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
       setFeedbackBanner({
         type: 'success',
-        message: `✓ Leave cancellation requested! Launched 2nd Workflow (Leave_Cancellation_Request #1122).`
+        message: `✓ Leave cancellation requested for #LR-${req.id}! Workflow #1122 (leave_cancellation_wf) launched.`
       })
       await loadRecords()
     } catch (err) {
@@ -337,8 +373,17 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     }
     if (s === 'CANCELLED') {
       return (
-        <span className="status-pill badge-neutral">
+        <span className="status-pill badge-neutral" style={{ background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}>
+          <XCircle size={12} />
           <span>Cancelled</span>
+        </span>
+      )
+    }
+    if (s === 'PENDING_CANCELLATION') {
+      return (
+        <span className="status-pill warning" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+          <Clock size={12} />
+          <span>Pending Cancellation</span>
         </span>
       )
     }
@@ -376,6 +421,31 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         <div className={`status-banner ${feedbackBanner.type === 'error' ? 'error' : 'success'} mb-4`}>
           {feedbackBanner.type === 'error' ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
           <span className="text-sm font-semibold">{feedbackBanner.message}</span>
+        </div>
+      )}
+
+      {/* Live Leave Quota & Balance Cards */}
+      {userBalances.length > 0 && (
+        <div className="leave-balance-grid mb-6">
+          {userBalances.map((b) => (
+            <div key={b.balance_id} className="leave-balance-card">
+              <div className="balance-card-header">
+                <span className="balance-type-title">{b.leaveTypeName}</span>
+                {Number(b.pending_days) > 0 && (
+                  <span className="balance-pending-pill">
+                    {b.pending_days}d pending
+                  </span>
+                )}
+              </div>
+              <div className="balance-value-row">
+                <span className="balance-remaining-num">{b.remaining_days}</span>
+                <span className="balance-allocated-text">/ {b.allocated_days} days</span>
+              </div>
+              <div className="balance-footer-text">
+                {Number(b.used_days) > 0 ? `${b.used_days} days used` : 'No leave taken'}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -772,6 +842,35 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                 </div>
 
                 <div className="modal-body">
+                  {/* Triggered Workflow Process */}
+                  <div className="field-group mb-3">
+                    <label className="field-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Triggered Workflow Process</span>
+                      <span style={{ fontSize: '10px', background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.3)', fontWeight: '600' }}>
+                        STUDIO BINDING
+                      </span>
+                    </label>
+                    <select
+                      className="select-input"
+                      value={selectedWorkflowKey}
+                      onChange={(e) => setSelectedWorkflowKey(e.target.value)}
+                      disabled={isSubmitting || Number(leaveTypeId) === 5}
+                      style={{ borderColor: selectedWorkflowKey === 'emp_leave_request' ? '#38bdf8' : '#818cf8' }}
+                    >
+                      <option value="emp_leave_request">
+                        ⚡ Employee Leave Request (Workflow #112 - Standard Manager Review & Notice)
+                      </option>
+                      <option value="leave_requests">
+                        ⚡ Leave Balance Tracking & Deduction (Workflow #1125 - Quota Check & Auto-Deduction)
+                      </option>
+                    </select>
+                    {Number(leaveTypeId) === 5 && (
+                      <div style={{ fontSize: '11px', color: '#38bdf8', marginTop: '4px' }}>
+                        ℹ️ Automatically routes to Work From Home Workflow (wfh_requests #1124)
+                      </div>
+                    )}
+                  </div>
+
                   {/* Leave Type */}
                   <div className="field-group mb-3">
                     <label className="field-label">Leave Type</label>

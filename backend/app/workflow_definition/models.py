@@ -21,9 +21,9 @@ class GenericWorkflow(WorkflowBase):
     entity_type = Column(String(100), nullable=True, index=True)  # Generic metadata: e.g. "Risk", "Audit", "Incident", "Purchase"
     connection_id = Column(Integer, nullable=True)  # Target Database Connection ID
     status = Column(String(20), default="DRAFT", nullable=False)   # "DRAFT", "ACTIVE", "ARCHIVED"
-    created_by = Column(Integer, nullable=True)
+    created_by = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
-    updated_by = Column(Integer, nullable=True)
+    updated_by = Column(Integer, default=1, nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
     # Relationships
@@ -42,7 +42,7 @@ class WorkflowVersion(WorkflowBase):
     version_number = Column(Integer, nullable=False)
     status = Column(String(20), default="DRAFT", nullable=False)  # "DRAFT", "VALIDATED", "PUBLISHED", "ARCHIVED"
     definition_metadata = Column(Text, default="{}", nullable=True)  # Flexible JSON metadata
-    created_by = Column(Integer, nullable=True)
+    created_by = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     published_at = Column(DateTime, nullable=True)
 

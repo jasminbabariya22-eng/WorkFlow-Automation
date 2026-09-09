@@ -51,6 +51,7 @@ import PropertiesPanel from './PropertiesPanel'
 import DesignerHeader from './designer/DesignerHeader'
 import DesignerValidationModal from './designer/DesignerValidationModal'
 import DesignerTestRunnerModal from './designer/DesignerTestRunnerModal'
+import ClientAppBindingModal from './ClientAppBindingModal'
 import { workflowStorage } from '../services/workflowStorage'
 import {
   StartNode,
@@ -318,6 +319,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
 
   // Modals & Panels
   const [showTestModal, setShowTestModal] = useState(false)
+  const [showBindingModal, setShowBindingModal] = useState(false)
   const [validationErrors, setValidationErrors] = useState([])
   const [isValidationOpen, setIsValidationOpen] = useState(false)
 
@@ -456,10 +458,15 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     }
 
     try {
-      // 1. Database Update Node
+      // 1. Database Update / Read Node
       if (currentType === 'record' || currentType === 'dbUpdate') {
         const mappings = currentNode.data?.fieldMappings || []
         const table = currentNode.data?.table || currentNode.data?.table_name || 'leave_requests'
+        const isRead = currentNode.data?.subType === 'READ_RECORD' ||
+          String(currentNode.data?.sql || '').trim().toUpperCase().startsWith('SELECT') ||
+          String(currentNode.data?.label || '').toLowerCase().includes('read') ||
+          String(currentNode.data?.name || '').toLowerCase().includes('read')
+        const actionToSend = isRead ? 'READ' : (actionChosen || 'UPDATE')
 
         const res = await fetch('/workflow-studio/test/execute-generic-node', {
           method: 'POST',
@@ -471,7 +478,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             node_id: currentNode.id,
             node_name: nodeLabel,
             node_type: currentType,
-            action: actionChosen || 'UPDATE',
+            action: actionToSend,
+            subType: currentNode.data?.subType || (isRead ? 'READ_RECORD' : 'UPDATE_RECORD'),
+            sql: currentNode.data?.sql,
             connection_id: workflowConnectionId
           })
         })
@@ -479,15 +488,17 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         if (res.ok && data.success) {
           stepLog.sql = data.sql_executed ? data.sql_executed.join('; ') : ''
           stepLog.diff = data.diff_fields
-          stepLog.status = 'COMMITTED'
+          stepLog.status = isRead ? 'READ_SUCCESS' : 'COMMITTED'
           stepLog.duration = `${data.duration_ms}ms`
-          stepLog.message = data.message
+          stepLog.message = data.message || (isRead ? `Fetched record #${testRecordId} successfully` : `Updated record #${testRecordId}`)
           await fetchRecordState(testRecordId)
         }
       }
       // 2. Notification / Email Node
       else if (currentType === 'communication' || currentType === 'notification' || currentType === 'email') {
         const to = currentNode.data?.to || currentNode.data?.recipient || '{{employee_email}}'
+        const cc = currentNode.data?.cc || ''
+        const bcc = currentNode.data?.bcc || ''
         const subject = currentNode.data?.subject || `Notification for Record #{{workflow.entity_id}}`
         const body = currentNode.data?.body || 'Your request #{{workflow.entity_id}} has been processed successfully.'
 
@@ -500,6 +511,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             node_name: nodeLabel,
             node_type: 'communication',
             to: to,
+            cc: cc,
+            bcc: bcc,
             subject: subject,
             body: body,
             action: actionChosen || 'SEND',
@@ -548,8 +561,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         const isMatch = String(actual || '').toUpperCase() === String(expected || '').toUpperCase()
 
         nextEdge = outgoingEdges.find(e => {
-          const sh = (e.sourceHandle || '').toUpperCase()
-          const lbl = (e.label || e.data?.label || '').toUpperCase()
+          const sh = String(e?.sourceHandle || '').toUpperCase()
+          const lbl = String(e?.label || e?.data?.label || '').toUpperCase()
           if (isMatch) {
             return sh === 'TRUE' || lbl.includes('TRUE') || lbl.includes('APPROVE')
           } else {
@@ -558,10 +571,11 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         }) || outgoingEdges[0]
       } else if (actionChosen) {
         nextEdge = outgoingEdges.find(e => {
-          const sh = (e.sourceHandle || '').toUpperCase()
-          const lbl = (e.label || e.data?.label || '').toUpperCase()
-          const act = (actionChosen || '').toUpperCase()
-          return sh === act || lbl.includes(act)
+          const sh = String(e?.sourceHandle || '').toUpperCase()
+          const lbl = String(e?.label || e?.data?.label || '').toUpperCase()
+          const act = String(actionChosen || '').toUpperCase()
+          return sh === act || lbl.includes(act) ||
+            ((act === 'READ' || act === 'UPDATE' || act === 'SEND' || act === 'EXECUTE') && (sh === 'SUCCESS' || lbl.includes('SUCCESS') || sh === 'OUTPUT' || lbl.includes('NEXT')))
         }) || outgoingEdges[0]
       } else {
         nextEdge = outgoingEdges[0]
@@ -1005,14 +1019,17 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       })
 
       const newNodeId = `${item.type}-${Date.now()}`
-      const defaultLabel = item.defaultData?.label || item.name || 'Node'
+      const defaultData = item.defaultData || {}
+      const defaultLabel = defaultData.label || item.name || 'Node'
       const newNode = {
         id: newNodeId,
         type: item.type,
         position,
         selected: true,
         data: {
-          ...item.defaultData,
+          subType: item.subType || defaultData.subType || item.type,
+          ...item,
+          ...defaultData,
           label: defaultLabel,
           name: defaultLabel
         }
@@ -1038,14 +1055,17 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     const y = -viewport.y / viewport.zoom + 150
 
     const newNodeId = `${item.type}-${Date.now()}`
-    const defaultLabel = item.defaultData?.label || item.name || 'Node'
+    const defaultData = item.defaultData || {}
+    const defaultLabel = defaultData.label || item.name || 'Node'
     const newNode = {
       id: newNodeId,
       type: item.type,
       position: { x, y },
       selected: true,
       data: {
-        ...item.defaultData,
+        subType: item.subType || defaultData.subType || item.type,
+        ...item,
+        ...defaultData,
         label: defaultLabel,
         name: defaultLabel
       }
@@ -1457,6 +1477,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         handleResetCanvas={handleClearCanvas}
         handleValidateGraph={handleValidateWorkflow}
         handleOpenTestModal={() => setShowTestModal(true)}
+        handleOpenBindingModal={() => setShowBindingModal(true)}
         handleExportJSON={handleExportJSON}
         fileInputRef={fileInputRef}
         handleImportFile={handleImportJSON}
@@ -1610,6 +1631,22 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         testTxLogs={testTxLogs}
         handleGenericNodeAction={handleGenericNodeAction}
       />
+
+      {/* Declarative ClientApp Binding Modal */}
+      {showBindingModal && (
+        <ClientAppBindingModal
+          isOpen={showBindingModal}
+          workflow={{
+            id: workflowId,
+            workflow_id: workflowId,
+            spec_id: workflowName,
+            name: workflowName,
+            connection_id: workflowConnectionId
+          }}
+          onClose={() => setShowBindingModal(false)}
+          showToast={showToast}
+        />
+      )}
     </div>
   )
 }

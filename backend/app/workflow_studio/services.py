@@ -181,8 +181,8 @@ class WorkflowStudioService:
             entity_type=data.entity_type,
             connection_id=data.connection_id,
             status="DRAFT",
-            created_by=user_id,
-            updated_by=user_id,
+            created_by=user_id or 1,
+            updated_by=user_id or 1,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -194,7 +194,7 @@ class WorkflowStudioService:
             version_number=1,
             status="DRAFT",
             definition_metadata=json.dumps(data.metadata or {}),
-            created_by=user_id,
+            created_by=user_id or 1,
             created_at=datetime.now()
         )
         db.add(initial_version)
@@ -279,7 +279,7 @@ class WorkflowStudioService:
             edges_to_save = data.edges if data.edges is not None else []
             cls._save_nodes_and_edges(db, latest_version.workflow_version_id, nodes_to_save, edges_to_save)
 
-        workflow.updated_by = user_id
+        workflow.updated_by = user_id or 1
         workflow.updated_at = datetime.now()
 
         db.commit()

@@ -185,14 +185,17 @@ export default function DesignerTestRunnerModal({
                     {/* Dynamic Action Buttons */}
                     <div className="flex items-center gap-2 flex-wrap">
                       {nodeType === 'userTask' || nodeType === 'approval' ? (
-                        nodeActions.map((act) => {
-                          const actName = typeof act === 'string' ? act : (act.label || act.id)
+                        (Array.isArray(nodeActions) ? nodeActions : ['APPROVE', 'REJECT']).map((act, actIdx) => {
+                          const rawName = typeof act === 'string'
+                            ? act
+                            : (act?.label || act?.name || act?.id || act?.action_code || act?.action || `Action ${actIdx + 1}`)
+                          const actName = String(rawName || 'Action')
                           const isApprove = actName.toUpperCase().includes('APPROVE')
                           const isReject = actName.toUpperCase().includes('REJECT')
 
                           return (
                             <button
-                              key={actName}
+                              key={`${actName}_${actIdx}`}
                               className={isApprove ? 'wf-btn-test-approve' : isReject ? 'wf-btn-test-reject' : 'wf-btn wf-btn-primary'}
                               disabled={testLoading}
                               onClick={() => handleGenericNodeAction(activeNode, actName.toUpperCase())}
@@ -212,15 +215,23 @@ export default function DesignerTestRunnerModal({
                           <span>Evaluate Condition & Advance Branch</span>
                         </button>
                       ) : nodeType === 'record' || nodeType === 'dbUpdate' ? (
-                        <button
-                          className="wf-btn wf-btn-primary"
-                          style={{ background: '#2563eb', borderColor: '#3b82f6' }}
-                          disabled={testLoading}
-                          onClick={() => handleGenericNodeAction(activeNode, 'UPDATE')}
-                        >
-                          <Database size={13} />
-                          <span>Execute DB Update & Advance</span>
-                        </button>
+                        (() => {
+                          const isRead = activeNode?.data?.subType === 'READ_RECORD' ||
+                            String(activeNode?.data?.sql || '').trim().toUpperCase().startsWith('SELECT') ||
+                            String(activeNode?.data?.label || '').toLowerCase().includes('read') ||
+                            String(activeNode?.data?.name || '').toLowerCase().includes('read')
+                          return (
+                            <button
+                              className="wf-btn wf-btn-primary"
+                              style={{ background: isRead ? '#059669' : '#2563eb', borderColor: isRead ? '#10b981' : '#3b82f6' }}
+                              disabled={testLoading}
+                              onClick={() => handleGenericNodeAction(activeNode, isRead ? 'READ' : 'UPDATE')}
+                            >
+                              <Database size={13} />
+                              <span>{isRead ? 'Execute DB Read & Advance' : 'Execute DB Update & Advance'}</span>
+                            </button>
+                          )
+                        })()
                       ) : nodeType === 'communication' || nodeType === 'notification' ? (
                         <button
                           className="wf-btn wf-btn-primary"

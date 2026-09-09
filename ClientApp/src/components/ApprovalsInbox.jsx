@@ -107,7 +107,7 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
                   </div>
                   <div className="text-xs text-muted flex items-center gap-1">
                     <Clock size={12} />
-                    <span>{t.created_on ? new Date(t.created_on).toLocaleString() : 'Just now'}</span>
+                    <span>{t.created_on ? new Date(t.created_on).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : 'Just now'}</span>
                   </div>
                 </div>
 

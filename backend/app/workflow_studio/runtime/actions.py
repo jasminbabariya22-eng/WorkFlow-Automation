@@ -246,6 +246,14 @@ def _db_read_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Di
             "operator": "=",
             "value": config.get("recordId")
         }]
+    elif not filters:
+        entity_val = context_vars.get("entity_id") or context_vars.get("record_id") or "{{entity_id}}"
+        target_pk = config.get("primary_key") or ("leave_request_id" if "leave" in str(table_name).lower() else "id")
+        filters = [{
+            "field": target_pk,
+            "operator": "=",
+            "value": str(entity_val)
+        }]
 
     result_mapping = config.get("resultMapping") or config.get("result_mapping") or config.get("fieldMappings")
     if isinstance(result_mapping, list):
@@ -289,7 +297,7 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
     """
     from app.core.database import ClientDatabaseAdapter
 
-    table_name = config.get("table") or config.get("entity") or config.get("table_name")
+    table_name = config.get("table") or config.get("entity") or config.get("table_name") or config.get("tableName")
     if not table_name:
         raise ValueError("Database UPDATE action requires 'table' or 'entity' to be configured.")
 
@@ -297,9 +305,14 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
         config.get("updates") or 
         config.get("values") or 
         config.get("fields") or 
+        config.get("fieldsToUpdate") or
         config.get("fieldMappings") or 
         config.get("field_mappings")
     )
+    if not updates and config.get("statusValue"):
+        status_col = config.get("statusColumn") or "status"
+        updates = {status_col: config["statusValue"]}
+
     if isinstance(updates, list):
         update_dict = {}
         for item in updates:
@@ -308,11 +321,13 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
         updates = update_dict
 
     filters = config.get("filters") or []
+    entity_val = str(context_vars.get("entity_id") or context_vars.get("entityId") or "{{entity_id}}")
+
     if not filters and config.get("filterField"):
         filters = [{
             "field": config.get("filterField"),
             "operator": config.get("filterOperator", "="),
-            "value": config.get("filterValue", "{{entity.id}}")
+            "value": config.get("filterValue", entity_val)
         }]
     elif not filters and (config.get("recordId") or config.get("record_id")):
         filters = [{
@@ -321,15 +336,16 @@ def _db_update_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
             "value": config.get("recordId") or config.get("record_id")
         }]
     elif not filters:
+        target_pk = config.get("primary_key") or ("leave_request_id" if "leave" in str(table_name).lower() else "id")
         filters = [{
-            "field": "id",
+            "field": target_pk,
             "operator": "=",
-            "value": "{{entity.id}}"
+            "value": entity_val
         }]
 
     allow_full = bool(config.get("allowFullTableUpdate") or config.get("allow_full_table_update"))
     result_mapping = config.get("resultMapping") or config.get("result_mapping")
-    conn_id = config.get("connection_id") or context_vars.get("connection_id")
+    conn_id = config.get("connection_id") or config.get("connectionId") or context_vars.get("connection_id")
 
     mapped_data = ClientDatabaseAdapter.update_entity_record_generic(
         table_name=table_name,
@@ -355,7 +371,13 @@ def _db_create_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
     if not table_name:
         raise ValueError("Database CREATE action requires 'table' or 'entity' to be configured.")
 
-    values = config.get("values") or config.get("fields") or config.get("data")
+    values = (
+        config.get("values") or 
+        config.get("fields") or 
+        config.get("fieldMappings") or 
+        config.get("fieldsToInsert") or
+        config.get("data")
+    )
     if isinstance(values, list):
         val_dict = {}
         for item in values:
@@ -365,14 +387,20 @@ def _db_create_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> 
 
     result_mapping = config.get("resultMapping") or config.get("result_mapping")
     conn_id = config.get("connection_id") or context_vars.get("connection_id")
+    conflict_res = config.get("conflictResolution") or config.get("conflict_resolution")
 
     mapped_data = ClientDatabaseAdapter.create_entity_record_generic(
         table_name=table_name,
         values=values,
         variables=context_vars,
         result_mapping=result_mapping,
-        connection_id=conn_id
+        connection_id=conn_id,
+        conflict_resolution=conflict_res
     )
+
+    out_var = config.get("outputVariable")
+    if out_var:
+        context_vars[out_var] = mapped_data.get("created_id") or mapped_data.get("id")
 
     context_vars.update(mapped_data)
     return {"status": "SUCCESS", "data": mapped_data}
@@ -382,11 +410,14 @@ ActionRegistry.register("DB_UPDATE", _db_update_handler)
 ActionRegistry.register("DATABASE_UPDATE", _db_update_handler)
 ActionRegistry.register("UPDATE_RECORD", _db_update_handler)
 ActionRegistry.register("RECORD_UPDATE", _db_update_handler)
+ActionRegistry.register("UPDATE", _db_update_handler)
 
 ActionRegistry.register("DB_CREATE", _db_create_handler)
 ActionRegistry.register("DATABASE_CREATE", _db_create_handler)
 ActionRegistry.register("CREATE_RECORD", _db_create_handler)
 ActionRegistry.register("RECORD_CREATE", _db_create_handler)
+ActionRegistry.register("CREATE", _db_create_handler)
+ActionRegistry.register("INSERT", _db_create_handler)
 
 
 def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Dict[str, Any]:
@@ -401,40 +432,87 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 
     entity_id = context_vars.get("entity_id") or context_vars.get("record_id") or context_vars.get("id")
-    conn_id = config.get("connection_id") or context_vars.get("connection_id")
+    conn_id = config.get("connection_id") or context_vars.get("connection_id") or context_vars.get("_workflow_connection_id") or context_vars.get("workflow_connection_id")
     now_dt = datetime.datetime.now()
     user_id = context_vars.get("user_id", 1)
 
-    # 1. Resolve Recipient Email Dynamically
-    raw_to = str(config.get("to") or config.get("recipient") or "").strip()
-    to_email = None
+    # 1. Resolve Recipient Email List (Supports direct emails, role:RoleName, user:UserName, variables)
+    def _resolve_recipient_list(raw_input: Any) -> Optional[str]:
+        if not raw_input:
+            return None
+        raw_str = str(raw_input).strip()
+        if not raw_str:
+            return None
 
-    if raw_to.startswith("role:"):
-        role_target = raw_to.replace("role:", "").strip()
-        users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
-        role_emails = [u["email"] for u in users if u.get("email") and (str(u.get("role_id")) == role_target or u.get("name") == role_target)]
-        if role_emails:
-            to_email = ", ".join(role_emails)
-        else:
-            to_email = f"{role_target.lower()}s@company.com"
-    elif raw_to.startswith("user:"):
-        user_target = raw_to.replace("user:", "").strip()
-        users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
-        matched_user = next((u for u in users if u.get("name") == user_target or str(u.get("id")) == user_target), None)
-        if matched_user and matched_user.get("email"):
-            to_email = matched_user["email"]
-        else:
-            to_email = f"{user_target.lower()}@company.com"
-    elif "{{" in raw_to:
-        to_email = ClientDatabaseAdapter._resolve_template_value(raw_to, context_vars)
-    elif "@" in raw_to:
-        to_email = raw_to
+        parts = [p.strip() for p in raw_str.split(",") if p.strip()]
+        resolved_emails = []
 
-    # Fallback resolution from context variables
+        for p in parts:
+            if p.startswith("role:"):
+                role_target = p.replace("role:", "").strip()
+                try:
+                    # 1. Query all users assigned to this role in the connected DB (via mapping table or role col)
+                    role_users = ClientDatabaseAdapter.get_users_by_role(role_target, connection_id=conn_id)
+                    matched_emails = [u["email"] for u in role_users if u.get("email")]
+
+                    # 2. Fallback: check get_users()
+                    if not matched_emails:
+                        users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
+                        matched_emails = [
+                            u["email"] for u in users
+                            if u.get("email") and (
+                                str(u.get("role_id", "")).lower() == role_target.lower() or
+                                str(u.get("role_name", "")).lower() == role_target.lower() or
+                                any(str(r).lower() == role_target.lower() for r in u.get("roles", [])) or
+                                str(u.get("name", "")).lower() == role_target.lower()
+                            )
+                        ]
+
+                    if matched_emails:
+                        resolved_emails.extend(matched_emails)
+                    else:
+                        logger.warning(f"ActionRegistry SEND_EMAIL: No users found assigned to role '{role_target}' (connection_id={conn_id})")
+                except Exception as ex:
+                    logger.error(f"ActionRegistry SEND_EMAIL: Error resolving role '{role_target}': {ex}")
+
+            elif p.startswith("user:"):
+                user_target = p.replace("user:", "").strip()
+                try:
+                    users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
+                    matched_user = next(
+                        (u for u in users if str(u.get("name", "")).lower() == user_target.lower() or str(u.get("id")) == user_target),
+                        None
+                    )
+                    if matched_user and matched_user.get("email"):
+                        resolved_emails.append(matched_user["email"])
+                    else:
+                        logger.warning(f"ActionRegistry SEND_EMAIL: No user found for user target '{user_target}' (connection_id={conn_id})")
+                except Exception as ex:
+                    logger.error(f"ActionRegistry SEND_EMAIL: Error resolving user '{user_target}': {ex}")
+            elif "{{" in p:
+                interpolated = ClientDatabaseAdapter._resolve_template_value(p, context_vars)
+                if interpolated:
+                    resolved_emails.append(str(interpolated))
+            elif "@" in p:
+                resolved_emails.append(p)
+            else:
+                resolved_emails.append(p)
+
+        if not resolved_emails:
+            return None
+
+        deduped = []
+        for e in resolved_emails:
+            if e not in deduped:
+                deduped.append(e)
+        return ", ".join(deduped)
+
+    to_email = _resolve_recipient_list(config.get("to") or config.get("recipient"))
     if not to_email:
         to_email = context_vars.get("employee_email") or context_vars.get("email") or context_vars.get("user_email") or "applicant@company.com"
 
-    to_email = str(to_email)
+    cc_email = _resolve_recipient_list(config.get("cc") or config.get("email_cc"))
+    bcc_email = _resolve_recipient_list(config.get("bcc") or config.get("email_bcc"))
 
     # 2. Resolve Subject & Body with Variable Interpolation
     display_id = f"#{entity_id}" if entity_id else ""
@@ -444,39 +522,11 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     raw_body = config.get("body") or f"Your request {display_id} has been processed successfully."
     body_text = str(ClientDatabaseAdapter._resolve_template_value(raw_body, context_vars) or raw_body)
 
-    recipient_name = context_vars.get("employee_name") or context_vars.get("user_name") or "Colleague"
-
-    html_body = f"""
-    <html>
-    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color:#0f172a; color:#f8fafc; padding:24px;">
-        <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-                <td align="center">
-                    <table width="600px" style="background:#1e293b; border-radius:12px; padding:24px; border:1px solid #334155; color:#f8fafc;">
-                        <tr>
-                            <td style="background:linear-gradient(135deg, #6366f1, #4f46e5); color:white; padding:16px 20px; border-radius:8px;">
-                                <h2 style="margin:0; font-size:18px; font-weight:600;">{subject}</h2>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding:24px 8px; color:#e2e8f0; line-height: 1.6; font-size:14px;">
-                                <p style="margin-top:0;">Dear <b>{recipient_name}</b>,</p>
-                                <p style="white-space: pre-line;">{body_text}</p>
-                                <p style="margin-bottom:0; color:#94a3b8;">Best regards,<br><b style="color:#f8fafc;">Enterprise Workflow Platform</b></p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding:12px 8px; font-size:11px; color:#64748b; border-top:1px solid #334155; text-align:center;">
-                                Automated notification dispatched by Enterprise Workflow Platform.
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-    </body>
-    </html>
-    """
+    clean_body = body_text.strip()
+    if clean_body.startswith("<html") or clean_body.startswith("<div") or clean_body.startswith("<p"):
+        html_body = clean_body
+    else:
+        html_body = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b; white-space: pre-wrap;">{body_text}</div>"""
 
     # 3. Attempt insert into client email queue if table exists
     email_job_id = None
@@ -489,17 +539,19 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                     res = conn.execute(
                         text(f"""
                             INSERT INTO {mail_tbl} (
-                                email_server_id, email_module, email_to, email_subject, email_type,
+                                email_server_id, email_module, email_to, email_cc, email_bcc, email_subject, email_type,
                                 email_body, send_status, total_attempts, send_attempts, attempt_delay,
                                 next_attempt_at, created_on, created_by, is_deleted
                             ) VALUES (
-                                1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
+                                1, 'WORKFLOW', :email_to, :email_cc, :email_bcc, :email_subject, 'HTML',
                                 :email_body, 'New', 3, 0, 5000,
                                 :now_dt, :now_dt, :user_id, 0
                             ) RETURNING email_job_id
                         """),
                         {
                             "email_to": to_email,
+                            "email_cc": cc_email,
+                            "email_bcc": bcc_email,
                             "email_subject": subject,
                             "email_body": html_body,
                             "now_dt": now_dt,
@@ -511,7 +563,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                         break
                 except Exception:
                     try:
-                        # Fallback for tables with 'id' PK
+                        # Fallback for tables without CC/BCC or with 'id' PK
                         res = conn.execute(
                             text(f"""
                                 INSERT INTO {mail_tbl} (
@@ -522,7 +574,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                                     1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
                                     :email_body, 'New', 3, 0, 5000,
                                     :now_dt, :now_dt, :user_id, 0
-                                ) RETURNING id
+                                ) RETURNING email_job_id
                             """),
                             {
                                 "email_to": to_email,
@@ -541,10 +593,17 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         pass
 
     context_vars["email_to"] = to_email
+    if cc_email:
+        context_vars["email_cc"] = cc_email
+    if bcc_email:
+        context_vars["email_bcc"] = bcc_email
+
     return {
         "status": "SUCCESS",
         "email_job_id": email_job_id,
         "email_to": to_email,
+        "email_cc": cc_email,
+        "email_bcc": bcc_email,
         "email_subject": subject,
         "send_status": "New"
     }
@@ -567,6 +626,30 @@ ActionRegistry.register("DB_CREATE", _db_create_handler)
 ActionRegistry.register("DATABASE_CREATE", _db_create_handler)
 ActionRegistry.register("CREATE_RECORD", _db_create_handler)
 ActionRegistry.register("INSERT_RECORD", _db_create_handler)
+
+
+def _raw_sql_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Dict[str, Any]:
+    from sqlalchemy import text
+    from app.core.database import DynamicEnginePool
+
+    sql = config.get("sql") or config.get("query") or config.get("statement")
+    if not sql:
+        raise ValueError("EXECUTE_SQL action requires 'sql' or 'query' parameter.")
+
+    conn_id = config.get("connection_id") or context_vars.get("connection_id")
+    eng = DynamicEnginePool.get_engine(conn_id)
+
+    with eng.begin() as conn:
+        res = conn.execute(text(sql), context_vars)
+        affected = res.rowcount if res.rowcount is not None else 0
+
+    return {"status": "SUCCESS", "affectedRows": affected}
+
+
+ActionRegistry.register("SQL", _raw_sql_handler)
+ActionRegistry.register("RAW_SQL", _raw_sql_handler)
+ActionRegistry.register("EXECUTE_SQL", _raw_sql_handler)
+
 
 
 

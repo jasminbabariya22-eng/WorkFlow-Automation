@@ -25,6 +25,7 @@ def list_instances(
     Lists workflow execution instances, with status and entity filters.
     """
     try:
+        from sqlalchemy import text
         query = db.query(SpiffWorkflowInstance)
         if status:
             query = query.filter(SpiffWorkflowInstance.status == status)
@@ -33,13 +34,37 @@ def list_instances(
             
         instances = query.order_by(SpiffWorkflowInstance.started_on.desc()).all()
         
+        # Build lookup for workflow names
+        wf_map = {}
+        try:
+            ver_rows = db.execute(text('''
+                SELECT v.workflow_version_id, w.name, w.workflow_key 
+                FROM workflow.wf_version v 
+                JOIN workflow.wf_definition w ON v.workflow_id = w.workflow_id
+            ''')).fetchall()
+            for r in ver_rows:
+                wf_map[r[0]] = (r[1], r[2])
+        except Exception:
+            pass
+
+        try:
+            bpmn_rows = db.execute(text('SELECT id, name, spec_id FROM workflow.bpmn_definition')).fetchall()
+            for r in bpmn_rows:
+                if r[0] not in wf_map:
+                    wf_map[r[0]] = (r[1] or r[2], r[2])
+        except Exception:
+            pass
+
         result = []
         for inst in instances:
+            wf_info = wf_map.get(inst.bpmn_definition_id) or (None, None)
             result.append({
                 "instance_id": inst.instance_id,
                 "entity_type": inst.entity_type,
                 "entity_id": inst.entity_id,
                 "bpmn_definition_id": inst.bpmn_definition_id,
+                "workflow_name": wf_info[0] or f"Workflow #{inst.bpmn_definition_id}",
+                "workflow_key": wf_info[1] or "",
                 "status": inst.status,
                 "current_task_code": inst.current_task_code,
                 "started_on": inst.started_on,
@@ -59,15 +84,37 @@ def get_instance_details(
     current_user: dict = Depends(get_current_user)
 ):
     try:
+        from sqlalchemy import text
         inst = db.query(SpiffWorkflowInstance).filter(SpiffWorkflowInstance.instance_id == id).first()
         if not inst:
             raise HTTPException(status_code=404, detail="Instance not found")
             
+        wf_name = None
+        wf_key = None
+        if inst.bpmn_definition_id:
+            try:
+                row = db.execute(text('''
+                    SELECT w.name, w.workflow_key 
+                    FROM workflow.wf_version v 
+                    JOIN workflow.wf_definition w ON v.workflow_id = w.workflow_id 
+                    WHERE v.workflow_version_id = :vid
+                '''), {'vid': inst.bpmn_definition_id}).first()
+                if row:
+                    wf_name, wf_key = row[0], row[1]
+                else:
+                    b_row = db.execute(text('SELECT name, spec_id FROM workflow.bpmn_definition WHERE id = :bid'), {'bid': inst.bpmn_definition_id}).first()
+                    if b_row:
+                        wf_name, wf_key = b_row[0] or b_row[1], b_row[1]
+            except Exception:
+                pass
+
         return success_response(data={
             "instance_id": inst.instance_id,
             "entity_type": inst.entity_type,
             "entity_id": inst.entity_id,
             "bpmn_definition_id": inst.bpmn_definition_id,
+            "workflow_name": wf_name or f"Workflow #{inst.bpmn_definition_id}",
+            "workflow_key": wf_key or "",
             "status": inst.status,
             "current_task_code": inst.current_task_code,
             "started_on": inst.started_on,

@@ -24,12 +24,12 @@ class WorkflowModuleBinding(WorkflowBase):
     module_key = Column(String(100), unique=True, nullable=False, index=True)
     title = Column(String(255), nullable=False)
     workflow_id = Column(Integer, nullable=False)
-    connection_id = Column(Integer, nullable=False, default=4)
+    connection_id = Column(Integer, nullable=True)
     table_name = Column(String(100), nullable=False)
     primary_key = Column(String(100), nullable=False, default="id")
     status_column = Column(String(100), nullable=False, default="status")
     default_status = Column(String(50), nullable=False, default="PENDING")
-    approval_roles = Column(JSONB, default=["MANAGER", "HR"])
+    approval_roles = Column(JSONB, default=list)
     fields = Column(JSONB, default=[])
     form_schema = Column(JSONB, default={})
     is_active = Column(Boolean, default=True)
@@ -56,38 +56,8 @@ class WorkflowModuleBinding(WorkflowBase):
         }
 
 
-# In-memory defaults as instant fallback
-FALLBACK_BINDINGS: Dict[str, Dict[str, Any]] = {
-    "leave_requests": {
-        "module_key": "leave_requests",
-        "title": "Employee Leave Management",
-        "workflow_id": 112,
-        "connection_id": 4,
-        "table_name": "leave_requests",
-        "primary_key": "leave_request_id",
-        "status_column": "status",
-        "default_status": "PENDING",
-        "approval_roles": ["MANAGER", "FUNCTION_HEAD", "APPROVER", "HR"],
-        "fields": [
-            {"name": "employee_id", "type": "int", "required": True},
-            {"name": "leave_type_id", "type": "int", "required": True},
-            {"name": "start_date", "type": "str", "required": True},
-            {"name": "end_date", "type": "str", "required": True},
-            {"name": "reason", "type": "str", "required": False}
-        ]
-    },
-    "leave_cancellation": {
-        "module_key": "leave_cancellation",
-        "title": "Leave Cancellation Request",
-        "workflow_id": 1122,
-        "connection_id": 4,
-        "table_name": "leave_requests",
-        "primary_key": "leave_request_id",
-        "status_column": "status",
-        "default_status": "PENDING_CANCELLATION",
-        "approval_roles": ["MANAGER", "FUNCTION_HEAD", "APPROVER", "HR"]
-    }
-}
+# In-memory defaults as fallback (empty by default; all bindings are database-driven)
+FALLBACK_BINDINGS: Dict[str, Dict[str, Any]] = {}
 
 
 def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
@@ -168,12 +138,12 @@ def upsert_binding(data: Dict[str, Any], db: Optional[Session] = None) -> Dict[s
                 module_key=module_key,
                 title=data.get("title", module_key.replace("_", " ").title()),
                 workflow_id=int(data["workflow_id"]),
-                connection_id=int(data.get("connection_id", 4)),
+                connection_id=int(data["connection_id"]) if data.get("connection_id") else None,
                 table_name=data["table_name"],
                 primary_key=data.get("primary_key", "id"),
                 status_column=data.get("status_column", "status"),
                 default_status=data.get("default_status", "PENDING"),
-                approval_roles=data.get("approval_roles", ["MANAGER", "HR"]),
+                approval_roles=data.get("approval_roles") or [],
                 fields=data.get("fields", []),
                 form_schema=data.get("form_schema", {}),
                 is_active=data.get("is_active", True)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Navbar from './components/Navbar'
 import LeaveModule from './components/LeaveModule'
 import ExpenseModule from './components/ExpenseModule'
@@ -9,6 +9,7 @@ import ApprovalsInbox from './components/ApprovalsInbox'
 import ServerConfigModal from './components/ServerConfigModal'
 import { clientDb } from './services/clientDb'
 import { workflowClient } from './services/workflowClient'
+import { workflowSocket } from './services/workflowSocket'
 
 export default function App() {
   const users = clientDb.getUsers()
@@ -17,8 +18,20 @@ export default function App() {
   const [isServerModalOpen, setIsServerModalOpen] = useState(false)
   const [, setTick] = useState(0)
 
-  // Force re-render on database changes
+  // Force re-render on database / workflow changes
   const triggerRefresh = () => setTick(t => t + 1)
+
+  // Real-time WebSocket connection: updates approvals & data automatically
+  useEffect(() => {
+    const unsubscribe = workflowSocket.connect({
+      userId: currentUser?.id,
+      onEvent: (event) => {
+        console.log('⚡ [Workflow WebSocket] Live event:', event)
+        triggerRefresh()
+      }
+    })
+    return () => unsubscribe()
+  }, [currentUser])
 
   const pendingApprovals = clientDb.getPendingApprovalsForUser(currentUser)
 

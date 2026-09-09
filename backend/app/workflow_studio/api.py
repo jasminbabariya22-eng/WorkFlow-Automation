@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.workflow.database import get_workflow_db
 from app.core.dependencies import get_current_user
+from app.core.logger import logger, WorkflowTelemetryLogger
 from app.workflow_studio.schemas import (
     StudioWorkflowCreate,
     StudioWorkflowUpdate,
@@ -439,12 +440,12 @@ def get_test_record_state(
 
     # Auto-discover table if not specified or placeholder
     clean_table = table_name or ""
-    if str(clean_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+    if str(clean_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
         tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=connection_id)
         if tables:
             clean_table = tables[0].get("table_name") or tables[0].get("name")
         else:
-            clean_table = "leave_requests"
+            return {"columns": [], "primary_keys": [], "table_name": clean_table}
 
     if "." in clean_table:
         parts = clean_table.split(".", 1)
@@ -563,9 +564,12 @@ def reset_test_record(payload: Dict[str, Any]):
     target_schema = ClientDatabaseAdapter._resolve_target_schema(payload.get("schema"), conn_id)
 
     raw_table = payload.get("table_name") or payload.get("table") or ""
-    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
         tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=conn_id)
-        raw_table = tables[0].get("table_name") or "leave_requests" if tables else "leave_requests"
+        if tables:
+            raw_table = tables[0].get("table_name") or tables[0].get("name")
+        else:
+            raise HTTPException(status_code=400, detail="No target table specified.")
 
     clean_table = raw_table
     if "." in raw_table:
@@ -626,7 +630,8 @@ def reset_test_record(payload: Dict[str, Any]):
 @catalog_router.post("/test/execute-generic-node")
 def execute_generic_test_node(
     payload: Dict[str, Any],
-    db: Session = Depends(get_workflow_db)
+    db: Session = Depends(get_workflow_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     100% Generic test execution endpoint: Executes node actions dynamically against the bound Client Database.
@@ -650,9 +655,12 @@ def execute_generic_test_node(
     node_type = (payload.get("node_type") or "record").lower()
     
     raw_table = payload.get("table_name") or payload.get("table") or ""
-    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table", "ers.risk_register"):
+    if str(raw_table).strip().lower() in ("", "undefined", "null", "none", "target table"):
         tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=conn_id)
-        raw_table = tables[0].get("table_name") or "leave_requests" if tables else "leave_requests"
+        if tables:
+            raw_table = tables[0].get("table_name") or tables[0].get("name")
+        else:
+            raise HTTPException(status_code=400, detail="table_name is required")
 
     clean_table = raw_table
     if "." in raw_table:
@@ -662,8 +670,8 @@ def execute_generic_test_node(
 
     field_mappings = payload.get("field_mappings") or payload.get("fieldMappings") or []
     action = str(payload.get("action", "EXECUTE")).upper()
-    user_id = payload.get("user_id", 1)
-    user_role = payload.get("user_role", "SYSTEM")
+    user_id = payload.get("user_id") or (current_user.get("id") if isinstance(current_user, dict) else None) or 1
+    user_role = payload.get("user_role") or (current_user.get("role_code") if isinstance(current_user, dict) else None) or (current_user.get("user_type_name") if isinstance(current_user, dict) else None) or "SYSTEM"
 
     start_time = time.time()
     now_dt = datetime.datetime.now()
@@ -699,48 +707,102 @@ def execute_generic_test_node(
                         to_email = record_info.get(c)
                         break
             if not to_email:
-                to_email = "employee@company.com"
+                to_email = payload.get("fallback_email") or (current_user.get("email") if isinstance(current_user, dict) else None) or "noreply@company.local"
 
             subject = payload.get("subject") or f"Notification for Record #{record_id}"
             body_text = payload.get("body") or "Your workflow request has been processed."
 
-            email_job_info = {
-                "email_to": str(to_email),
-                "email_subject": subject,
-                "send_status": "New",
-                "created_on": now_dt.isoformat()
+            # Real dispatch via ActionRegistry so email is inserted into mst_email_job
+            from app.workflow_studio.runtime.actions import ActionRegistry
+            email_ctx = {
+                **record_info,
+                "entity_id": int(record_id),
+                "record_id": int(record_id),
+                "user_id": user_id,
+                "connection_id": conn_id
             }
+            email_cfg = {
+                "to": to_email,
+                "cc": payload.get("cc"),
+                "bcc": payload.get("bcc"),
+                "subject": subject,
+                "body": body_text,
+                "connection_id": conn_id
+            }
+            try:
+                email_res = ActionRegistry.execute("SEND_EMAIL", email_cfg, email_ctx)
+                email_job_info = {
+                    "email_job_id": email_res.get("email_job_id"),
+                    "email_to": email_res.get("email_to") or str(to_email),
+                    "email_cc": email_res.get("email_cc"),
+                    "email_bcc": email_res.get("email_bcc"),
+                    "email_subject": email_res.get("email_subject") or subject,
+                    "send_status": email_res.get("send_status") or "New",
+                    "created_on": now_dt.isoformat()
+                }
+            except Exception as mail_err:
+                logger.warning(f"execute_generic_test_node: Email dispatch warning: {mail_err}")
+                email_job_info = {
+                    "email_to": str(to_email),
+                    "email_subject": subject,
+                    "send_status": "Simulated",
+                    "created_on": now_dt.isoformat(),
+                    "warning": str(mail_err)
+                }
 
-        # 2. DB UPDATE / RECORD
+        # 2. DB UPDATE / RECORD / READ
         elif node_type in ("record", "dbupdate", "db_update", "action"):
-            for mapping in field_mappings:
-                f_name = mapping.get("field")
-                f_val = mapping.get("value")
-                if f_name:
-                    updates[f_name] = f_val
+            sub_type = str(payload.get("subType") or payload.get("sub_type") or "").upper()
+            action_upper = str(action).upper()
+            sql_prop = str(payload.get("sql") or "").strip().upper()
+            is_read = (
+                action_upper in ("READ", "SELECT") or 
+                sub_type in ("READ_RECORD", "DATABASE_READ", "DB_LOOKUP") or 
+                sql_prop.startswith("SELECT") or
+                ("read" in node_name.lower())
+            )
 
-            if not updates:
-                # Default status advance
-                for candidate in ["status", "state", "approval_status"]:
-                    if candidate in col_names:
-                        updates[candidate] = "APPROVED" if action == "APPROVE" else "REJECTED" if action == "REJECT" else action
-                        break
+            if is_read and not field_mappings:
+                # Execute DB Read without crashing on non-existent status
+                with eng.connect() as conn:
+                    r_row = conn.execute(
+                        text(f"SELECT * FROM {full_table} WHERE {primary_key} = :pk_val"),
+                        {"pk_val": int(record_id)}
+                    ).mappings().first()
+                    diff_fields = dict(r_row) if r_row else {}
+                sql_statements.append(f"SELECT * FROM {full_table} WHERE {primary_key} = {record_id}")
+            else:
+                for mapping in field_mappings:
+                    f_name = mapping.get("field")
+                    f_val = mapping.get("value")
+                    if f_name:
+                        updates[f_name] = f_val
 
-            if updates:
-                set_clauses = []
-                bind_params = {"pk_val": int(record_id)}
-                for k, v in updates.items():
-                    param_key = f"val_{k}"
-                    set_clauses.append(f"{k} = :{param_key}")
-                    bind_params[param_key] = v
+                if not updates:
+                    # Default status advance ONLY if column type allows it
+                    for candidate in ["status", "state", "approval_status"]:
+                        if candidate in col_names:
+                            col_def = next((c for c in columns_info if c.get("name") == candidate), None)
+                            col_type = str(col_def.get("data_type", "") if col_def else "").lower()
+                            if "int" not in col_type and "num" not in col_type:
+                                updates[candidate] = "APPROVED" if action == "APPROVE" else "REJECTED" if action == "REJECT" else action
+                            break
 
-                sql_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key} = :pk_val"
-                sql_statements.append(sql_str)
+                if updates:
+                    set_clauses = []
+                    bind_params = {"pk_val": int(record_id)}
+                    for k, v in updates.items():
+                        param_key = f"val_{k}"
+                        set_clauses.append(f"{k} = :{param_key}")
+                        bind_params[param_key] = v
 
-                with eng.begin() as conn:
-                    conn.execute(text(sql_str), bind_params)
+                    sql_str = f"UPDATE {full_table} SET {', '.join(set_clauses)} WHERE {primary_key} = :pk_val"
+                    sql_statements.append(sql_str)
 
-                diff_fields = {k: {"new": v} for k, v in updates.items()}
+                    with eng.begin() as conn:
+                        conn.execute(text(sql_str), bind_params)
+
+                    diff_fields = {k: {"new": v} for k, v in updates.items()}
 
         elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
@@ -761,9 +823,151 @@ def execute_generic_test_node(
         raise HTTPException(status_code=500, detail=f"Node execution failed: {str(e)}")
 
 
+@catalog_router.post("/test/execute-sql")
+def execute_test_sql(payload: Dict[str, Any]):
+    """
+    Directly executes an arbitrary or visual SQL statement against the connected Client Database for testing.
+    Safely serializes results, extracts returned columns/rows, and calculates execution latency.
+    """
+    import time
+    import re
+    import datetime
+    from decimal import Decimal
+    from sqlalchemy import text
+    from app.core.database import DynamicEnginePool
+
+    raw_sql = str(payload.get("sql") or "").strip()
+    if not raw_sql:
+        raise HTTPException(status_code=400, detail="SQL statement cannot be empty")
+
+    conn_id = payload.get("connection_id")
+    eng = DynamicEnginePool.get_engine(conn_id)
+
+    # 1. Clean up parameters: convert double-bracket {{var}} to :var
+    cleaned_sql = re.sub(r'\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}', r':\1', raw_sql)
+    exec_sql = cleaned_sql.rstrip(";").strip()
+
+    raw_params = payload.get("params") or {}
+    found_params = re.findall(r':([a-zA-Z0-9_]+)', exec_sql)
+    exec_params = {}
+    today_str = datetime.date.today().isoformat()
+    future_date_str = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+
+    # Pre-lookup valid foreign key IDs from client database if available
+    valid_user_id = 1
+    valid_lt_id = 1
+    try:
+        with eng.connect() as check_conn:
+            u_row = check_conn.execute(text("SELECT user_id FROM users WHERE is_active = true OR is_active IS NULL LIMIT 1")).scalar()
+            if u_row:
+                valid_user_id = u_row
+            lt_row = check_conn.execute(text("SELECT leave_type_id FROM leave_types LIMIT 1")).scalar()
+            if lt_row:
+                valid_lt_id = lt_row
+    except Exception:
+        pass
+
+    for p in found_params:
+        if p in raw_params and raw_params[p] not in (None, ""):
+            exec_params[p] = raw_params[p]
+        elif p in ("user_id", "employee_id", "created_by", "manager_id"):
+            exec_params[p] = valid_user_id
+        elif p in ("leave_type_id", "type_id"):
+            exec_params[p] = valid_lt_id
+        elif p in ("entity_id", "id", "record_id"):
+            exec_params[p] = valid_user_id
+        elif p in ("days", "quantity", "amount", "count"):
+            exec_params[p] = 3
+        elif p in ("start_date", "from_date", "date"):
+            exec_params[p] = today_str
+        elif p in ("end_date", "to_date", "due_date"):
+            exec_params[p] = future_date_str
+        elif p == "status":
+            exec_params[p] = "PENDING"
+        elif p in ("reason", "description", "note", "title", "subject", "message"):
+            exec_params[p] = "Automated Test Value"
+        elif p in ("leave_type_code", "code", "type"):
+            exec_params[p] = "VACATION"
+        else:
+            exec_params[p] = raw_params.get(p, "test")
+
+    def _json_serial(obj):
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        if isinstance(obj, bytes):
+            return obj.decode('utf-8', errors='ignore')
+        return str(obj)
+
+    start_time = time.time()
+    try:
+        is_select = exec_sql.strip().upper().startswith("SELECT")
+        with eng.connect() as conn:
+            if is_select:
+                result = conn.execute(text(exec_sql), exec_params)
+                cols = list(result.keys()) if result.returns_rows else []
+                raw_rows = result.mappings().fetchmany(25) if result.returns_rows else []
+                rows = []
+                for r in raw_rows:
+                    row_dict = {}
+                    for k, v in r.items():
+                        if isinstance(v, (datetime.datetime, datetime.date, Decimal, bytes)):
+                            row_dict[k] = _json_serial(v)
+                        else:
+                            row_dict[k] = v
+                    rows.append(row_dict)
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                return {
+                    "status": "SUCCESS",
+                    "operation": "SELECT",
+                    "sql": cleaned_sql,
+                    "columns": cols,
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "execution_time_ms": elapsed_ms
+                }
+            else:
+                with conn.begin():
+                    result = conn.execute(text(exec_sql), exec_params)
+                    rows_affected = result.rowcount
+                    cols = list(result.keys()) if result.returns_rows else []
+                    returned_rows = []
+                    if result.returns_rows:
+                        raw_ret = result.mappings().fetchmany(25)
+                        for r in raw_ret:
+                            row_dict = {}
+                            for k, v in r.items():
+                                if isinstance(v, (datetime.datetime, datetime.date, Decimal, bytes)):
+                                    row_dict[k] = _json_serial(v)
+                                else:
+                                    row_dict[k] = v
+                            returned_rows.append(row_dict)
+
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                op = "INSERT" if exec_sql.strip().upper().startswith("INSERT") else "UPDATE" if exec_sql.strip().upper().startswith("UPDATE") else "DELETE" if exec_sql.strip().upper().startswith("DELETE") else "EXECUTE"
+                return {
+                    "status": "SUCCESS",
+                    "operation": op,
+                    "sql": cleaned_sql,
+                    "rows_affected": rows_affected,
+                    "columns": cols,
+                    "rows": returned_rows,
+                    "execution_time_ms": elapsed_ms
+                }
+    except Exception as ex:
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        return {
+            "status": "ERROR",
+            "sql": cleaned_sql,
+            "execution_time_ms": elapsed_ms,
+            "error": str(ex)
+        }
+
+
 @catalog_router.get("/records")
 def get_client_records(
-    table_name: str = Query("leave_requests"),
+    table_name: Optional[str] = Query(None, description="Target database table name"),
     schema: Optional[str] = Query(None),
     connection_id: Optional[int] = Query(None),
     limit: int = Query(100)
@@ -776,9 +980,17 @@ def get_client_records(
 
     eng = DynamicEnginePool.get_engine(connection_id)
     target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
     clean_table = table_name
-    if "." in table_name:
-        parts = table_name.split(".", 1)
+    if not clean_table or str(clean_table).strip().lower() in ("", "undefined", "null", "none"):
+        tables = ClientDatabaseAdapter.get_tables(schema=target_schema, connection_id=connection_id)
+        if tables:
+            clean_table = tables[0].get("table_name") or tables[0].get("name")
+        else:
+            raise HTTPException(status_code=400, detail="table_name parameter is required.")
+
+    if "." in clean_table:
+        parts = clean_table.split(".", 1)
         target_schema = parts[0]
         clean_table = parts[1]
 
@@ -811,7 +1023,9 @@ def create_client_record(payload: Dict[str, Any]):
     from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 
     conn_id = payload.get("connection_id")
-    raw_table = payload.get("table_name") or payload.get("table") or "leave_requests"
+    raw_table = payload.get("table_name") or payload.get("table")
+    if not raw_table:
+        raise HTTPException(status_code=400, detail="table_name is required in payload")
     values = payload.get("values") or payload.get("data") or {}
     
     eng = DynamicEnginePool.get_engine(conn_id)
@@ -942,7 +1156,8 @@ def get_bound_module_records(
 def submit_bound_workflow_record(
     module_key: str,
     payload: Dict[str, Any],
-    db: Session = Depends(get_workflow_db)
+    db: Session = Depends(get_workflow_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generic submission gateway:
@@ -962,9 +1177,14 @@ def submit_bound_workflow_record(
     table_name = binding["table_name"]
     workflow_id = binding["workflow_id"]
     values = payload.get("data") or payload.get("values") or {}
-    user_id = payload.get("user_id") or values.get("employee_id") or 5
-    user_name = payload.get("user_name") or "Employee"
-    user_email = payload.get("user_email") or "employee@company.com"
+
+    auth_user_id = current_user.get("id") or current_user.get("user_id") if isinstance(current_user, dict) else None
+    user_id = payload.get("user_id") or values.get("employee_id") or values.get("user_id") or auth_user_id
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required to submit a workflow record")
+
+    user_name = payload.get("user_name") or (current_user.get("name") if isinstance(current_user, dict) else None) or (current_user.get("username") if isinstance(current_user, dict) else None) or "User"
+    user_email = payload.get("user_email") or (current_user.get("email") if isinstance(current_user, dict) else None) or ""
 
     # Set default status if defined
     status_col = binding.get("status_column", "status")
@@ -995,14 +1215,16 @@ def submit_bound_workflow_record(
 
     # 2. Trigger Workflow Engine
     instance_id = None
+    wf_error = None
     try:
+        parsed_user_id = int(user_id) if str(user_id).isdigit() else user_id
         wf_variables = {
             **values,
             "entity_id": int(new_record_id),
-            "user_id": int(user_id) if str(user_id).isdigit() else 5,
+            "user_id": parsed_user_id,
             "user_name": user_name,
             "user_email": user_email,
-            "employee_id": int(user_id) if str(user_id).isdigit() else 5,
+            "employee_id": parsed_user_id,
             "employee_name": user_name,
             "employee_email": user_email,
             "connection_id": conn_id
@@ -1010,29 +1232,35 @@ def submit_bound_workflow_record(
         wf_res = StudioExecutionAdapter.start_workflow(
             entity_type=table_name,
             entity_id=int(new_record_id),
-            user_id=int(user_id) if str(user_id).isdigit() else 5,
+            user_id=parsed_user_id,
             variables=wf_variables,
             db=db,
             definition_id=workflow_id
         )
         instance_id = wf_res.get("instance_id")
+        logger.info(f"Successfully started workflow instance #{instance_id} for {table_name} record #{new_record_id}")
     except Exception as wf_err:
-        logger.error(f"Error launching bound workflow instance: {wf_err}")
+        wf_error = str(wf_err)
+        logger.error(f"Error launching bound workflow instance for {table_name} record #{new_record_id}: {wf_err}", exc_info=True)
 
-    return {
+    result = {
         "success": True,
         "module_key": module_key,
         "record_id": new_record_id,
         "instance_id": instance_id,
         "status": values.get(status_col, "PENDING")
     }
+    if wf_error:
+        result["workflow_error"] = wf_error
+    return result
 
 
 @catalog_router.post("/bindings/{module_key}/action")
 def execute_bound_workflow_action(
     module_key: str,
     payload: Dict[str, Any],
-    db: Session = Depends(get_workflow_db)
+    db: Session = Depends(get_workflow_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Generic action gateway:
@@ -1047,26 +1275,47 @@ def execute_bound_workflow_action(
 
     table_name = binding["table_name"]
     entity_id = payload.get("record_id") or payload.get("entity_id")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="record_id is required")
+
     action = (payload.get("action") or "APPROVE").upper()
-    user_id = payload.get("user_id") or 3
-    user_role = payload.get("role") or payload.get("user_role") or "MANAGER"
+    auth_user_id = current_user.get("id") or current_user.get("user_id") if isinstance(current_user, dict) else None
+    user_id = payload.get("user_id") or auth_user_id
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    user_role = (
+        payload.get("role") or 
+        payload.get("user_role") or 
+        (current_user.get("role_code") if isinstance(current_user, dict) else None) or 
+        (current_user.get("user_type_name") if isinstance(current_user, dict) else None)
+    )
     remarks = payload.get("remarks") or ""
     variables = payload.get("variables") or {}
 
-    variables["connection_id"] = binding.get("connection_id", 4)
-    variables["user_role"] = user_role
+    conn_id = binding.get("connection_id")
+    if conn_id is not None:
+        variables["connection_id"] = conn_id
+    if user_role:
+        variables["user_role"] = user_role
     variables["status"] = "APPROVED" if action == "APPROVE" else "REJECTED"
 
-    res = StudioExecutionAdapter.execute_action(
-        entity_type=table_name,
-        entity_id=int(entity_id),
-        action=action,
-        user_id=int(user_id) if str(user_id).isdigit() else 3,
-        remarks=remarks,
-        variables=variables,
-        db=db
-    )
-    return res
+    parsed_user_id = int(user_id) if str(user_id).isdigit() else user_id
+    try:
+        res = StudioExecutionAdapter.execute_action(
+            entity_type=table_name,
+            entity_id=int(entity_id),
+            action=action,
+            user_id=parsed_user_id,
+            remarks=remarks,
+            variables=variables,
+            db=db
+        )
+        logger.info(f"Executed action {action} on {table_name} #{entity_id} by user {parsed_user_id}")
+        return res
+    except Exception as e:
+        logger.error(f"Error executing bound workflow action for {table_name} #{entity_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to execute workflow action: {str(e)}")
 
 
 

@@ -450,10 +450,198 @@ class ClientDatabaseAdapter:
                         "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
                         "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None
                     })
+                # Enrich with user roles if a mapping table or roles table exists
+                user_roles_map = {}
+                user_role_names_map = {}
+                roles_dict = {}
+                try:
+                    role_table = next((t for t in ["roles", "mst_user_role", "tbl_roles", "mst_roles", "role"] if t in schema_tables or t in all_tables), None)
+                    if role_table:
+                        r_cols = [c["name"].lower() for c in inspector.get_columns(role_table, schema=active_schema)]
+                        r_id = next((c for c in ["role_id", "id", "role_code"] if c in r_cols), r_cols[0])
+                        r_name = next((c for c in ["role_name", "name", "title", "role_code"] if c in r_cols), r_id)
+                        r_rows = conn.execute(text(f"SELECT {r_id} AS id, {r_name} AS name FROM {role_table}")).mappings().all()
+                        roles_dict = {str(r["id"]): str(r["name"]) for r in r_rows}
+
+                    mapping_candidates = ["user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
+                    map_table = next((t for t in mapping_candidates if t in schema_tables or t in all_tables), None)
+                    if map_table:
+                        m_cols = [c["name"].lower() for c in inspector.get_columns(map_table, schema=active_schema)]
+                        m_user_id = next((c for c in ["user_id", "id", "employee_id", "emp_id"] if c in m_cols), m_cols[0])
+                        m_role_id = next((c for c in ["role_id", "role", "role_code"] if c in m_cols), m_cols[1] if len(m_cols) > 1 else m_cols[0])
+                        m_rows = conn.execute(text(f"SELECT {m_user_id} AS user_id, {m_role_id} AS role_id FROM {map_table}")).mappings().all()
+                        for mr in m_rows:
+                            uid = str(mr["user_id"])
+                            rid = str(mr["role_id"])
+                            rname = roles_dict.get(rid, rid)
+                            user_roles_map.setdefault(uid, []).append(rid)
+                            user_role_names_map.setdefault(uid, []).append(rname)
+                except Exception as map_err:
+                    logger.debug(f"ClientDatabaseAdapter: could not load user_roles mapping: {map_err}")
+
+                for u in result:
+                    uid = u["id"]
+                    assigned_roles = user_role_names_map.get(uid) or []
+                    assigned_rids = user_roles_map.get(uid) or []
+                    if assigned_roles:
+                        u["roles"] = assigned_roles
+                        u["role_name"] = assigned_roles[0]
+                    elif u.get("role_id") and u["role_id"] in roles_dict:
+                        u["role_name"] = roles_dict[u["role_id"]]
+                        u["roles"] = [roles_dict[u["role_id"]]]
+                    else:
+                        u["roles"] = [u["role_id"]] if u.get("role_id") else []
+                        u["role_name"] = u.get("role_id")
+
+                    if assigned_rids and not u.get("role_id"):
+                        u["role_id"] = assigned_rids[0]
+
                 return result
         except Exception as ex:
             logger.info(f"ClientDatabaseAdapter: Note: No user tables in connection {connection_id}: {ex}")
             return []
+
+    @staticmethod
+    def get_users_by_role(role_name_or_id: str, schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieves all users assigned to a specific role (by role name or role ID) in the Client Database.
+        Dynamically adapts to direct columns (users.role_id) or mapping tables (user_roles).
+        """
+        from sqlalchemy import inspect
+        if not role_name_or_id:
+            return []
+        target = str(role_name_or_id).strip()
+
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            inspector = inspect(eng)
+            target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
+            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
+            all_tables = set(inspector.get_table_names())
+
+            # 1. Identify roles table to find matching role IDs and names
+            role_candidates = ["roles", "mst_user_role", "tbl_roles", "mst_roles", "user_role", "role"]
+            found_role_table = None
+            active_schema = None
+            for candidate in role_candidates:
+                if candidate in schema_tables:
+                    found_role_table = candidate
+                    active_schema = target_schema
+                    break
+                elif candidate in all_tables:
+                    found_role_table = candidate
+                    active_schema = None
+                    break
+
+            matched_role_ids = set()
+            matched_role_names = set()
+
+            with eng.connect() as conn:
+                if found_role_table:
+                    cols_meta = inspector.get_columns(found_role_table, schema=active_schema)
+                    col_names = [c["name"].lower() for c in cols_meta]
+                    id_col = next((c for c in ["role_id", "user_role_id", "id", "role_code", "code"] if c in col_names), col_names[0])
+                    name_col = next((c for c in ["role_name", "user_role_name", "name", "role_code", "title"] if c in col_names), id_col)
+                    r_ref = f"{active_schema}.{found_role_table}" if active_schema else found_role_table
+                    r_rows = conn.execute(text(f"SELECT {id_col} AS id, {name_col} AS name FROM {r_ref}")).mappings().all()
+                    for r in r_rows:
+                        rid = str(r["id"])
+                        rname = str(r["name"])
+                        if rid.lower() == target.lower() or rname.lower() == target.lower():
+                            matched_role_ids.add(rid)
+                            matched_role_names.add(rname)
+
+                # If no role table or didn't match via table, assume target could be the ID or name itself
+                if not matched_role_ids:
+                    matched_role_ids.add(target)
+                if not matched_role_names:
+                    matched_role_names.add(target)
+
+                # 2. Check if a mapping table (e.g. user_roles) exists
+                mapping_candidates = ["user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
+                found_map_table = next((t for t in mapping_candidates if t in schema_tables or t in all_tables), None)
+
+                # 3. Find users table
+                user_candidates = ["mst_users", "users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees"]
+                found_user_table = next((t for t in user_candidates if t in schema_tables or t in all_tables), None)
+
+                if found_user_table and found_map_table:
+                    u_cols = [c["name"].lower() for c in inspector.get_columns(found_user_table, schema=active_schema)]
+                    u_id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in u_cols), u_cols[0])
+                    u_name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in u_cols), u_id_col)
+                    u_email_col = next((c for c in ["email", "email_id", "mail"] if c in u_cols), None)
+
+                    m_cols = [c["name"].lower() for c in inspector.get_columns(found_map_table, schema=active_schema)]
+                    m_user_id = next((c for c in ["user_id", "id", "employee_id", "emp_id"] if c in m_cols), m_cols[0])
+                    m_role_id = next((c for c in ["role_id", "role", "role_code"] if c in m_cols), m_cols[1] if len(m_cols) > 1 else m_cols[0])
+
+                    u_ref = f"{active_schema}.{found_user_table}" if active_schema else found_user_table
+                    m_ref = f"{active_schema}.{found_map_table}" if active_schema else found_map_table
+
+                    select_fields = [f"u.{u_id_col} AS id", f"u.{u_name_col} AS name"]
+                    if u_email_col:
+                        select_fields.append(f"u.{u_email_col} AS email")
+
+                    query = f"""
+                        SELECT {', '.join(select_fields)}
+                        FROM {u_ref} u
+                        JOIN {m_ref} m ON CAST(u.{u_id_col} AS VARCHAR) = CAST(m.{m_user_id} AS VARCHAR)
+                        WHERE CAST(m.{m_role_id} AS VARCHAR) IN :role_ids
+                    """
+                    users_matched = conn.execute(text(query), {"role_ids": tuple(matched_role_ids)}).mappings().all()
+                    if users_matched:
+                        return [
+                            {
+                                "id": str(um["id"]),
+                                "name": str(um.get("name") or um["id"]),
+                                "email": um.get("email"),
+                                "role": target
+                            }
+                            for um in users_matched
+                        ]
+
+                # If no mapping table or mapping query returned empty, check if users table has role column
+                if found_user_table:
+                    u_cols = [c["name"].lower() for c in inspector.get_columns(found_user_table, schema=active_schema)]
+                    u_id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in u_cols), u_cols[0])
+                    u_name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in u_cols), u_id_col)
+                    u_email_col = next((c for c in ["email", "email_id", "mail"] if c in u_cols), None)
+                    u_role_col = next((c for c in ["role_id", "role", "role_name", "user_role_id"] if c in u_cols), None)
+
+                    if u_role_col:
+                        u_ref = f"{active_schema}.{found_user_table}" if active_schema else found_user_table
+                        select_fields = [f"{u_id_col} AS id", f"{u_name_col} AS name"]
+                        if u_email_col:
+                            select_fields.append(f"{u_email_col} AS email")
+
+                        match_targets = tuple(matched_role_ids | matched_role_names)
+                        query = f"SELECT {', '.join(select_fields)} FROM {u_ref} WHERE CAST({u_role_col} AS VARCHAR) IN :targets"
+                        users_matched = conn.execute(text(query), {"targets": match_targets}).mappings().all()
+                        if users_matched:
+                            return [
+                                {
+                                    "id": str(um["id"]),
+                                    "name": str(um.get("name") or um["id"]),
+                                    "email": um.get("email"),
+                                    "role": target
+                                }
+                                for um in users_matched
+                            ]
+
+        except Exception as ex:
+            logger.warning(f"ClientDatabaseAdapter: get_users_by_role error for role '{target}': {ex}")
+
+        # Fallback: scan all users from get_users
+        all_users = ClientDatabaseAdapter.get_users(schema=schema, connection_id=connection_id)
+        return [
+            u for u in all_users
+            if (
+                str(u.get("role_id", "")).lower() == target.lower() or
+                str(u.get("role_name", "")).lower() == target.lower() or
+                any(str(r).lower() == target.lower() for r in u.get("roles", []))
+            )
+        ]
 
     @staticmethod
     def get_departments(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -578,12 +766,18 @@ class ClientDatabaseAdapter:
             column_details = []
             for c in cols:
                 c_name = c["name"]
+                has_default = c.get("default") is not None
+                is_pk = c_name in pk_cols
                 column_details.append({
                     "name": c_name,
                     "data_type": str(c["type"]).lower(),
                     "type": str(c["type"]).lower(),
                     "nullable": bool(c.get("nullable", True)),
-                    "primary_key": c_name in pk_cols,
+                    "primary_key": is_pk,
+                    "is_primary_key": is_pk,
+                    "has_default": has_default,
+                    "default": str(c.get("default") or ""),
+                    "autoincrement": bool(c.get("autoincrement", False)) or (is_pk and "int" in str(c["type"]).lower()),
                     "foreign_key": fk_map.get(c_name)
                 })
 
@@ -612,7 +806,7 @@ class ClientDatabaseAdapter:
         based on structured configuration without raw SQL strings.
         Maps result fields to workflow variables.
         """
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = cls._resolve_target_schema(schema, connection_id)
         clean_table = table_name
         if "." in table_name:
             parts = table_name.split(".", 1)
@@ -856,7 +1050,8 @@ class ClientDatabaseAdapter:
         variables: Optional[Dict[str, Any]] = None,
         result_mapping: Optional[Dict[str, str]] = None,
         schema: Optional[str] = None,
-        connection_id: Optional[int] = None
+        connection_id: Optional[int] = None,
+        conflict_resolution: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Executes a secure, parameterized generic INSERT against the Client Database
@@ -898,24 +1093,39 @@ class ClientDatabaseAdapter:
             bind_params[p_name] = resolved_val
 
         schema_prefix = f"{target_schema}." if target_schema else ""
-        
-        # If table has a primary key and database is PostgreSQL, add RETURNING pk_col
-        returning_clause = ""
-        pk_to_return = pk_cols[0] if pk_cols else None
-        if pk_to_return:
-            returning_clause = f" RETURNING {pk_to_return}"
 
-        query_str = f"INSERT INTO {schema_prefix}{table_name} ({', '.join(col_names)}) VALUES ({', '.join(param_names)}){returning_clause}"
+        # 4. Optional Conflict Handling (ON CONFLICT DO NOTHING / DO UPDATE)
+        conflict_clause = ""
+        if conflict_resolution == "DO_NOTHING":
+            conflict_clause = " ON CONFLICT DO NOTHING"
+        elif conflict_resolution == "DO_UPDATE" and pk_cols:
+            pk_col = pk_cols[0]
+            non_pk_updates = [f"{c} = EXCLUDED.{c}" for c in col_names if c != pk_col]
+            if non_pk_updates:
+                conflict_clause = f" ON CONFLICT ({pk_col}) DO UPDATE SET {', '.join(non_pk_updates)}"
+            else:
+                conflict_clause = f" ON CONFLICT ({pk_col}) DO NOTHING"
+        
+        # PostgreSQL: always use RETURNING * so full created record and any sequence PKs are returned
+        returning_clause = " RETURNING *"
+        pk_to_return = pk_cols[0] if pk_cols else None
+
+        query_str = f"INSERT INTO {schema_prefix}{clean_table} ({', '.join(col_names)}) VALUES ({', '.join(param_names)}){conflict_clause}{returning_clause}"
 
         created_id = None
+        created_row = {}
         try:
             target_eng = DynamicEnginePool.get_engine(connection_id)
             with target_eng.begin() as conn:
                 res = conn.execute(text(query_str), bind_params)
-                if returning_clause and res.returns_rows:
+                if res.returns_rows:
                     row = res.mappings().first()
-                    if row and pk_to_return in row:
-                        created_id = row[pk_to_return]
+                    if row:
+                        created_row = dict(row)
+                        if pk_to_return and pk_to_return in row:
+                            created_id = row[pk_to_return]
+                        elif len(row) > 0:
+                            created_id = list(row.values())[0]
         except Exception as e:
             logger.error(f"ClientDatabaseAdapter: Error executing generic insert on '{table_name}': {e}")
             raise RuntimeError(f"Client Database insert execution failed: {str(e)}")
@@ -924,7 +1134,8 @@ class ClientDatabaseAdapter:
             "created_id": created_id,
             "id": created_id,
             "table": table_name,
-            "status": "SUCCESS"
+            "status": "SUCCESS",
+            **created_row
         }
         if pk_to_return and created_id is not None:
             result_data[pk_to_return] = created_id

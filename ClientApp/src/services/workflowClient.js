@@ -1,46 +1,35 @@
 /**
  * workflowClient.js
- * Standalone Offline Client Service
- * Disconnected from the central workflow server.
+ * Workflow Server Connection Manager
  */
 
 class WorkflowClient {
   constructor() {
-    this.serverUrl = 'Offline Mode'
+    this.serverUrl = localStorage.getItem('workflow_server_url') || 'http://localhost:8000'
   }
 
   getServerUrl() {
-    return 'Standalone Offline'
+    return this.serverUrl
   }
 
-  setServerUrl(_url) {}
+  setServerUrl(url) {
+    if (!url) return
+    this.serverUrl = url.trim().replace(/\/+$/, '')
+    localStorage.setItem('workflow_server_url', this.serverUrl)
+  }
+
+  async testConnection(customUrl) {
+    try {
+      const target = customUrl || this.getServerUrl()
+      const res = await fetch(`${target}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) })
+      return { success: res.ok, message: res.ok ? 'Connected successfully' : 'Server responded with error' }
+    } catch (err) {
+      return { success: false, message: err.message || 'Cannot reach server' }
+    }
+  }
 
   async checkHealth() {
-    return { ok: true, offline: true }
-  }
-
-  async fetchWorkflows() {
-    return []
-  }
-
-  async startWorkflow(_workflowId, _payload) {
-    return { status: 'SUCCESS', offline: true }
-  }
-
-  async executeAction(_workflowId, _payload) {
-    return { status: 'SUCCESS', offline: true }
-  }
-
-  async fetchRecords(_tableName, _connectionId) {
-    return []
-  }
-
-  async createRecord(_tableName, _values, _connectionId) {
-    return { id: Date.now() }
-  }
-
-  async fetchMyTasks(_userId) {
-    return []
+    return await this.testConnection()
   }
 }
 

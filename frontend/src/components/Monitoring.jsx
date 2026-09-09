@@ -23,6 +23,20 @@ import {
 
 import { workflowStorage } from '../services/workflowStorage'
 
+function format12Hr(val) {
+  if (!val) return '—'
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return String(val)
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  })
+}
+
 function Monitoring({ showToast }) {
   // Main view mode: 'instances' | 'telemetry'
   const [viewMode, setViewMode] = useState('instances')
@@ -309,14 +323,23 @@ function Monitoring({ showToast }) {
                         {inst.status || 'Running'}
                       </span>
                     </div>
-                    <div style={{ marginTop: '6px', fontSize: '12px' }}>
-                      <span style={{ color: 'var(--color-text-primary)', fontWeight: '500' }}>{inst.entity_type}</span>: ID {inst.entity_id}
+
+                    {/* Workflow Name Badge */}
+                    <div style={{ marginTop: '6px', fontSize: '12px', fontWeight: '600', color: '#e0e7ff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: '#818cf8', fontSize: '13px' }}>⚡</span>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {inst.workflow_name || `Workflow #${inst.bpmn_definition_id}`}
+                      </span>
+                    </div>
+
+                    <div style={{ marginTop: '5px', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                      Target: <span style={{ color: 'var(--color-text-primary)', fontWeight: '500' }}>{inst.entity_type}</span> (ID #{inst.entity_id})
                     </div>
                     <div className="instance-card-meta" style={{ marginTop: '4px' }}>
                       <span>Current Task: <b>{inst.current_task_code || '—'}</b></span>
                     </div>
                     <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                      Started: {new Date(inst.started_on).toLocaleString()}
+                      Started: {format12Hr(inst.started_on)}
                     </div>
                   </div>
                 ))}
@@ -332,11 +355,16 @@ function Monitoring({ showToast }) {
                 <div className="detail-header">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', fontWeight: '600' }}>
-                        Instance #{selectedInstance.instance_id} Execution Trace
-                      </h3>
-                      <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                        Entity: <span style={{ color: 'var(--color-text-primary)', fontWeight: '600' }}>{selectedInstance.entity_type}</span> (ID {selectedInstance.entity_id}) | BPMN Spec ID: {selectedInstance.bpmn_definition_id}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', fontWeight: '600' }}>
+                          Instance #{selectedInstance.instance_id} Execution Trace
+                        </h3>
+                        <span style={{ fontSize: '11px', background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)', fontWeight: '600' }}>
+                          ⚡ {selectedInstance.workflow_name || `Workflow #${selectedInstance.bpmn_definition_id}`}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '5px' }}>
+                        Entity: <span style={{ color: 'var(--color-text-primary)', fontWeight: '600' }}>{selectedInstance.entity_type}</span> (ID #{selectedInstance.entity_id}) | BPMN Spec: {selectedInstance.workflow_key || selectedInstance.bpmn_definition_id}
                       </p>
                     </div>
                     <span className={`status-badge ${(selectedInstance?.status || 'Running').toLowerCase()}`}>
@@ -451,7 +479,7 @@ function Monitoring({ showToast }) {
                                         </span>
                                       </td>
                                       <td style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                                        {new Date(log.timestamp).toLocaleString()}
+                                        {format12Hr(log.timestamp)}
                                       </td>
                                     </tr>
                                   ))}
@@ -494,7 +522,7 @@ function Monitoring({ showToast }) {
                                         </span>
                                       </td>
                                       <td style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                                        {new Date(h.performed_on).toLocaleString()}
+                                        {format12Hr(h.performed_on)}
                                       </td>
                                       <td style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
                                         {h.remarks || '—'}

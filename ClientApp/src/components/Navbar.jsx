@@ -12,6 +12,7 @@ import {
   ChevronDown
 } from 'lucide-react'
 import { workflowClient } from '../services/workflowClient'
+import { workflowSocket } from '../services/workflowSocket'
 
 export default function Navbar({
   activeTab,
@@ -23,6 +24,7 @@ export default function Navbar({
   onOpenServerModal
 }) {
   const [serverOnline, setServerOnline] = useState(false)
+  const [socketLive, setSocketLive] = useState(workflowSocket.isConnected)
   const [checking, setChecking] = useState(false)
 
   const checkHealth = async () => {
@@ -35,7 +37,14 @@ export default function Navbar({
   useEffect(() => {
     checkHealth()
     const interval = setInterval(checkHealth, 30000)
-    return () => clearInterval(interval)
+    const unsubSocket = workflowSocket.onStatusChange((isLive) => {
+      setSocketLive(isLive)
+      if (isLive) setServerOnline(true)
+    })
+    return () => {
+      clearInterval(interval)
+      unsubSocket()
+    }
   }, [])
 
   return (
@@ -105,16 +114,16 @@ export default function Navbar({
 
       {/* Right Tools: Server Status & Active User Switcher */}
       <div className="nav-right-actions">
-        {/* Remote Server Indicator */}
+        {/* Remote Server & Real-Time Socket Indicator */}
         <button
-          className={`server-status-pill ${serverOnline ? 'online' : 'offline'}`}
+          className={`server-status-pill ${socketLive ? 'online' : (serverOnline ? 'online' : 'offline')}`}
           onClick={onOpenServerModal}
-          title="Click to configure Central Workflow Server"
+          title={socketLive ? 'Workflow Engine: Real-Time WebSocket Connected' : 'Click to configure Central Workflow Server'}
         >
           <span className="pulse-dot" />
           <Server size={13} />
           <span className="server-label">
-            {workflowClient.getServerUrl().replace('http://', '').replace('https://', '')}
+            {socketLive ? '⚡ Live Socket' : workflowClient.getServerUrl().replace('http://', '').replace('https://', '')}
           </span>
           <Settings size={12} className="opacity-60" />
         </button>

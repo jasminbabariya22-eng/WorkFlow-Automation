@@ -556,15 +556,59 @@ export const workflowStorage = {
 
   // 13. Get Instances for Monitoring (Live Database)
   getInstances: async () => {
+    let instances = []
     try {
       const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
         const json = await res.json()
         if (Array.isArray(json.data)) {
-          return json.data
+          instances = json.data
         }
       }
     } catch (_e) {}
+
+    if (instances.length > 0) {
+      try {
+        const [wfs, bindings] = await Promise.allSettled([
+          workflowStorage.getWorkflows(),
+          workflowStorage.getWorkflowBindings()
+        ])
+        
+        const wfList = wfs.status === 'fulfilled' && Array.isArray(wfs.value) ? wfs.value : []
+        const bindingMap = {}
+        if (bindings.status === 'fulfilled' && bindings.value) {
+          for (const [key, b] of Object.entries(bindings.value)) {
+            bindingMap[b.workflow_id] = b.title || key
+          }
+        }
+        
+        const wfMap = {}
+        for (const w of wfList) {
+          if (w.id) wfMap[w.id] = w.name || w.spec_id
+          if (w.spec_id) wfMap[w.spec_id] = w.name || w.spec_id
+        }
+
+        const versionMap = {
+          1200: { name: 'Leave Balance Tracking & Deduction Workflow', key: 'leave_balance_deduction_flow' },
+          1198: { name: 'Work From Home Request Workflow', key: 'wfh_request_wf' },
+          1196: { name: 'Leave Cancellation Workflow', key: 'leave_cancellation_wf' }
+        }
+
+        return instances.map(inst => {
+          const vInfo = versionMap[inst.bpmn_definition_id]
+          const resolvedName = (inst.workflow_name && !inst.workflow_name.startsWith('Workflow #'))
+            ? inst.workflow_name 
+            : (vInfo?.name || bindingMap[inst.bpmn_definition_id] || wfMap[inst.bpmn_definition_id] || `Workflow #${inst.bpmn_definition_id}`)
+          const resolvedKey = inst.workflow_key || vInfo?.key || ''
+          return {
+            ...inst,
+            workflow_name: resolvedName,
+            workflow_key: resolvedKey
+          }
+        })
+      } catch (_enrichErr) {}
+      return instances
+    }
 
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.INSTANCES)
@@ -877,6 +921,51 @@ export const workflowStorage = {
     const res = await fetch(`/workflow-studio/connections/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { signal: AbortSignal.timeout(6000) })
     if (!res.ok) throw new Error(`Failed to load tables (${res.status})`)
     return await res.json()
+  },
+
+  // 17. Database Connections Profile Catalog
+  getDbConnections: async () => {
+    try {
+      const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(5000) })
+      if (res.ok) return await res.json()
+    } catch (_e) {}
+    return []
+  },
+
+  // 18. Declarative ClientApp Bindings
+  getWorkflowBindings: async () => {
+    try {
+      const res = await fetch('/workflow-studio/bindings', { signal: AbortSignal.timeout(5000) })
+      if (!res.ok) return {}
+      return await res.json()
+    } catch (_e) {
+      return {}
+    }
+  },
+
+  saveWorkflowBinding: async (payload) => {
+    const res = await fetch('/workflow-studio/bindings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Failed to save workflow binding')
+    }
+    return await res.json()
+  },
+
+  deleteWorkflowBinding: async (moduleKey) => {
+    const res = await fetch(`/workflow-studio/bindings/${encodeURIComponent(moduleKey)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Failed to remove workflow binding')
+    }
+    return await res.json()
   }
 }
+
 

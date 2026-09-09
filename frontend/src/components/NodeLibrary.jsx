@@ -70,15 +70,15 @@ export const NODE_REGISTRY = [
         type: 'communication',
         subType: 'EMAIL',
         name: 'Send Email',
-        description: 'Dispatch templated notification email',
+        description: 'Dispatch custom notification email',
         icon: <Mail size={15} color="#6366f1" />,
         badgeClass: 'wf-badge-indigo',
         defaultData: {
           label: 'Send Email',
           subType: 'EMAIL',
-          to: '{{process.owner.email}}',
-          subject: 'Task Review Required: {{workflow.name}}',
-          body: 'Hello {{assignee.name}}, a task is pending your review.'
+          to: '',
+          subject: '',
+          body: ''
         }
       },
       {
@@ -285,7 +285,11 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
       type: item.type,
       name: item.name,
       subType: item.subType || item.type,
-      ...item.defaultData
+      defaultData: {
+        subType: item.subType || item.type,
+        ...(item.defaultData || {})
+      },
+      ...(item.defaultData || {})
     }
     event.dataTransfer.setData('application/reactflow', JSON.stringify(payload))
     event.dataTransfer.effectAllowed = 'move'
