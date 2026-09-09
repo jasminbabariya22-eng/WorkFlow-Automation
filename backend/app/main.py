@@ -76,7 +76,6 @@ app.include_router(workflow_jobs_router)
 app.include_router(workflow_executor_router)
 # Dedicated Workflow GET & Inspection APIs
 app.include_router(workflows_api_router)
-app.include_router(workflows_api_router, prefix="/api/v1")
 
 app.include_router(workflow_management_router)
 app.include_router(workflow_definition_router)
@@ -84,7 +83,6 @@ app.include_router(workflow_studio_router)
 app.include_router(workflow_studio_catalog_router)
 app.include_router(workflow_connections_router)
 app.include_router(client_gateway_router)
-app.include_router(client_gateway_router, prefix="/api/v1")
 
 # --- Real-Time Workflow WebSocket Gateway ---
 from fastapi import WebSocket, WebSocketDisconnect
