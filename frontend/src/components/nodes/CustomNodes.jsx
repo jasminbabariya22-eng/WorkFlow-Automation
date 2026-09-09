@@ -472,17 +472,20 @@ export const ParallelNode = memo(({ id, data, selected }) => {
 export const TimerNode = memo(({ id, data, selected }) => {
   const title = data?.label || data?.name || 'Timer Delay'
   const timerType = data?.timerType || 'duration'
-  const durationValue = data?.durationValue !== undefined ? data?.durationValue : (data?.duration || 15)
+  const durationValue = data?.durationValue !== undefined ? data?.durationValue : (data?.duration !== undefined ? data?.duration : 10)
   const durationUnit = data?.durationUnit || 'minutes'
   const targetDate = data?.targetDate || ''
   const timerExpression = data?.timerExpression || ''
   const description = data?.description || ''
 
-  let summaryText = `Wait ${durationValue} ${durationUnit}`
+  let timeDisplay = `${durationValue} ${durationUnit}`
+  let subPill = `Pause: ${durationValue} ${durationUnit}`
   if (timerType === 'dateTime') {
-    summaryText = targetDate ? `Until ${targetDate.replace('T', ' ')}` : 'Wait until date'
+    subPill = targetDate ? `Until ${targetDate.replace('T', ' ')}` : 'Wait until date'
+    timeDisplay = targetDate || 'Fixed Date'
   } else if (timerType === 'expression') {
-    summaryText = timerExpression || 'Dynamic delay expression'
+    subPill = timerExpression || 'Dynamic expression'
+    timeDisplay = timerExpression || 'Dynamic'
   }
 
   return (
@@ -498,9 +501,21 @@ export const TimerNode = memo(({ id, data, selected }) => {
           <div className="wf-category-tag wf-tag-control">TIMING & DELAY</div>
           <div className="wf-title">{title}</div>
           <div className="wf-subtitle-row">
-            <span className="wf-badge-sub font-semibold">{summaryText}</span>
+            <span className="wf-badge-sub font-semibold" style={{ color: '#fbbf24', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+              ⏱️ {timeDisplay}
+            </span>
           </div>
           {description && <div className="wf-card-desc">{description}</div>}
+        </div>
+      </div>
+
+      <div className="wf-card-body" style={{ padding: '4px 10px 8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+          <span>Delay Mode:</span>
+          <span className="font-mono text-xs text-slate-300 font-semibold uppercase">{timerType}</span>
+        </div>
+        <div style={{ height: '4px', width: '100%', background: 'rgba(245, 158, 11, 0.2)', borderRadius: '2px', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: '100%', background: 'linear-gradient(90deg, #f59e0b, #d97706)', borderRadius: '2px' }} />
         </div>
       </div>
 
@@ -510,6 +525,7 @@ export const TimerNode = memo(({ id, data, selected }) => {
           <Handle type="source" position={Position.Right} id="TIMEOUT" className="wf-handle wf-handle-amber" />
         </div>
         <Handle type="source" position={Position.Right} id="ELAPSED" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
+        <Handle type="source" position={Position.Right} id="SUCCESS" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
         <Handle type="source" position={Position.Right} id="output" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
         <Handle type="source" position={Position.Right} id="NEXT" className="wf-handle wf-handle-amber opacity-0 pointer-events-none" />
       </div>

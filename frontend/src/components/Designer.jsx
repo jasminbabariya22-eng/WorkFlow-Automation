@@ -535,12 +535,45 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           stepLog.status = 'SENT'
         }
       }
-      // 3. User Task or Approval Node
+      // 3. Timer / Delay / Wait Node
+      else if (currentType === 'timer' || currentType === 'delay' || currentType === 'wait') {
+        const durVal = currentNode.data?.durationValue !== undefined ? currentNode.data?.durationValue : (currentNode.data?.duration !== undefined ? currentNode.data?.duration : 10)
+        const durUnit = currentNode.data?.durationUnit || 'minutes'
+        const tType = currentNode.data?.timerType || 'duration'
+        const tDate = currentNode.data?.targetDate || ''
+
+        try {
+          const res = await fetch('/workflow-studio/test/execute-generic-node', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              record_id: Number(testRecordId),
+              node_id: currentNode.id,
+              node_name: nodeLabel,
+              node_type: 'timer',
+              durationValue: durVal,
+              durationUnit: durUnit,
+              timerType: tType,
+              targetDate: tDate,
+              action: actionChosen || 'TIMEOUT',
+              connection_id: workflowConnectionId
+            })
+          })
+          const data = await res.json()
+          stepLog.status = 'TIMER_ELAPSED'
+          stepLog.duration = `${data?.duration_ms || 15}ms`
+          stepLog.message = `⏱️ Timer completed: Waited ${durVal} ${durUnit}. Advancing to next step.`
+        } catch (e) {
+          stepLog.status = 'TIMER_ELAPSED'
+          stepLog.message = `⏱️ Timer simulated: ${durVal} ${durUnit} delay elapsed.`
+        }
+      }
+      // 4. User Task or Approval Node
       else if (currentType === 'userTask' || currentType === 'approval') {
         stepLog.message = `User Task '${nodeLabel}' submitted by ${currentNode.data?.role || 'Reviewer'} with action: [${actionChosen}]`
         stepLog.status = 'SUBMITTED'
       }
-      // 4. Condition / Decision Gateway Node
+      // 5. Condition / Decision Gateway Node
       else if (currentType === 'condition') {
         const field = currentNode.data?.field || 'action'
         const expected = currentNode.data?.value || 'APPROVE'
@@ -573,13 +606,21 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             return sh === 'FALSE' || lbl.includes('FALSE') || lbl.includes('REJECT')
           }
         }) || outgoingEdges[0]
+      } else if (currentType === 'timer' || currentType === 'delay' || currentType === 'wait') {
+        // Match timer output handles: TIMEOUT, ELAPSED, SUCCESS, NEXT, OUTPUT, or first connection
+        nextEdge = outgoingEdges.find(e => {
+          const sh = String(e?.sourceHandle || '').toUpperCase()
+          const lbl = String(e?.label || e?.data?.label || '').toUpperCase()
+          return sh === 'TIMEOUT' || sh === 'ELAPSED' || sh === 'SUCCESS' || sh === 'NEXT' || sh === 'OUTPUT' ||
+            lbl.includes('TIMEOUT') || lbl.includes('ELAPSED') || lbl.includes('NEXT') || lbl.includes('SUCCESS')
+        }) || outgoingEdges[0]
       } else if (actionChosen) {
         nextEdge = outgoingEdges.find(e => {
           const sh = String(e?.sourceHandle || '').toUpperCase()
           const lbl = String(e?.label || e?.data?.label || '').toUpperCase()
           const act = String(actionChosen || '').toUpperCase()
           return sh === act || lbl.includes(act) ||
-            ((act === 'READ' || act === 'UPDATE' || act === 'SEND' || act === 'EXECUTE') && (sh === 'SUCCESS' || lbl.includes('SUCCESS') || sh === 'OUTPUT' || lbl.includes('NEXT')))
+            ((act === 'READ' || act === 'UPDATE' || act === 'SEND' || act === 'EXECUTE' || act === 'TIMEOUT') && (sh === 'SUCCESS' || lbl.includes('SUCCESS') || sh === 'OUTPUT' || lbl.includes('NEXT') || sh === 'TIMEOUT' || sh === 'ELAPSED'))
         }) || outgoingEdges[0]
       } else {
         nextEdge = outgoingEdges[0]

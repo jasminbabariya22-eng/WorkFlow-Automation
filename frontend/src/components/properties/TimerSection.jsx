@@ -60,21 +60,29 @@ export default function TimerSection({
               type="number"
               min="1"
               max="9999"
-              className="wf-input"
+              className="wf-input font-bold"
+              style={{ fontSize: '14px', color: '#fbbf24' }}
               value={durationValue}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10) || 1
                 handleFieldsChange({
                   durationValue: val,
-                  duration: val
+                  duration: val,
+                  description: `Wait ${val} ${durationUnit}`
                 })
               }}
-              placeholder="15"
+              placeholder="10"
             />
             <select
-              className="wf-select"
+              className="wf-select font-medium"
               value={durationUnit}
-              onChange={(e) => handleFieldChange('durationUnit', e.target.value)}
+              onChange={(e) => {
+                const u = e.target.value
+                handleFieldsChange({
+                  durationUnit: u,
+                  description: `Wait ${durationValue} ${u}`
+                })
+              }}
             >
               <option value="seconds">Seconds (s)</option>
               <option value="minutes">Minutes (m)</option>
@@ -83,7 +91,7 @@ export default function TimerSection({
             </select>
           </div>
           <p className="wf-hint-text" style={{ marginTop: '6px' }}>
-            Workflow execution will pause for <strong>{durationValue} {durationUnit}</strong> before proceeding to the next node.
+            Workflow execution will pause for <strong style={{ color: '#fbbf24' }}>{durationValue} {durationUnit}</strong> before advancing to the next node.
           </p>
         </div>
       )}

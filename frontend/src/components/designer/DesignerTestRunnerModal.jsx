@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Activity,
   X,
@@ -35,6 +35,39 @@ export default function DesignerTestRunnerModal({
   testTxLogs,
   handleGenericNodeAction
 }) {
+  const [countdownRemaining, setCountdownRemaining] = useState(null)
+  const [isCountingDown, setIsCountingDown] = useState(false)
+  const countdownTimerRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+    setIsCountingDown(false)
+    setCountdownRemaining(null)
+  }, [simActiveNodeId])
+
+  const startTimerCountdown = (activeNode, seconds = 5) => {
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+    setIsCountingDown(true)
+    setCountdownRemaining(seconds)
+
+    let currentSec = seconds
+    countdownTimerRef.current = setInterval(() => {
+      currentSec -= 1
+      setCountdownRemaining(currentSec)
+      if (currentSec <= 0) {
+        clearInterval(countdownTimerRef.current)
+        setIsCountingDown(false)
+        handleGenericNodeAction(activeNode, 'TIMEOUT')
+      }
+    }, 1000)
+  }
+
   if (!isOpen) return null
 
   return (
@@ -174,8 +207,34 @@ export default function DesignerTestRunnerModal({
                           Email Recipient: <code>{activeNode.data?.to || '{{employee_email}}'}</code> &bull; Subject: <em>{activeNode.data?.subject || 'Workflow Notification'}</em>
                         </div>
                       ) : nodeType === 'timer' || nodeType === 'delay' || nodeType === 'wait' ? (
-                        <div>
-                          Timer Configuration: <code>{activeNode.data?.durationValue || activeNode.data?.duration || 15} {activeNode.data?.durationUnit || 'minutes'} Delay</code>. Click below to simulate timer elapse and advance workflow.
+                        <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', padding: '12px 14px', marginTop: '4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Clock size={16} color="#fbbf24" />
+                              <span style={{ fontWeight: '700', color: '#fbbf24', fontSize: '13px' }}>
+                                Configured Timer Delay: {activeNode.data?.durationValue || activeNode.data?.duration || 10} {activeNode.data?.durationUnit || 'minutes'}
+                              </span>
+                            </div>
+                            <span className="font-mono text-xs" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fde68a', padding: '2px 8px', borderRadius: '4px' }}>
+                              {isCountingDown ? `⏳ Ticking: ${countdownRemaining}s Remaining` : `Mode: ${activeNode.data?.timerType || 'duration'}`}
+                            </span>
+                          </div>
+
+                          {isCountingDown && (
+                            <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#cbd5e1', marginBottom: '4px' }}>
+                                <span>Simulated Countdown Progress</span>
+                                <span className="font-mono text-amber-400 font-bold">{countdownRemaining}s remaining</span>
+                              </div>
+                              <div style={{ height: '6px', width: '100%', background: 'rgba(245, 158, 11, 0.2)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${Math.max(0, (countdownRemaining / 5) * 100)}%`, background: 'linear-gradient(90deg, #f59e0b, #eab308)', transition: 'width 1s linear' }} />
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                            Workflow will pause for <strong>{activeNode.data?.durationValue || activeNode.data?.duration || 10} {activeNode.data?.durationUnit || 'minutes'}</strong> before executing the downstream notification email.
+                          </div>
                         </div>
                       ) : nodeType === 'end' ? (
                         <div style={{ color: '#4ade80', fontWeight: '600' }}>
@@ -247,15 +306,30 @@ export default function DesignerTestRunnerModal({
                           <span>Dispatch Notification & Advance</span>
                         </button>
                       ) : nodeType === 'timer' || nodeType === 'delay' || nodeType === 'wait' ? (
-                        <button
-                          className="wf-btn wf-btn-primary"
-                          style={{ background: '#d97706', borderColor: '#f59e0b' }}
-                          disabled={testLoading}
-                          onClick={() => handleGenericNodeAction(activeNode, 'TIMEOUT')}
-                        >
-                          <Clock size={13} />
-                          <span>Simulate Timer Elapse & Advance</span>
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            className="wf-btn wf-btn-primary"
+                            style={{ background: '#d97706', borderColor: '#f59e0b' }}
+                            disabled={testLoading}
+                            onClick={() => {
+                              if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+                              setIsCountingDown(false)
+                              handleGenericNodeAction(activeNode, 'TIMEOUT')
+                            }}
+                          >
+                            <Clock size={13} />
+                            <span>⚡ Fast-Forward & Advance (Simulate {activeNode.data?.durationValue || activeNode.data?.duration || 10}m Elapsed)</span>
+                          </button>
+                          <button
+                            className="wf-btn wf-btn-outline"
+                            style={{ color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                            disabled={testLoading || isCountingDown}
+                            onClick={() => startTimerCountdown(activeNode, 5)}
+                          >
+                            <Play size={13} />
+                            <span>{isCountingDown ? `⏳ Counting Down (${countdownRemaining}s)...` : '▶️ Run 5-Sec Simulation'}</span>
+                          </button>
+                        </div>
                       ) : nodeType === 'end' ? (
                         <button
                           className="wf-btn wf-btn-outline"
