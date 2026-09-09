@@ -510,3 +510,4 @@ def get_user_tasks(
     except Exception as e:
         logger.error(f"Error fetching tasks for user {user_id}: {e}", exc_info=True)
         return error_response(message=str(e), status_code=500)
+

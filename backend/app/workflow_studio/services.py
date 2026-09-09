@@ -214,27 +214,42 @@ class WorkflowStudioService:
     def get_workflow_definition(
         cls,
         db: Session,
-        workflow_id: int,
+        workflow_id: Any,
         version_id: Optional[int] = None
     ) -> StudioWorkflowResponse:
-        workflow = db.query(GenericWorkflow).filter(GenericWorkflow.workflow_id == workflow_id).first()
-        if not workflow:
-            raise HTTPException(status_code=404, detail=f"Workflow with ID {workflow_id} not found.")
+        workflow = None
+        # 1. Try numeric ID
+        if isinstance(workflow_id, int) or (isinstance(workflow_id, str) and workflow_id.isdigit()):
+            workflow = db.query(GenericWorkflow).filter(GenericWorkflow.workflow_id == int(workflow_id)).first()
 
+        # 2. Try workflow_key or name
+        if not workflow and isinstance(workflow_id, str):
+            key = workflow_id.strip()
+            workflow = db.query(GenericWorkflow).filter(
+                (GenericWorkflow.workflow_key == key) |
+                (GenericWorkflow.name == key) |
+                (GenericWorkflow.workflow_key.ilike(key)) |
+                (GenericWorkflow.name.ilike(key))
+            ).first()
+
+        if not workflow:
+            raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+
+        target_wf_id = workflow.workflow_id
         if version_id:
             version = db.query(WorkflowVersion).filter(
                 WorkflowVersion.workflow_version_id == version_id,
-                WorkflowVersion.workflow_id == workflow_id
+                WorkflowVersion.workflow_id == target_wf_id
             ).first()
             if not version:
                 raise HTTPException(status_code=404, detail=f"Workflow version {version_id} not found.")
         else:
             # Pick latest draft or latest published version
             version = db.query(WorkflowVersion).filter(
-                WorkflowVersion.workflow_id == workflow_id
+                WorkflowVersion.workflow_id == target_wf_id
             ).order_by(WorkflowVersion.version_number.desc()).first()
             if not version:
-                raise HTTPException(status_code=404, detail=f"No versions found for workflow ID {workflow_id}.")
+                raise HTTPException(status_code=404, detail=f"No versions found for workflow ID {target_wf_id}.")
 
         return cls._serialize_studio_response(workflow, version)
 

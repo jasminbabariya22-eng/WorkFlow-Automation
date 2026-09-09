@@ -34,6 +34,7 @@ from app.workflow_studio.api import (
 )
 from app.workflow_studio.connections_api import router as workflow_connections_router
 from app.workflow.api.client_gateway import router as client_gateway_router
+from app.workflow.api.workflows_api import router as workflows_api_router
 
 # Trigger dynamic registration of custom & generic workflow service tasks
 import app.workflow.activities.generic_activities
@@ -73,12 +74,17 @@ app.include_router(workflow_tasks_router)
 app.include_router(workflow_monitoring_router)
 app.include_router(workflow_jobs_router)
 app.include_router(workflow_executor_router)
+# Dedicated Workflow GET & Inspection APIs
+app.include_router(workflows_api_router)
+app.include_router(workflows_api_router, prefix="/api/v1")
+
 app.include_router(workflow_management_router)
 app.include_router(workflow_definition_router)
 app.include_router(workflow_studio_router)
 app.include_router(workflow_studio_catalog_router)
 app.include_router(workflow_connections_router)
 app.include_router(client_gateway_router)
+app.include_router(client_gateway_router, prefix="/api/v1")
 
 # --- Real-Time Workflow WebSocket Gateway ---
 from fastapi import WebSocket, WebSocketDisconnect
