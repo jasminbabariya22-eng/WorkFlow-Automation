@@ -88,6 +88,8 @@ app.include_router(client_gateway_router)
 from fastapi import WebSocket, WebSocketDisconnect
 from app.core.websocket import ws_manager
 
+from app.workflow_studio.runtime.db_trigger_worker import DatabaseTriggerWorker
+
 @app.on_event("startup")
 async def on_startup():
     import asyncio
@@ -96,6 +98,21 @@ async def on_startup():
     except Exception as e:
         logger.warning(f"Could not bind WebSocket event loop on startup: {e}")
     logger.info("Workflow WebSocket Gateway active at /ws/workflow")
+    
+    # Start background database event trigger scanner job
+    try:
+        await DatabaseTriggerWorker.start()
+        logger.info("Background DatabaseTriggerWorker job started.")
+    except Exception as e:
+        logger.error(f"Failed to start DatabaseTriggerWorker: {e}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    try:
+        await DatabaseTriggerWorker.stop()
+        logger.info("Background DatabaseTriggerWorker job stopped.")
+    except Exception as e:
+        logger.error(f"Error stopping DatabaseTriggerWorker: {e}")
 
 @app.websocket("/ws/workflow")
 async def workflow_websocket_endpoint(websocket: WebSocket, user_id: str = None):
