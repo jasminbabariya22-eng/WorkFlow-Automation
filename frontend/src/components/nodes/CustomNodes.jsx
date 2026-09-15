@@ -164,7 +164,6 @@ export const UserTaskNode = memo(({ id, data, selected }) => {
       if (id === 'SUBMIT') label = 'Submit'
       if (id === 'APPROVE') label = 'Approve'
       if (id === 'REJECT') label = 'Reject'
-      if (id === 'FORCE_APPROVE') label = 'Force Approve'
       return { id, label }
     }
     const actId = a?.id || a?.action_code || a?.action || a?.label || a?.name || 'ACTION'
@@ -202,7 +201,6 @@ export const UserTaskNode = memo(({ id, data, selected }) => {
           let pillClass = 'wf-action-pill-default'
           if (actionId === 'APPROVE') pillClass = 'wf-action-pill-approve'
           else if (actionId === 'REJECT') pillClass = 'wf-action-pill-reject'
-          else if (actionId === 'FORCE_APPROVE') pillClass = 'wf-action-pill-force'
           else if (actionId === 'SUBMIT') pillClass = 'wf-action-pill-submit'
           else if (actionId === 'SAVE_DRAFT') pillClass = 'wf-action-pill-draft'
 
@@ -241,7 +239,7 @@ export const ApprovalNode = memo(({ id, data, selected }) => {
   const role = data?.role || data?.user || data?.department || 'Function Head'
   const assignmentType = data?.assignmentType || 'Role'
 
-  // Dynamic actions array for outcomes (Approve, Reject, Force Approve)
+  // Dynamic actions array for outcomes (Approve, Reject, custom actions)
   const rawActions = data?.actions || [
     { id: 'APPROVE', label: 'Approve', color: '#16a34a' },
     { id: 'REJECT', label: 'Reject', color: '#ef4444' }
@@ -251,7 +249,6 @@ export const ApprovalNode = memo(({ id, data, selected }) => {
       let label = a.replace(/_/g, ' ')
       if (a === 'APPROVE') return { id: 'APPROVE', label: 'Approve' }
       if (a === 'REJECT') return { id: 'REJECT', label: 'Reject' }
-      if (a === 'FORCE_APPROVE') return { id: 'FORCE_APPROVE', label: 'Force Approve' }
       return { id: a, label }
     }
     return a
@@ -284,7 +281,6 @@ export const ApprovalNode = memo(({ id, data, selected }) => {
           const label = act.label || act.id
           const isApprove = actionId === 'APPROVE'
           const isReject = actionId === 'REJECT'
-          const isForce = actionId === 'FORCE_APPROVE'
 
           let badgeClass = 'wf-outcome-neutral'
           let handleClass = 'wf-handle-action'
@@ -294,9 +290,6 @@ export const ApprovalNode = memo(({ id, data, selected }) => {
           } else if (isReject) {
             badgeClass = 'wf-outcome-reject'
             handleClass = 'wf-handle-reject'
-          } else if (isForce) {
-            badgeClass = 'wf-outcome-force'
-            handleClass = 'wf-handle-force'
           }
 
           return (
@@ -774,15 +767,12 @@ export const WorkflowEdge = memo(({
   let edgeClass = 'wf-edge-default'
   let labelClass = 'wf-edge-pill-default'
 
-  if (lower.includes('approve') && !lower.includes('force')) {
+  if (lower.includes('approve')) {
     edgeClass = 'wf-edge-approve'
     labelClass = 'wf-edge-pill-approve'
   } else if (lower.includes('reject') || lower === 'false' || lower === 'failure') {
     edgeClass = 'wf-edge-reject'
     labelClass = 'wf-edge-pill-reject'
-  } else if (lower.includes('force')) {
-    edgeClass = 'wf-edge-force'
-    labelClass = 'wf-edge-pill-force'
   } else if (lower === 'true' || lower === 'success') {
     edgeClass = 'wf-edge-true'
     labelClass = 'wf-edge-pill-true'

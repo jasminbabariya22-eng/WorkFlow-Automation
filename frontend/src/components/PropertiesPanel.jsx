@@ -149,7 +149,7 @@ export default function PropertiesPanel({
               className="wf-input"
               value={label}
               onChange={(e) => onUpdateEdgeData(selectedEdge.id, { label: e.target.value, action: e.target.value })}
-              placeholder="e.g. Approve, Reject, Force Approve, TRUE"
+              placeholder="e.g. Approve, Reject, Submit, TRUE"
             />
           </div>
 

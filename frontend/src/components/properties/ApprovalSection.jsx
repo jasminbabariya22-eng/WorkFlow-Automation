@@ -85,14 +85,14 @@ export default function ApprovalSection({
         <input
           type="text"
           className="wf-input wf-input-sm"
-          placeholder="e.g. Force Approve"
+          placeholder="e.g. Delegate / Resubmit"
           value={newActionLabel}
           onChange={(e) => setNewActionLabel(e.target.value)}
         />
         <input
           type="text"
           className="wf-input wf-input-sm font-mono uppercase"
-          placeholder="ID (e.g. FORCE_APPROVE)"
+          placeholder="ID (e.g. DELEGATE)"
           value={newActionId}
           onChange={(e) => setNewActionId(e.target.value)}
         />
@@ -119,14 +119,6 @@ export default function ApprovalSection({
             onChange={(e) => handleFieldChange('commentOnApprove', e.target.checked)}
           />
           <span>Require comment on Approve</span>
-        </label>
-        <label className="wf-checkbox-label">
-          <input
-            type="checkbox"
-            checked={data.commentOnForceApprove !== false}
-            onChange={(e) => handleFieldChange('commentOnForceApprove', e.target.checked)}
-          />
-          <span>Require comment on Force Approve</span>
         </label>
       </div>
 

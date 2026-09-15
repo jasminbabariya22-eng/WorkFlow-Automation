@@ -239,15 +239,26 @@ class WorkflowManagementService:
         # 5. Sync permissions from visual graph nodes to WorkflowTaskPermission table
         if draft.json_content:
             try:
-                graph = json.loads(draft.json_content)
+                graph = json.loads(draft.json_content) if isinstance(draft.json_content, str) else draft.json_content
                 nodes = graph.get("nodes", [])
                 for node in nodes:
-                    if node.get("type") in ["approval", "userTask"]:
-                        node_id = node.get("id")
+                    ntype = str(node.get("type", "")).lower()
+                    if ntype in ["approval", "usertask", "approval_node"]:
+                        node_id = str(node.get("id"))
+                        data = node.get("data", {})
                         config = node.get("config", {})
-                        role_code = config.get("role_code", "FUNCTION_HEAD")
-                        actions_list = config.get("actions", ["APPROVE", "REJECT"])
-                        actions_str = ",".join(actions_list)
+                        role_code = (
+                            data.get("role") or 
+                            data.get("role_code") or 
+                            data.get("approver_role") or 
+                            config.get("role_code") or 
+                            "MANAGER"
+                        )
+                        actions_list = data.get("actions") or config.get("actions") or ["APPROVE", "REJECT"]
+                        if isinstance(actions_list, str):
+                            actions_str = actions_list
+                        else:
+                            actions_str = ",".join(actions_list)
 
                         # Existing permission check
                         perm = db.query(WorkflowTaskPermission).filter(

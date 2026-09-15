@@ -150,10 +150,6 @@ export default class CustomWorkflowRenderer extends BaseRenderer {
     const name = bo.name || bo.id || ''
 
     const upperName = name.toUpperCase()
-    const isRM = upperName.includes('RM') || role.includes('RISK_MANAGER')
-    const isRH = upperName.includes('RH') || role.includes('RISK_HEAD')
-    const hasForce = isRM || isRH
-
     let roleLabel = role.replace(/_/g, ' ') || 'FUNCTION HEAD'
 
     // Main card rect — returned for hit-testing
@@ -188,13 +184,6 @@ export default class CustomWorkflowRenderer extends BaseRenderer {
     // ✕ Reject chip
     svgRoundRect(parentGfx, chipX, chipY, 54, 18, 4, '#fef2f2', '#fca5a5', 1)
     svgText(parentGfx, chipX + 27, chipY + 13, '✕ Reject', { fill: '#dc2626', size: '9px', weight: '700', anchor: 'middle' })
-    chipX += 58
-
-    // ⚡ Force Approve chip (RM / RH only)
-    if (hasForce) {
-      svgRoundRect(parentGfx, chipX, chipY, 74, 18, 4, '#fef3c7', '#fcd34d', 1)
-      svgText(parentGfx, chipX + 37, chipY + 13, '⚡ Force', { fill: '#b45309', size: '8.5px', weight: '700', anchor: 'middle' })
-    }
 
     return mainRect
   }

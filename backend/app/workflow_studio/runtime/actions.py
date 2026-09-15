@@ -17,7 +17,7 @@ class ConditionEvaluator:
 
         cond = condition_str.strip()
 
-        # 1. Direct action matching (e.g. "APPROVE", "REJECT", "FORCE_APPROVE", "RESUBMIT")
+        # 1. Direct action matching (e.g. "APPROVE", "REJECT", "SUBMIT", "RESUBMIT")
         if cond.upper() == action.upper():
             return True
 

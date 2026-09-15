@@ -219,7 +219,7 @@ def execute_studio_action(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Executes a human action (APPROVE, REJECT, FORCE_APPROVE, etc.) on a running workflow instance.
+    Executes a human action (APPROVE, REJECT, SUBMIT, etc.) on a running workflow instance.
     """
     from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
 
@@ -1335,6 +1335,214 @@ def execute_bound_workflow_action(
     except Exception as e:
         logger.error(f"Error executing bound workflow action for {table_name} #{entity_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to execute workflow action: {str(e)}")
+
+
+# ==========================================
+# 7. WORKFLOW RETRIEVAL & INSPECTION APIS
+# ==========================================
+
+@catalog_router.get("/inspect/{workflow_identifier}")
+def inspect_workflow_definition(
+    workflow_identifier: str,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Unified Workflow Retrieval & Inspection API.
+    Inspects any workflow by ID or spec_id to extract:
+    - Metadata & Database Connection
+    - Required Approval Roles
+    - Configured Outcome Actions (Approve/Reject)
+    - Target Tables and Automated Actions
+    - Active Module Bindings ready for ClientApp consumption.
+    """
+    import json
+    from app.workflow.persistence.models import BPMNDefinition, DatabaseConnection
+    from app.workflow_definition.models import GenericWorkflow, WorkflowVersion, WorkflowNode
+    from app.workflow_studio.bindings import WorkflowModuleBinding
+
+    # 1. Resolve BPMNDefinition or GenericWorkflow
+    bpmn_def = None
+    if workflow_identifier.isdigit():
+        bpmn_def = db.query(BPMNDefinition).filter(BPMNDefinition.id == int(workflow_identifier)).first()
+    if not bpmn_def:
+        bpmn_def = db.query(BPMNDefinition).filter(
+            (BPMNDefinition.spec_id == workflow_identifier) | (BPMNDefinition.name == workflow_identifier)
+        ).order_by(BPMNDefinition.id.desc()).first()
+
+    if not bpmn_def:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_identifier}' not found in registry.")
+
+    # 2. Extract visual graph nodes and configurations
+    nodes = []
+    edges = []
+    if bpmn_def.json_content:
+        try:
+            graph = json.loads(bpmn_def.json_content) if isinstance(bpmn_def.json_content, str) else bpmn_def.json_content
+            nodes = graph.get("nodes", [])
+            edges = graph.get("edges", [])
+        except Exception as e:
+            logger.warning(f"Error parsing json_content in inspect_workflow: {e}")
+
+    # 3. Analyze graph capabilities
+    approval_roles = set()
+    allowed_actions = set()
+    target_tables = set()
+    has_email = False
+    has_timer = False
+
+    for n in nodes:
+        ntype = str(n.get("type", "")).lower()
+        data = n.get("data", {})
+        config = n.get("config", {})
+
+        if ntype in ["approval", "usertask", "approval_node"]:
+            role = (
+                data.get("role") or 
+                data.get("role_code") or 
+                data.get("approver_role") or 
+                config.get("role_code")
+            )
+            if role:
+                approval_roles.add(str(role))
+            acts = data.get("actions") or config.get("actions") or ["APPROVE", "REJECT"]
+            if isinstance(acts, list):
+                for a in acts:
+                    allowed_actions.add(str(a).upper())
+            elif isinstance(acts, str):
+                for a in acts.split(","):
+                    allowed_actions.add(a.strip().upper())
+
+        elif ntype in ["communication", "notification", "email"]:
+            has_email = True
+
+        elif ntype in ["timer", "delay", "wait"]:
+            has_timer = True
+
+        elif ntype in ["database", "action", "crud", "db_action"]:
+            tbl = data.get("table") or data.get("table_name") or config.get("table")
+            if tbl:
+                target_tables.add(str(tbl))
+
+    # Also inspect edge labels for outcome actions
+    for e in edges:
+        lbl = e.get("label") or (e.get("data", {}).get("label") if isinstance(e.get("data"), dict) else None)
+        if lbl and str(lbl).upper() in ["APPROVE", "REJECT", "SUBMIT", "RESUBMIT", "CANCEL"]:
+            allowed_actions.add(str(lbl).upper())
+
+    if not allowed_actions:
+        allowed_actions = {"APPROVE", "REJECT"}
+
+    # 4. Resolve DB connection info
+    conn_info = None
+    if bpmn_def.connection_id:
+        db_conn = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == bpmn_def.connection_id).first()
+        if db_conn:
+            conn_info = {
+                "connection_id": db_conn.connection_id,
+                "connection_name": db_conn.connection_name,
+                "db_type": db_conn.db_type,
+                "database_name": db_conn.database_name,
+                "default_schema": db_conn.default_schema
+            }
+
+    # 5. Check active bindings in ClientApp
+    active_bindings = []
+    bindings_query = db.query(WorkflowModuleBinding).filter(
+        (WorkflowModuleBinding.workflow_id == bpmn_def.id) | 
+        (WorkflowModuleBinding.module_key == bpmn_def.spec_id)
+    ).all()
+    for b in bindings_query:
+        active_bindings.append({
+            "binding_id": b.binding_id,
+            "module_key": b.module_key,
+            "title": b.title,
+            "table_name": b.table_name,
+            "status_column": b.status_column,
+            "is_active": b.is_active
+        })
+
+    return {
+        "success": True,
+        "workflow": {
+            "id": bpmn_def.id,
+            "spec_id": bpmn_def.spec_id,
+            "name": bpmn_def.name,
+            "description": bpmn_def.description,
+            "status": bpmn_def.status,
+            "is_active": bpmn_def.is_active,
+            "version": bpmn_def.version,
+            "tags": bpmn_def.tags,
+            "connection": conn_info,
+            "statistics": {
+                "total_nodes": len(nodes),
+                "total_edges": len(edges),
+                "has_email_notification": has_email,
+                "has_timer_escalation": has_timer
+            },
+            "inspection": {
+                "approval_roles": sorted(list(approval_roles)),
+                "allowed_actions": sorted(list(allowed_actions)),
+                "target_tables_detected": sorted(list(target_tables)),
+                "can_bind_to_client_app": bpmn_def.status in ["Published", "Active", "PUBLISHED", "ACTIVE"] or len(nodes) > 0
+            },
+            "active_client_bindings": active_bindings
+        }
+    }
+
+
+@catalog_router.get("/catalog/workflows")
+def list_workflow_catalog(
+    status: Optional[str] = Query(None, description="Optional status filter: Published, Draft, Active"),
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Returns a clean catalog of all available workflows ready for ClientApp binding.
+    """
+    import json
+    from app.workflow.persistence.models import BPMNDefinition, DatabaseConnection
+    from app.workflow_studio.bindings import WorkflowModuleBinding
+
+    query = db.query(BPMNDefinition)
+    if status:
+        query = query.filter(BPMNDefinition.status.ilike(status))
+    definitions = query.order_by(BPMNDefinition.id.desc()).all()
+
+    # Preload connections
+    connections = {c.connection_id: c.connection_name for c in db.query(DatabaseConnection).all()}
+    
+    # Preload active bindings
+    all_bindings = db.query(WorkflowModuleBinding).all()
+    wf_to_bindings = {}
+    for b in all_bindings:
+        wf_to_bindings.setdefault(b.workflow_id, []).append(b.module_key)
+
+    catalog = []
+    for d in definitions:
+        node_count = 0
+        if d.json_content:
+            try:
+                g = json.loads(d.json_content) if isinstance(d.json_content, str) else d.json_content
+                node_count = len(g.get("nodes", []))
+            except Exception:
+                node_count = 0
+
+        catalog.append({
+            "id": d.id,
+            "spec_id": d.spec_id,
+            "name": d.name,
+            "description": d.description,
+            "version": d.version,
+            "status": d.status,
+            "is_active": d.is_active,
+            "connection_id": d.connection_id,
+            "connection_name": connections.get(d.connection_id, "Default DB"),
+            "nodes_count": node_count,
+            "bound_modules": wf_to_bindings.get(d.id, []),
+            "published_on": d.published_on.isoformat() if d.published_on else None,
+            "updated_on": d.updated_on.isoformat() if d.updated_on else None
+        })
+
+    return {"success": True, "total": len(catalog), "workflows": catalog}
 
 
 

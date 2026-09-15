@@ -70,22 +70,31 @@ function Dashboard({ onOpenDesigner, showToast }) {
   // Create Draft Definition
   const handleCreateDraft = async (e) => {
     e.preventDefault()
-    if (!newDraft.spec_id || !newDraft.name) {
+    const cleanSpec = String(newDraft.spec_id || '').trim().replace(/\s+/g, '_').toLowerCase()
+    if (!cleanSpec || !String(newDraft.name || '').trim()) {
       showToast('Specification ID and Name are required.', 'error')
       return
     }
+
+    // Frontend validation: Check if Specification ID already exists
+    const duplicate = workflows.some(w => String(w.spec_id || '').trim().toLowerCase() === cleanSpec)
+    if (duplicate) {
+      showToast(`Specification ID '${cleanSpec}' already exists. Please enter a unique key.`, 'error')
+      return
+    }
+
     setSubmitting(true)
     try {
       const created = await workflowStorage.createWorkflow(newDraft)
       showToast('Draft created successfully', 'success')
       setShowCreateModal(false)
-      setNewDraft({ spec_id: '', name: '', description: '', tags: '' })
+      setNewDraft({ spec_id: '', name: '', description: '', tags: '', connection_id: '' })
       await fetchWorkflows()
       if (created && created.id) {
         onOpenDesigner(created.id)
       }
     } catch (error) {
-      showToast('Failed to create draft', 'error')
+      showToast(error.message || 'Failed to create draft', 'error')
     } finally {
       setSubmitting(false)
     }
@@ -313,9 +322,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
                   <td>
                     {(() => {
                       const wfId = Number(wf.id || wf.workflow_id)
+                      const wfSpec = String(wf.spec_id || '').toLowerCase()
                       let boundKey = null
                       for (const [key, b] of Object.entries(activeBindings || {})) {
-                        if (Number(b.workflow_id) === wfId) {
+                        if (
+                          Number(b.workflow_id) === wfId ||
+                          String(b.workflow_id) === wfSpec ||
+                          key.toLowerCase() === wfSpec
+                        ) {
                           boundKey = key
                           break
                         }

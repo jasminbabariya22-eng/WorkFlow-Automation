@@ -228,10 +228,10 @@ class WorkflowService:
                 instance_id=instance.instance_id,
                 from_state=None,
                 to_state=instance.current_task_code,
-                action_name="Create Risk",
+                action_name=f"Create {entity_type}",
                 user_id=user_id,
-                role_code="RISK_OWNER",
-                remarks="Initial Risk Registration"
+                role_code="CREATOR",
+                remarks=f"Initial {entity_type} Registration"
             )
             
             # Find the active human task (enters PENDING_FH state)
@@ -407,121 +407,46 @@ class WorkflowService:
                 db=self.db
             )
             from app.workflow.services.visibility_service import WorkflowVisibilityService
-            WorkflowVisibilityService.sync_visibility(self.main_db or self.db, instance.instance_id, entity_type, entity_id)
-            if action == "FORCE_APPROVE":
-                from app.core.constants import ROLE_TO_APPROVAL_LEVEL
-                role_code = self.get_current_role(entity_type, entity_id)
-                level = ROLE_TO_APPROVAL_LEVEL.get(role_code) if role_code else None
-                return [level] if level else [1, 2, 3]
             return instance
 
-        # 6 & 7. Legacy BPMN Action Execution
-        if action == "FORCE_APPROVE":
-            approved_levels = []
-            from app.core.constants import ROLE_TO_APPROVAL_LEVEL
-            
-            while True:
-                role_code = self.get_current_role(entity_type, entity_id)
-                if not role_code:
-                    break
-                    
-                inst = self.db.query(SpiffWorkflowInstance).filter(
-                    SpiffWorkflowInstance.entity_type == entity_type,
-                    SpiffWorkflowInstance.entity_id == entity_id
-                ).first()
-                if inst.status != "Running":
-                    break
-                    
-                task_code = inst.current_task_code
-                
-                if not check_task_permission(self.db, definition.spec_id, task_code, user_role_name, "FORCE_APPROVE"):
-                    break
-                    
-                level = ROLE_TO_APPROVAL_LEVEL.get(role_code)
-                if level and level not in approved_levels:
-                    approved_levels.append(level)
-                    
-                curr_human_task = self.db.query(SpiffHumanTask).filter(
-                    SpiffHumanTask.instance_id == inst.instance_id,
-                    SpiffHumanTask.task_spec_id == task_code,
-                    SpiffHumanTask.status == "READY"
-                ).first()
-                
-                self.execution_layer.resume_workflow(
-                    xml_content=definition.xml_content,
-                    spec_id=definition.spec_id,
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    task_spec_id=task_code,
-                    payload={
-                        "approved": True,
-                        "action": "FORCE_APPROVE",
-                        "user_id": user_id,
-                        "role_code": user_role_name,
-                        "remarks": remarks
-                    },
-                    db_session=self.db
-                )
-                
-                if curr_human_task:
-                    curr_human_task.status = "COMPLETED"
-                    curr_human_task.completed_on = datetime.now()
-                    self.db.flush()
-                    
-                self._log_history_and_activity(
-                    instance_id=inst.instance_id,
-                    from_state=task_code,
-                    to_state=inst.current_task_code,
-                    action_name="Force Approve",
-                    user_id=user_id,
-                    role_code=user_role_name,
-                    remarks=remarks,
-                    variables={"approved": True, "action": "FORCE_APPROVE"}
-                )
-            
-            self.db.commit()
-            from app.workflow.services.visibility_service import WorkflowVisibilityService
-            WorkflowVisibilityService.sync_visibility(self.main_db or self.db, instance.instance_id, entity_type, entity_id)
-            return approved_levels
-            
-        else:
-            is_approved = (action == "APPROVE")
-            
-            self.execution_layer.resume_workflow(
-                xml_content=definition.xml_content,
-                spec_id=definition.spec_id,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                task_spec_id=current_task_code,
-                payload={
-                    "approved": is_approved,
-                    "action": action,
-                    "user_id": user_id,
-                    "role_code": user_role_name,
-                    "remarks": remarks
-                },
-                db_session=self.db
-            )
-            
-            human_task.status = "COMPLETED" if is_approved else "REJECTED"
-            human_task.completed_on = datetime.now()
-            self.db.flush()
-            
-            self._log_history_and_activity(
-                instance_id=instance.instance_id,
-                from_state=current_task_code,
-                to_state=instance.current_task_code,
-                action_name=action.capitalize(),
-                user_id=user_id,
-                role_code=user_role_name,
-                remarks=remarks,
-                variables={"approved": is_approved, "action": action}
-            )
-            
-            self.db.flush()
-            from app.workflow.services.visibility_service import WorkflowVisibilityService
-            WorkflowVisibilityService.sync_visibility(self.main_db or self.db, instance.instance_id, entity_type, entity_id)
-            return instance
+        # 6. Action Execution
+        is_approved = (action == "APPROVE")
+        
+        self.execution_layer.resume_workflow(
+            xml_content=definition.xml_content,
+            spec_id=definition.spec_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            task_spec_id=current_task_code,
+            payload={
+                "approved": is_approved,
+                "action": action,
+                "user_id": user_id,
+                "role_code": user_role_name,
+                "remarks": remarks
+            },
+            db_session=self.db
+        )
+        
+        human_task.status = "COMPLETED" if is_approved else "REJECTED"
+        human_task.completed_on = datetime.now()
+        self.db.flush()
+        
+        self._log_history_and_activity(
+            instance_id=instance.instance_id,
+            from_state=current_task_code,
+            to_state=instance.current_task_code,
+            action_name=action.capitalize(),
+            user_id=user_id,
+            role_code=user_role_name,
+            remarks=remarks,
+            variables={"approved": is_approved, "action": action}
+        )
+        
+        self.db.flush()
+        from app.workflow.services.visibility_service import WorkflowVisibilityService
+        WorkflowVisibilityService.sync_visibility(self.main_db or self.db, instance.instance_id, entity_type, entity_id)
+        return instance
 
     def approve(
         self,
@@ -604,21 +529,7 @@ class WorkflowService:
         
         return None
 
-    def force_approve(
-        self,
-        entity_type: str,
-        entity_id: int,
-        user_id: int,
-        remarks: str = None
-    ) -> List[int]:
-        logger.info(f"Executing force_approve for entity type='{entity_type}', id={entity_id} by user={user_id}")
-        return self.execute_action(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            action="FORCE_APPROVE",
-            user_id=user_id,
-            remarks=remarks
-        )
+
 
     def is_action_allowed(
         self,
@@ -683,7 +594,7 @@ class WorkflowService:
                     current_cfg = {}
             allowed_actions = current_cfg.get("actions") or current_cfg.get("allowed_actions") or []
             if not allowed_actions:
-                allowed_actions = ["APPROVE", "REJECT", "FORCE_APPROVE"]
+                allowed_actions = ["APPROVE", "REJECT"]
             allowed_upper = [a.upper() for a in allowed_actions]
 
             node_role = current_cfg.get("role") or current_cfg.get("role_code") or task_role
@@ -729,8 +640,6 @@ class WorkflowService:
             else:
                 if action_code.upper() in ["APPROVE", "REJECT"]:
                     allowed_actions = ["APPROVE", "REJECT"] if user_role_name == task_role else []
-                elif action_code.upper() == "FORCE_APPROVE":
-                    allowed_actions = ["FORCE_APPROVE"] if user_role_name in ["MANAGER", "EXECUTIVE", "ADMIN"] else []
                 else:
                     allowed_actions = []
 
@@ -740,8 +649,8 @@ class WorkflowService:
                     "reason": f"Action {action_code} is not permitted for role {user_role_name} at task {task_spec_id}."
                 }
 
-        # 6. Additional validation: Visibility check (except for FORCE_APPROVE)
-        if action_code.upper() != "FORCE_APPROVE":
+        # 6. Additional validation: Visibility check
+        if True:
             is_admin = user_record.user_type.name.upper() == "ADMIN" if user_record and user_record.user_type else False
             is_owner = False
             
@@ -865,11 +774,12 @@ class WorkflowService:
                             # Fallback logic
                             if user_role_name == current_role:
                                 allowed_actions = ["APPROVE", "REJECT"]
-                            elif user_role_name in ["RISK_MANAGER", "RISK_HEAD"]:
-                                allowed_actions = ["FORCE_APPROVE"]
+                            else:
+                                allowed_actions = []
                         
         return {
-            "risk_register_id": entity_id,
+            "entity_id": entity_id,
+            "entity_type": entity_type,
             "workflow_instance_id": instance.instance_id,
             "current_state": current_state,
             "current_role": user_role_name,
@@ -900,9 +810,7 @@ def check_task_permission(db, spec_id: str, task_spec_id: str, role_code: str, a
         return False
         
     # Default fallback behavior for backward compatibility with existing tests/runs
-    if action.upper() in ["APPROVE", "REJECT"]:
+    if action.upper() in ["APPROVE", "REJECT", "SUBMIT"]:
         return True
-    if action.upper() == "FORCE_APPROVE":
-        return role_code in ["RISK_MANAGER", "RISK_HEAD"]
         
     return False

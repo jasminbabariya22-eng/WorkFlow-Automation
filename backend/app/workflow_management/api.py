@@ -270,7 +270,11 @@ def publish_workflow_definition(
     try:
         published = WorkflowManagementService.publish_workflow(db, id, current_user["id"])
         
-        # Synchronize wf_definition and wf_version
+        # Synchronize into relational runtime tables (wf_definition, wf_version, wf_node, wf_connection)
+        from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+        StudioExecutionAdapter._sync_bpmn_definition_to_version(db, published)
+        
+        # Also ensure any existing GenericWorkflow records are marked ACTIVE
         wf_records = db.query(GenericWorkflow).filter(
             (GenericWorkflow.workflow_key == published.spec_id) | (GenericWorkflow.workflow_id == published.id)
         ).all()
@@ -311,6 +315,10 @@ def activate_workflow_definition(
         # Mark this version active
         definition.is_active = True
         definition.status = "Active"
+
+        # Synchronize into relational runtime tables (wf_definition, wf_version, wf_node, wf_connection)
+        from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+        StudioExecutionAdapter._sync_bpmn_definition_to_version(db, definition)
 
         # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
         wf_records = db.query(GenericWorkflow).filter(

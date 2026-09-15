@@ -10,9 +10,8 @@ from app.core.config import settings
 from app.core.logger import logger
 
 # Client / External Domain Database Engine
-# This engine connects to the client's business database configured via settings.DATABASE_URL
 client_engine = create_engine(
-    settings.DATABASE_URL or settings.WORKFLOW_DATABASE_URL,
+    getattr(settings, "DATABASE_URL", None) or settings.WORKFLOW_DATABASE_URL,
     echo=False,
     pool_pre_ping=True
 )

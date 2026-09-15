@@ -544,7 +544,7 @@ class StudioExecutionAdapter:
         db: Optional[Session] = None
     ) -> Dict[str, Any]:
         """
-        Resumes workflow execution upon human action (e.g. APPROVE, REJECT, FORCE_APPROVE).
+        Resumes workflow execution upon human action (e.g. APPROVE, REJECT, SUBMIT).
         Completes the current human task, follows matching outgoing edge, and advances.
         """
         db_to_use = db or WorkflowSessionLocal()

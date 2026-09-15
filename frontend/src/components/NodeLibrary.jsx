@@ -61,8 +61,7 @@ export const NODE_REGISTRY = [
           role: 'MANAGER',
           actions: [
             { id: 'APPROVE', label: 'Approve' },
-            { id: 'REJECT', label: 'Reject' },
-            { id: 'FORCE_APPROVE', label: 'Force Approve' }
+            { id: 'REJECT', label: 'Reject' }
           ],
           description: 'Review and signoff decision'
         }

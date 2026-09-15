@@ -326,6 +326,10 @@ def activate_workflow_version(
         definition.is_active = True
         definition.status = "Active"
 
+        # Synchronize into relational runtime tables (wf_definition, wf_version, wf_node, wf_connection)
+        from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+        StudioExecutionAdapter._sync_bpmn_definition_to_version(db, definition)
+
         # Synchronize GenericWorkflow (workflow.wf_definition) and wf_version
         wf_records = db.query(GenericWorkflow).filter(
             (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
@@ -337,9 +341,10 @@ def activate_workflow_version(
                 WorkflowVersion.workflow_id == wf.workflow_id
             ).update({"status": "PUBLISHED", "published_at": datetime.now()})
 
-        # Update active entity mapping for 'Risk' entity
+        # Update active entity mapping for this specification
+        target_entity = definition.spec_id or "generic"
         entity_config = db.query(WorkflowEntityConfig).filter(
-            WorkflowEntityConfig.entity_type == "Risk"
+            WorkflowEntityConfig.entity_type == target_entity
         ).first()
         if entity_config:
             entity_config.specification_id = definition.spec_id
@@ -347,7 +352,7 @@ def activate_workflow_version(
             entity_config.modified_on = datetime.now()
         else:
             entity_config = WorkflowEntityConfig(
-                entity_type="Risk",
+                entity_type=target_entity,
                 specification_id=definition.spec_id,
                 is_active=True,
                 created_on=datetime.now()
@@ -356,7 +361,7 @@ def activate_workflow_version(
 
         db.commit()
 
-        return success_response(message=f"Workflow version {definition.version} activated and bound to Risk entity")
+        return success_response(message=f"Workflow version {definition.version} activated for '{definition.spec_id}'")
 
     except Exception as e:
         db.rollback()

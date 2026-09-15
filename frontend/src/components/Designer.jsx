@@ -1009,7 +1009,6 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     if (actionLabel === 'SUBMIT') actionLabel = 'Submit'
     if (actionLabel === 'APPROVE') actionLabel = 'Approve'
     if (actionLabel === 'REJECT') actionLabel = 'Reject'
-    if (actionLabel === 'FORCE_APPROVE') actionLabel = 'Force Approve'
     if (actionLabel.includes('_') && actionLabel !== 'WORKFLOW_INITIALIZED') actionLabel = actionLabel.replace(/_/g, ' ')
 
     const newEdge = {
