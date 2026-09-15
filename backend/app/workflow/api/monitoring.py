@@ -70,12 +70,22 @@ def list_instances(
         result = []
         for inst in instances:
             wf_info = wf_map.get(inst.bpmn_definition_id) or (None, None)
+            state_wf_name = None
+            if inst.serialized_state:
+                try:
+                    s_data = json.loads(inst.serialized_state) if isinstance(inst.serialized_state, str) else inst.serialized_state
+                    if isinstance(s_data, dict):
+                        state_wf_name = s_data.get("workflow_name") or s_data.get("wf_name")
+                except Exception:
+                    pass
+
+            resolved_name = state_wf_name or wf_info[0] or f"Workflow #{inst.bpmn_definition_id}"
             result.append({
                 "instance_id": inst.instance_id,
                 "entity_type": inst.entity_type,
                 "entity_id": inst.entity_id,
                 "bpmn_definition_id": inst.bpmn_definition_id,
-                "workflow_name": wf_info[0] or f"Workflow #{inst.bpmn_definition_id}",
+                "workflow_name": resolved_name,
                 "workflow_key": wf_info[1] or "",
                 "status": inst.status,
                 "current_task_code": inst.current_task_code,

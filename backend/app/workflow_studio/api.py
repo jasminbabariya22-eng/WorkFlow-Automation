@@ -882,7 +882,10 @@ def execute_generic_test_node(
             ).first()
 
             is_end_node = node_type in ("end", "endevent")
+            wf_name = payload.get("workflow_name") or payload.get("spec_id") or "Workflow_1"
             state_data = {
+                "workflow_name": wf_name,
+                "wf_name": wf_name,
                 "diff": diff_fields,
                 "sql": sql_statements,
                 "table": clean_table,
@@ -906,8 +909,11 @@ def execute_generic_test_node(
                 inst.bpmn_definition_id = bpmn_id
                 inst.current_task_code = node_name
                 inst.status = "Completed" if is_end_node else "Running"
+                inst.started_on = now_dt
                 if is_end_node:
                     inst.completed_on = now_dt
+                else:
+                    inst.completed_on = None
                 inst.serialized_state = json.dumps(state_data, default=str)
 
             db.flush()
@@ -926,12 +932,12 @@ def execute_generic_test_node(
 
             # Record in WorkflowHistory
             wf_hist = WorkflowHistory(
-                entity_type=clean_table,
-                entity_id=int(record_id),
-                action=action,
+                instance_id=inst.instance_id,
+                action_name=action,
                 performed_by=int(user_id) if str(user_id).isdigit() else 1,
-                comments=f"Step '{node_name}' ({node_type}) executed successfully",
-                timestamp=now_dt
+                performed_role=str(user_role),
+                remarks=f"Step '{node_name}' ({node_type}) executed successfully",
+                performed_on=now_dt
             )
             db.add(wf_hist)
 
