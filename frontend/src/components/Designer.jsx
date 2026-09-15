@@ -506,11 +506,16 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         const subject = currentNode.data?.subject || `Notification for Record #{{workflow.entity_id}}`
         const body = currentNode.data?.body || 'Your request #{{workflow.entity_id}} has been processed successfully.'
 
+        const foundTableNode = nodes.find(n => n.data?.table || n.data?.table_name || n.data?.target_entity || n.data?.entity)
+        const rawTbl = foundTableNode ? (foundTableNode.data?.table || foundTableNode.data?.table_name || foundTableNode.data?.target_entity || foundTableNode.data?.entity) : ''
+        const canvasTable = (rawTbl && String(rawTbl).trim() !== 'undefined' && String(rawTbl).trim() !== 'null') ? String(rawTbl).trim() : 'test'
+
         const res = await fetch('/workflow-studio/test/execute-generic-node', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             record_id: Number(testRecordId),
+            table_name: canvasTable,
             node_id: currentNode.id,
             node_name: nodeLabel,
             node_type: 'communication',
@@ -520,7 +525,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             subject: subject,
             body: body,
             action: actionChosen || 'SEND',
-            connection_id: workflowConnectionId
+            connection_id: workflowConnectionId,
+            status: testRecordData?.status_value !== undefined ? testRecordData.status_value : (updatedVars.status || 2)
           })
         })
         const data = await res.json()

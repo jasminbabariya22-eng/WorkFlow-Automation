@@ -523,10 +523,9 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     body_text = str(ClientDatabaseAdapter._resolve_template_value(raw_body, context_vars) or raw_body)
 
     clean_body = body_text.strip()
-    if clean_body.startswith("<html") or clean_body.startswith("<div") or clean_body.startswith("<p"):
-        html_body = clean_body
-    else:
-        html_body = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b; white-space: pre-wrap;">{body_text}</div>"""
+    is_html = clean_body.startswith("<html") or clean_body.startswith("<div") or clean_body.startswith("<p") or "<br" in clean_body or "<table" in clean_body
+    final_email_body = clean_body if is_html else body_text
+    email_type_val = "HTML" if is_html else "TEXT"
 
     # 3. Attempt insert into client email queue if table exists
     email_job_id = None
@@ -543,7 +542,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                                 email_body, send_status, total_attempts, send_attempts, attempt_delay,
                                 next_attempt_at, created_on, created_by, is_deleted
                             ) VALUES (
-                                1, 'WORKFLOW', :email_to, :email_cc, :email_bcc, :email_subject, 'HTML',
+                                1, 'WORKFLOW', :email_to, :email_cc, :email_bcc, :email_subject, :email_type,
                                 :email_body, 'New', 3, 0, 5000,
                                 :now_dt, :now_dt, :user_id, 0
                             ) RETURNING email_job_id
@@ -553,7 +552,8 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                             "email_cc": cc_email,
                             "email_bcc": bcc_email,
                             "email_subject": subject,
-                            "email_body": html_body,
+                            "email_type": email_type_val,
+                            "email_body": final_email_body,
                             "now_dt": now_dt,
                             "user_id": user_id
                         }
@@ -571,7 +571,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                                     email_body, send_status, total_attempts, send_attempts, attempt_delay,
                                     next_attempt_at, created_on, created_by, is_deleted
                                 ) VALUES (
-                                    1, 'WORKFLOW', :email_to, :email_subject, 'HTML',
+                                    1, 'WORKFLOW', :email_to, :email_subject, :email_type,
                                     :email_body, 'New', 3, 0, 5000,
                                     :now_dt, :now_dt, :user_id, 0
                                 ) RETURNING email_job_id
@@ -579,7 +579,8 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                             {
                                 "email_to": to_email,
                                 "email_subject": subject,
-                                "email_body": html_body,
+                                "email_type": email_type_val,
+                                "email_body": final_email_body,
                                 "now_dt": now_dt,
                                 "user_id": user_id
                             }

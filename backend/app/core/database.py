@@ -1173,40 +1173,73 @@ class ClientDatabaseAdapter:
 
     @staticmethod
     def _resolve_template_value(val: Any, context_vars: Dict[str, Any]) -> Any:
-        """Resolves template expressions like {{entity.id}} or {{variables.score}} from runtime context."""
+        """Resolves template expressions like {{id}}, {{status}}, {{entity.id}} or {{variables.score}} from runtime context."""
         if not isinstance(val, str):
+            return val
+        if not context_vars:
             return val
         
         def _get_val_from_path(kpath: List[str]) -> Any:
-            # 1. Try exact path in context_vars
+            # Fast alias normalization for common workflow variables
+            if len(kpath) == 1:
+                k = kpath[0].lower()
+                if k in ("id", "record_id", "entity_id", "pk"):
+                    for candidate in ("id", "entity_id", "record_id", "primary_key_val", "pk_val"):
+                        if candidate in context_vars and context_vars[candidate] is not None:
+                            return context_vars[candidate]
+                if k in ("status", "status_value", "status_code", "status_id"):
+                    for candidate in ("status", "status_value", "status_code", "status_id"):
+                        if candidate in context_vars and context_vars[candidate] is not None:
+                            return context_vars[candidate]
+
+            # 1. Try exact path in context_vars (with case-insensitive fallback)
             cur = context_vars
             found = True
             for k in kpath:
                 if isinstance(cur, dict) and k in cur:
                     cur = cur[k]
+                elif isinstance(cur, dict):
+                    matched_k = next((ck for ck in cur.keys() if str(ck).lower() == k.lower()), None)
+                    if matched_k is not None:
+                        cur = cur[matched_k]
+                    else:
+                        found = False
+                        break
                 else:
                     found = False
                     break
-            if found:
+            if found and cur is not None:
                 return cur
 
-            # 2. If path starts with "variables" or "workflow", try stripped path
-            if len(kpath) > 1 and kpath[0] in ("variables", "workflow"):
+            # 2. If path starts with "variables", "workflow", "entity", or "record", try stripped sub-path
+            if len(kpath) > 1 and kpath[0].lower() in ("variables", "workflow", "entity", "record"):
                 sub_path = kpath[1:]
                 cur = context_vars
                 found = True
                 for k in sub_path:
                     if isinstance(cur, dict) and k in cur:
                         cur = cur[k]
+                    elif isinstance(cur, dict):
+                        matched_k = next((ck for ck in cur.keys() if str(ck).lower() == k.lower()), None)
+                        if matched_k is not None:
+                            cur = cur[matched_k]
+                        else:
+                            found = False
+                            break
                     else:
                         found = False
                         break
-                if found:
+                if found and cur is not None:
                     return cur
 
             # 3. If kpath is single key and exists in context_vars["variables"]
-            if len(kpath) == 1 and isinstance(context_vars.get("variables"), dict) and kpath[0] in context_vars["variables"]:
-                return context_vars["variables"][kpath[0]]
+            if len(kpath) == 1 and isinstance(context_vars.get("variables"), dict):
+                v_dict = context_vars["variables"]
+                if kpath[0] in v_dict and v_dict[kpath[0]] is not None:
+                    return v_dict[kpath[0]]
+                matched_k = next((ck for ck in v_dict.keys() if str(ck).lower() == kpath[0].lower()), None)
+                if matched_k is not None and v_dict[matched_k] is not None:
+                    return v_dict[matched_k]
 
             return None
 

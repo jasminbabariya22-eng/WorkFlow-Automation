@@ -737,8 +737,11 @@ def execute_generic_test_node(
             from app.workflow_studio.runtime.actions import ActionRegistry
             email_ctx = {
                 **record_info,
+                "id": int(record_id),
                 "entity_id": int(record_id),
                 "record_id": int(record_id),
+                "primary_key_val": int(record_id),
+                "status": record_info.get("status") if record_info.get("status") is not None else payload.get("status"),
                 "user_id": user_id,
                 "connection_id": conn_id
             }
