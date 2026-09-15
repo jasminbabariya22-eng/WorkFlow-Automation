@@ -849,6 +849,96 @@ def execute_generic_test_node(
 
         elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
+        # Record execution in SpiffWorkflowInstance and SpiffActivityHistory for Live Monitoring
+        try:
+            from app.workflow.persistence.models import SpiffWorkflowInstance, SpiffActivityHistory, BPMNDefinition
+            from app.workflow_definition.models import WorkflowDefinition
+            from app.workflow.models.history import WorkflowHistory
+            import json
+
+            # Find matching workflow definition id for name lookup
+            bpmn_id = 1
+            wf_name_to_match = payload.get("workflow_name") or payload.get("spec_id") or ""
+            wf_id_in_payload = payload.get("workflow_id")
+            if wf_id_in_payload and str(wf_id_in_payload).isdigit():
+                bpmn_id = int(wf_id_in_payload)
+            elif wf_name_to_match:
+                found_bpmn = db.query(BPMNDefinition).filter(
+                    (BPMNDefinition.name == wf_name_to_match) | (BPMNDefinition.spec_id == wf_name_to_match)
+                ).first()
+                if found_bpmn:
+                    bpmn_id = found_bpmn.id
+                else:
+                    found_wf = db.query(WorkflowDefinition).filter(
+                        (WorkflowDefinition.name == wf_name_to_match) | (WorkflowDefinition.spec_id == wf_name_to_match) | (WorkflowDefinition.workflow_key == wf_name_to_match)
+                    ).first()
+                    if found_wf:
+                        bpmn_id = found_wf.workflow_id
+
+            # Find or create instance for this entity
+            inst = db.query(SpiffWorkflowInstance).filter(
+                SpiffWorkflowInstance.entity_type == clean_table,
+                SpiffWorkflowInstance.entity_id == int(record_id)
+            ).first()
+
+            is_end_node = node_type in ("end", "endevent")
+            state_data = {
+                "diff": diff_fields,
+                "sql": sql_statements,
+                "table": clean_table,
+                "record_id": record_id,
+                "status": updates.get("status") if updates else payload.get("status")
+            }
+
+            if not inst:
+                inst = SpiffWorkflowInstance(
+                    entity_type=clean_table,
+                    entity_id=int(record_id),
+                    bpmn_definition_id=bpmn_id,
+                    status="Completed" if is_end_node else "Running",
+                    serialized_state=json.dumps(state_data, default=str),
+                    current_task_code=node_name,
+                    started_on=now_dt,
+                    completed_on=now_dt if is_end_node else None
+                )
+                db.add(inst)
+            else:
+                inst.bpmn_definition_id = bpmn_id
+                inst.current_task_code = node_name
+                inst.status = "Completed" if is_end_node else "Running"
+                if is_end_node:
+                    inst.completed_on = now_dt
+                inst.serialized_state = json.dumps(state_data, default=str)
+
+            db.flush()
+
+            # Record step in SpiffActivityHistory
+            activity_hist = SpiffActivityHistory(
+                instance_id=inst.instance_id,
+                activity_id=str(node_id),
+                activity_name=node_name,
+                activity_type=node_type,
+                status="COMPLETED",
+                variables=json.dumps({**diff_fields, "duration_ms": elapsed_ms, "sql": sql_statements}, default=str),
+                timestamp=now_dt
+            )
+            db.add(activity_hist)
+
+            # Record in WorkflowHistory
+            wf_hist = WorkflowHistory(
+                entity_type=clean_table,
+                entity_id=int(record_id),
+                action=action,
+                performed_by=int(user_id) if str(user_id).isdigit() else 1,
+                comments=f"Step '{node_name}' ({node_type}) executed successfully",
+                timestamp=now_dt
+            )
+            db.add(wf_hist)
+
+            db.commit()
+        except Exception as mon_err:
+            logger.warning(f"execute_generic_test_node: Monitoring instance record warning: {mon_err}")
+
         return {
             "success": True,
             "node_id": node_id,

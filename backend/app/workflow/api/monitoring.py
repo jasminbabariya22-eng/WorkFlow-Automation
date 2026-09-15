@@ -55,6 +55,18 @@ def list_instances(
         except Exception:
             pass
 
+        try:
+            from app.workflow_definition.models import WorkflowDefinition
+            wfs = db.query(WorkflowDefinition).all()
+            for w in wfs:
+                w_id = w.workflow_id
+                w_name = getattr(w, 'name', None) or getattr(w, 'spec_id', None) or f"Workflow #{w_id}"
+                w_key = getattr(w, 'workflow_key', None) or getattr(w, 'spec_id', None) or ""
+                if w_id not in wf_map:
+                    wf_map[w_id] = (w_name, w_key)
+        except Exception:
+            pass
+
         result = []
         for inst in instances:
             wf_info = wf_map.get(inst.bpmn_definition_id) or (None, None)

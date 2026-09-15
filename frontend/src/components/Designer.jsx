@@ -485,7 +485,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             action: actionToSend,
             subType: currentNode.data?.subType || (isRead ? 'READ_RECORD' : 'UPDATE_RECORD'),
             sql: currentNode.data?.sql,
-            connection_id: workflowConnectionId
+            connection_id: workflowConnectionId,
+            workflow_id: workflowId,
+            workflow_name: workflowName
           })
         })
         const data = await res.json()
@@ -526,6 +528,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             body: body,
             action: actionChosen || 'SEND',
             connection_id: workflowConnectionId,
+            workflow_id: workflowId,
+            workflow_name: workflowName,
             status: testRecordData?.status_value !== undefined ? testRecordData.status_value : (updatedVars.status || 2)
           })
         })
@@ -562,7 +566,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
               timerType: tType,
               targetDate: tDate,
               action: actionChosen || 'TIMEOUT',
-              connection_id: workflowConnectionId
+              connection_id: workflowConnectionId,
+              workflow_id: workflowId,
+              workflow_name: workflowName
             })
           })
           const data = await res.json()
@@ -606,11 +612,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         nextEdge = outgoingEdges.find(e => {
           const sh = String(e?.sourceHandle || '').toUpperCase()
           const lbl = String(e?.label || e?.data?.label || '').toUpperCase()
-          if (isMatch) {
-            return sh === 'TRUE' || lbl.includes('TRUE') || lbl.includes('APPROVE')
-          } else {
-            return sh === 'FALSE' || lbl.includes('FALSE') || lbl.includes('REJECT')
-          }
+          return isMatch
+            ? (sh === 'TRUE' || sh === 'YES' || lbl.includes('TRUE') || lbl.includes('YES') || lbl.includes('APPROV'))
+            : (sh === 'FALSE' || sh === 'NO' || lbl.includes('FALSE') || lbl.includes('NO') || lbl.includes('REJECT'))
         }) || outgoingEdges[0]
       } else if (currentType === 'timer' || currentType === 'delay' || currentType === 'wait') {
         // Match timer output handles: TIMEOUT, ELAPSED, SUCCESS, NEXT, OUTPUT, or first connection
@@ -638,7 +642,25 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           setSimActiveNodeId(nextNode.id)
           if (nextNode.type === 'end') {
             const endLabel = (nextNode.data?.label || nextNode.data?.name || '').toLowerCase()
-            setSimStatus(endLabel.includes('reject') || endLabel.includes('terminate') ? 'REJECTED' : 'COMPLETED')
+            const finalStatus = endLabel.includes('reject') || endLabel.includes('terminate') ? 'REJECTED' : 'COMPLETED'
+            setSimStatus(finalStatus)
+            // Record completion in Monitoring
+            try {
+              fetch('/workflow-studio/test/execute-generic-node', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  record_id: Number(testRecordId),
+                  node_id: nextNode.id,
+                  node_name: nextNode.data?.label || nextNode.data?.name || 'End Process',
+                  node_type: 'end',
+                  action: finalStatus,
+                  connection_id: workflowConnectionId,
+                  workflow_id: workflowId,
+                  workflow_name: workflowName
+                })
+              })
+            } catch (_) {}
           }
         } else {
           setSimStatus('COMPLETED')
