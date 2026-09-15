@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { workflowStorage } from '../services/workflowStorage'
 import TaskDetailsSection from './properties/TaskDetailsSection'
+import StartNodeSection from './properties/StartNodeSection'
 import AssignmentSection from './properties/AssignmentSection'
 import ApprovalSection from './properties/ApprovalSection'
 import ConditionSection from './properties/ConditionSection'
@@ -404,22 +405,13 @@ export default function PropertiesPanel({
 
         {/* START NODE TRIGGER */}
         {nodeType === 'start' && (
-          <>
-            <div className="wf-section-divider">TRIGGER CONFIGURATION</div>
-            <div className="wf-field-group">
-              <label className="wf-field-label">Trigger Type</label>
-              <select
-                className="wf-select"
-                value={data.triggerType || 'Manual'}
-                onChange={(e) => handleFieldChange('triggerType', e.target.value)}
-              >
-                <option value="Manual">Manual Trigger (User / API)</option>
-                <option value="Database">Database Event (Insert / Update)</option>
-                {/* <option value="Schedule">Scheduled Cron Job</option> */}
-                {/* <option value="Webhook">Inbound Webhook</option> */}
-              </select>
-            </div>
-          </>
+          <StartNodeSection
+            data={data}
+            backendEntities={backendEntities}
+            availableFields={availableFields}
+            handleFieldChange={handleFieldChange}
+            handleFieldsChange={handleFieldsChange}
+          />
         )}
 
         {/* END NODE OUTCOME */}
