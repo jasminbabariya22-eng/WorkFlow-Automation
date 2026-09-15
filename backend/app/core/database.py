@@ -1,7 +1,7 @@
 import threading
 import time
 from urllib.parse import quote_plus
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -295,20 +295,33 @@ class ClientDatabaseAdapter:
             return []
 
     @staticmethod
-    def _resolve_target_schema(schema: Optional[str], connection_id: Optional[int]) -> Optional[str]:
-        if schema:
-            return schema
-        if connection_id:
-            from app.workflow.database import WorkflowSessionLocal
-            from app.workflow.persistence.models import DatabaseConnection
-            db = WorkflowSessionLocal()
-            try:
-                conn_rec = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == connection_id).first()
+    def _resolve_target_schema(schema: Optional[str] = None, connection_id: Optional[int] = None) -> Optional[str]:
+        if schema and isinstance(schema, str):
+            return schema.strip()
+        
+        parsed_conn_id = None
+        if isinstance(connection_id, int):
+            parsed_conn_id = connection_id
+        elif isinstance(connection_id, str) and connection_id.isdigit():
+            parsed_conn_id = int(connection_id)
+
+        from app.workflow.database import WorkflowSessionLocal
+        from app.workflow.persistence.models import DatabaseConnection
+        db = WorkflowSessionLocal()
+        try:
+            if parsed_conn_id:
+                conn_rec = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == parsed_conn_id).first()
                 if conn_rec and conn_rec.default_schema:
-                    return conn_rec.default_schema
-            finally:
-                db.close()
-        return settings.DB_SCHEMA or "public"
+                    return str(conn_rec.default_schema).strip()
+            else:
+                def_conn = db.query(DatabaseConnection).filter(DatabaseConnection.is_default == True, DatabaseConnection.is_active == True).first()
+                if def_conn and def_conn.default_schema:
+                    return str(def_conn.default_schema).strip()
+        except Exception:
+            pass
+        finally:
+            db.close()
+        return "public"
 
     @staticmethod
     def _build_active_filter(col_meta_dict: dict) -> str:
@@ -705,8 +718,7 @@ class ClientDatabaseAdapter:
     @staticmethod
     def get_tables(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Introspects all available tables in the Client Database dynamically."""
-        from sqlalchemy import inspect
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
             inspector = inspect(eng)
@@ -721,8 +733,7 @@ class ClientDatabaseAdapter:
     @staticmethod
     def get_table_columns(table_name: str, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Dict[str, Any]:
         """Introspects columns, data types, primary keys, and foreign keys for a Client DB table."""
-        from sqlalchemy import inspect
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         clean_table = table_name
         if "." in table_name:
             parts = table_name.split(".", 1)
@@ -746,10 +757,10 @@ class ClientDatabaseAdapter:
             if not cols:
                 raise ValueError(f"Table '{clean_table}' has no columns or does not exist.")
 
-            pk_constraint = inspector.get_pk_constraint(table_name, schema=schema_to_use) or {}
+            pk_constraint = inspector.get_pk_constraint(clean_table, schema=schema_to_use) or {}
             pk_cols = set(pk_constraint.get("constrained_columns") or [])
 
-            fk_list = inspector.get_foreign_keys(table_name, schema=schema_to_use) or []
+            fk_list = inspector.get_foreign_keys(clean_table, schema=schema_to_use) or []
             fk_map = {}
             for fk in fk_list:
                 constrained_cols = fk.get("constrained_columns") or []
@@ -1226,7 +1237,7 @@ class ClientDatabaseAdapter:
     @staticmethod
     def get_statuses(schema: Optional[str] = None, entity_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """Retrieves domain entity lifecycle statuses from the Client Database dynamically."""
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, None)
         for table in ["mst_status", "status", "statuses"]:
             try:
                 full_table = f"{target_schema}.{table}" if target_schema else table
@@ -1252,7 +1263,7 @@ class ClientDatabaseAdapter:
         Retrieves custom workflow transition actions from the Client Database if an action table exists.
         Returns an empty list if the Client Database does not define custom action tables.
         """
-        target_schema = schema or settings.DB_SCHEMA or "ers"
+        target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, None)
         for table in ["mst_action", "actions", "mst_workflow_action"]:
             try:
                 full_table = f"{target_schema}.{table}" if target_schema else table

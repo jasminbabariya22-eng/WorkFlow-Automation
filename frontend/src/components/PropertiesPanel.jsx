@@ -33,16 +33,32 @@ export default function PropertiesPanel({
   const [availableFields, setAvailableFields] = useState([])
   const [metadataError, setMetadataError] = useState(null)
 
+  const [dbConnections, setDbConnections] = useState([])
+  const nodeConnectionId = selectedNode?.data?.connection_id || null
+
   useEffect(() => {
     let isMounted = true
     const fetchMasterData = async () => {
       try {
+        let activeConnId = nodeConnectionId || workflowConnectionId
+
+        // If no explicit connection is specified, look up available/default db connection
+        let conns = []
+        try {
+          conns = await workflowStorage.getDbConnections()
+          if (isMounted) setDbConnections(conns || [])
+          if (!activeConnId && conns && conns.length > 0) {
+            const defConn = conns.find(c => c.is_default) || conns[0]
+            if (defConn) activeConnId = defConn.connection_id
+          }
+        } catch (_connErr) {}
+
         const results = await Promise.allSettled([
-          workflowStorage.getMetadataRoles(workflowConnectionId),
-          workflowStorage.getMetadataUsers(workflowConnectionId),
-          workflowStorage.getMetadataDepartments(workflowConnectionId),
-          workflowStorage.getMetadataTables(workflowConnectionId),
-          workflowStorage.getMetadataStatuses(null, workflowConnectionId),
+          workflowStorage.getMetadataRoles(activeConnId),
+          workflowStorage.getMetadataUsers(activeConnId),
+          workflowStorage.getMetadataDepartments(activeConnId),
+          workflowStorage.getMetadataTables(activeConnId),
+          workflowStorage.getMetadataStatuses(null, activeConnId),
           workflowStorage.getMetadataActions()
         ])
 
@@ -78,14 +94,15 @@ export default function PropertiesPanel({
 
     fetchMasterData()
     return () => { isMounted = false }
-  }, [workflowConnectionId])
+  }, [workflowConnectionId, nodeConnectionId])
 
   // Dynamic field introspection for the selected entity
   const currentEntity = selectedNode?.data?.entity || selectedNode?.data?.table || ''
   useEffect(() => {
     let isMounted = true
+    const activeConnId = nodeConnectionId || workflowConnectionId || (dbConnections.find(c => c.is_default)?.connection_id) || (dbConnections[0]?.connection_id) || null
     if (currentEntity && currentEntity !== 'Entity') {
-      workflowStorage.getMetadataEntityFields(currentEntity, workflowConnectionId)
+      workflowStorage.getMetadataEntityFields(currentEntity, activeConnId)
         .then(fields => {
           if (isMounted) setAvailableFields(fields || [])
         })
@@ -96,7 +113,7 @@ export default function PropertiesPanel({
       setAvailableFields([])
     }
     return () => { isMounted = false }
-  }, [currentEntity, workflowConnectionId])
+  }, [currentEntity, workflowConnectionId, nodeConnectionId, dbConnections])
 
   // Temporary input states for adding items
   const [newActionId, setNewActionId] = useState('')
@@ -398,8 +415,8 @@ export default function PropertiesPanel({
               >
                 <option value="Manual">Manual Trigger (User / API)</option>
                 <option value="Database">Database Event (Insert / Update)</option>
-                <option value="Schedule">Scheduled Cron Job</option>
-                <option value="Webhook">Inbound Webhook</option>
+                {/* <option value="Schedule">Scheduled Cron Job</option> */}
+                {/* <option value="Webhook">Inbound Webhook</option> */}
               </select>
             </div>
           </>

@@ -442,13 +442,30 @@ export default function EmailNodeSection({
 
           {/* Subject Field */}
           <div className="wf-field-group">
-            <label className="wf-field-label">Subject</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+              <label className="wf-field-label" style={{ margin: 0 }}>Subject <span style={{ color: '#f43f5e' }}>*</span></label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', color: '#94a3b8' }}>Insert:</span>
+                {activeVars.slice(0, 3).map(v => (
+                  <button
+                    key={`subj-var-${v.token}`}
+                    type="button"
+                    className="wf-token-chip"
+                    onClick={() => insertToken('subject', v.token)}
+                    title={`Insert ${v.token} into Subject`}
+                    style={{ fontSize: '10px', padding: '1px 6px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                  >
+                    +{v.token}
+                  </button>
+                ))}
+              </div>
+            </div>
             <input
               type="text"
               className="wf-input text-xs"
               value={data.subject || ''}
               onChange={(e) => handleFieldChange('subject', e.target.value)}
-              placeholder="e.g. add new record, Request #{{id}} update"
+              placeholder="e.g. Record #{{id}} status updated to {{status}}"
             />
           </div>
 
@@ -463,15 +480,16 @@ export default function EmailNodeSection({
               rows={6}
               value={data.body || ''}
               onChange={(e) => handleFieldChange('body', e.target.value)}
-              placeholder="Type your email message here... Use {{variable}} to insert dynamic values."
+              placeholder="Type your email message here... Use {{id}}, {{status}} to insert dynamic values."
               style={{ lineHeight: '1.5' }}
             />
           </div>
 
           {/* Generic Available Variables Bar */}
           <div className="wf-var-palette">
-            <div className="wf-var-palette-header">
-              <span>Insert Dynamic Variable:</span>
+            <div className="wf-var-palette-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Insert Variable into Message Body:</span>
+              <span style={{ fontSize: '10px', color: '#64748b' }}>Click to insert at end of body</span>
             </div>
             <div className="wf-var-chips-wrap">
               {activeVars.map(v => (

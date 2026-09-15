@@ -16,10 +16,9 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
-  Link2,
-  ShieldAlert,
-  Braces
+  Link2
 } from 'lucide-react'
+import { workflowStorage } from '../../services/workflowStorage'
 
 export default function DatabaseQueryBuilder({
   nodeType = 'record',
@@ -79,6 +78,56 @@ export default function DatabaseQueryBuilder({
     if (Array.isArray(data.filters)) return data.filters
     return []
   }, [data.filters])
+
+  // Dynamic connections and local tables
+  const [dbConnections, setDbConnections] = useState([])
+  const [localTables, setLocalTables] = useState([])
+  const [localFields, setLocalFields] = useState([])
+
+  const selectedConnId = data.connection_id || connectionId || null
+
+  useEffect(() => {
+    let isMounted = true
+    const loadConnections = async () => {
+      try {
+        const conns = await workflowStorage.getDbConnections()
+        if (isMounted) setDbConnections(conns || [])
+      } catch (_e) {}
+    }
+    loadConnections()
+    return () => { isMounted = false }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+    const loadTables = async () => {
+      try {
+        const tbls = await workflowStorage.getMetadataTables(selectedConnId)
+        if (isMounted && Array.isArray(tbls) && tbls.length > 0) {
+          setLocalTables(tbls.map(t => ({ name: t.name || t.table_name })))
+        }
+      } catch (_e) {}
+    }
+    loadTables()
+    return () => { isMounted = false }
+  }, [selectedConnId])
+
+  useEffect(() => {
+    let isMounted = true
+    if (currentTable && currentTable !== 'target_table') {
+      workflowStorage.getMetadataEntityFields(currentTable, selectedConnId)
+        .then(f => {
+          if (isMounted && Array.isArray(f) && f.length > 0) {
+            setLocalFields(f)
+          }
+        })
+        .catch(() => {})
+    }
+    return () => { isMounted = false }
+  }, [currentTable, selectedConnId])
+
+  const effectiveTables = localTables.length > 0 ? localTables : availableTables
+  const effectiveFields = localFields.length > 0 ? localFields : availableFields
 
   // Local state for adding a new field mapping
   const [newMapKey, setNewMapKey] = useState('')
@@ -184,9 +233,9 @@ export default function DatabaseQueryBuilder({
     }
 
     if (operation === 'UPDATE') {
-      const pkCol = availableFields.find(f => f.is_primary_key || f.primary_key)?.name || 'id'
+      const pkCol = effectiveFields.find(f => f.is_primary_key || f.primary_key)?.name || 'id'
       if (fieldMappings.length === 0) {
-        const nonPkFields = availableFields.filter(f => !f.is_primary_key && !f.primary_key)
+        const nonPkFields = effectiveFields.filter(f => !f.is_primary_key && !f.primary_key)
         const fallbackCol = nonPkFields.length > 0 ? nonPkFields[0].name : 'status'
         return `UPDATE ${tbl} SET ${fallbackCol} = :${fallbackCol}${whereStr || ` WHERE ${pkCol} = :entity_id`};`
       }
@@ -198,11 +247,11 @@ export default function DatabaseQueryBuilder({
     }
 
     if (operation === 'INSERT') {
-      const pkCol = availableFields.find(f => f.is_primary_key || f.primary_key)?.name || ''
+      const pkCol = effectiveFields.find(f => f.is_primary_key || f.primary_key)?.name || ''
       const returningClause = pkCol ? ` RETURNING ${pkCol}` : ' RETURNING *'
 
       if (fieldMappings.length === 0) {
-        const nonPkFields = availableFields.filter(f => !f.is_primary_key && !f.primary_key)
+        const nonPkFields = effectiveFields.filter(f => !f.is_primary_key && !f.primary_key)
         if (nonPkFields.length > 0) {
           const fallbackCol = nonPkFields[0].name
           return `INSERT INTO ${tbl} (${fallbackCol}) VALUES (:${fallbackCol})${returningClause};`
@@ -230,12 +279,12 @@ export default function DatabaseQueryBuilder({
     }
 
     if (operation === 'DELETE') {
-      const pkCol = availableFields.find(f => f.is_primary_key || f.primary_key)?.name || 'id'
+      const pkCol = effectiveFields.find(f => f.is_primary_key || f.primary_key)?.name || 'id'
       return `DELETE FROM ${tbl}${whereStr || ` WHERE ${pkCol} = :entity_id`};`
     }
 
     return `SELECT * FROM ${tbl}${whereStr};`
-  }, [mode, operation, currentTable, selectedColumns, fieldMappings, filters, availableFields, data.orderBy, data.orderDirection, data.limit, data.sql, data.conflictResolution])
+  }, [mode, operation, currentTable, selectedColumns, fieldMappings, filters, effectiveFields, data.orderBy, data.orderDirection, data.limit, data.sql, data.conflictResolution])
 
   // Sync generated SQL into data.sql if in visual mode
   useEffect(() => {
@@ -500,7 +549,7 @@ export default function DatabaseQueryBuilder({
               }}
             >
               <option value="">-- Choose Database Table --</option>
-              {availableTables.map(t => (
+              {effectiveTables.map(t => (
                 <option key={t.name} value={t.name}>{t.name}</option>
               ))}
             </select>
