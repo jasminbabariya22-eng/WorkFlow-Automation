@@ -1,185 +1,122 @@
 /**
  * genericWorkflowApi.js
- * Clean Client Gateway Integration.
- * Separates Client Business Domain from Workflow Studio / Engine.
- * Provides generic module bindings, entity submissions, actions, user tasks,
- * and parameterized Client DB queries (SELECT / INSERT / UPDATE / DELETE).
+ * Universal Workflow Hub API Client for ClientApp.
+ * Routes all workflow operations through the single master gateway POST /api/v1/workflow-hub.
  */
 
-const SERVER_URL = 'http://localhost:8000'
+const SERVER_URL = 'http://192.168.1.115:8000'
 
 class GenericWorkflowApi {
   constructor(baseUrl = SERVER_URL) {
-    this.baseUrl = baseUrl
+    this.defaultBaseUrl = baseUrl
   }
 
-  // 1. Get List of Registered Workflow Modules from Client Gateway
-  async getBindings() {
+  getBaseUrl() {
     try {
-      const res = await fetch(`${this.baseUrl}/client/bindings`)
-      if (!res.ok) {
-        // Fallback to legacy endpoint if gateway not reachable
-        const fallbackRes = await fetch(`${this.baseUrl}/workflow-studio/bindings`)
-        if (!fallbackRes.ok) return {}
-        return await fallbackRes.json()
-      }
-      return await res.json()
-    } catch (_e) {
-      try {
-        const fallbackRes = await fetch(`${this.baseUrl}/workflow-studio/bindings`)
-        if (!fallbackRes.ok) return {}
-        return await fallbackRes.json()
-      } catch (_err) {
-        return {}
-      }
-    }
+      const stored = localStorage.getItem('workflow_server_url')
+      if (stored && stored.trim()) return stored.trim().replace(/\/+$/, '')
+    } catch (_e) {}
+    return this.defaultBaseUrl || 'http://192.168.1.115:8000'
   }
 
-  // 2. Generic Fetch: Loads records from the bound Client Database table
-  async fetchRecords(moduleKey, statusFilter = null) {
-    try {
-      const url = new URL(`${this.baseUrl}/client/bindings/${moduleKey}/records`)
-      if (statusFilter) url.searchParams.append('status', statusFilter)
-      const res = await fetch(url.toString())
-      if (!res.ok) {
-        // Fallback
-        const fallbackUrl = new URL(`${this.baseUrl}/workflow-studio/bindings/${moduleKey}/records`)
-        if (statusFilter) fallbackUrl.searchParams.append('status', statusFilter)
-        const fbRes = await fetch(fallbackUrl.toString())
-        if (!fbRes.ok) return []
-        const fbJson = await fbRes.json()
-        return fbJson.data || []
-      }
-      const json = await res.json()
-      return json.data || []
-    } catch (_e) {
-      return []
-    }
-  }
+  /**
+   * Central request dispatcher to the Master Gateway endpoint.
+   */
+  async invoke(specId, operation, payload = {}) {
+    const base = this.getBaseUrl()
+    if (!base) return { local: true }
 
-  // 3. Generic Submit: Inserts DB record & initiates Workflow Instance
-  async submit(moduleKey, data, currentUser, options = {}) {
-    const res = await fetch(`${this.baseUrl}/client/bindings/${moduleKey}/submit`, {
+    const body = {
+      spec_id: specId,
+      operation: operation.toUpperCase(),
+      ...payload
+    }
+
+    const res = await fetch(`${base}/api/v1/workflow-hub`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        data,
-        user_id: currentUser?.id ? Number(currentUser.id) : 5,
-        user_name: currentUser?.name || 'Employee',
-        user_email: currentUser?.email || 'employee@company.com',
-        async_execution: options.asyncExecution || false
-      })
-    })
-
-    if (!res.ok) {
-      // Try legacy endpoint if client gateway fails
-      const fallbackRes = await fetch(`${this.baseUrl}/workflow-studio/bindings/${moduleKey}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          data,
-          user_id: currentUser?.id ? Number(currentUser.id) : 5,
-          user_name: currentUser?.name || 'Employee',
-          user_email: currentUser?.email || 'employee@company.com'
-        })
-      })
-      if (!fallbackRes.ok) {
-        const err = await fallbackRes.json().catch(() => ({}))
-        throw new Error(err.detail || `Submission failed with status ${fallbackRes.status}`)
-      }
-      return await fallbackRes.json()
-    }
-    return await res.json()
-  }
-
-  // 4. Generic Action Execution: (APPROVE / REJECT / etc.)
-  async executeAction(moduleKey, recordId, action, remarks, currentUser, extraVariables = {}) {
-    const payload = {
-      record_id: recordId,
-      action: action.toUpperCase(),
-      user_id: currentUser?.id ? Number(currentUser.id) : 3,
-      role: currentUser?.role || 'MANAGER',
-      user_role: currentUser?.role || 'MANAGER',
-      remarks: remarks || '',
-      variables: {
-        ...extraVariables,
-        user_role: currentUser?.role || 'MANAGER',
-        approved_by: currentUser?.name || 'Manager'
-      }
-    }
-
-    const res = await fetch(`${this.baseUrl}/client/bindings/${moduleKey}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-
-    if (!res.ok) {
-      const fbRes = await fetch(`${this.baseUrl}/workflow-studio/bindings/${moduleKey}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      if (!fbRes.ok) {
-        const err = await fbRes.json().catch(() => ({}))
-        throw new Error(err.detail || `Action execution failed with status ${fbRes.status}`)
-      }
-      return await fbRes.json()
-    }
-    return await res.json()
-  }
-
-  // 5. Generic Task Inbox: Fetches assigned human tasks across ALL bound workflows
-  async fetchMyTasks(userId) {
-    try {
-      const res = await fetch(`${this.baseUrl}/client/tasks/my-tasks?user_id=${userId}`)
-      if (!res.ok) {
-        const fbRes = await fetch(`${this.baseUrl}/workflow-studio/tasks/my-tasks?user_id=${userId}`)
-        if (!fbRes.ok) return []
-        return await fbRes.json()
-      }
-      return await res.json()
-    } catch (_e) {
-      return []
-    }
-  }
-
-  // 6. Generic Client-Side DB Query Gateway (SELECT, INSERT, UPDATE, DELETE)
-  async query({
-    tableName,
-    operation = 'SELECT',
-    columns = null,
-    filters = null,
-    orderBy = null,
-    orderDirection = 'ASC',
-    limit = 100,
-    offset = 0,
-    values = null,
-    connectionId = null
-  }) {
-    const res = await fetch(`${this.baseUrl}/client/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        table_name: tableName,
-        operation: operation.toUpperCase(),
-        columns,
-        filters,
-        order_by: orderBy,
-        order_direction: orderDirection,
-        limit,
-        offset,
-        values,
-        connection_id: connectionId
-      })
+      body: JSON.stringify(body)
     })
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || err.message || `Client query failed with status ${res.status}`)
+      throw new Error(err.detail || err.Error?.Error_message || `Request failed with HTTP status ${res.status}`)
     }
-    return await res.json()
+
+    const json = await res.json()
+    return json.data !== undefined ? json.data : json
+  }
+
+  // 1. Dynamic Schema Discovery
+  async getSchema(specId) {
+    return await this.invoke(specId, 'SCHEMA')
+  }
+
+  // 2. Fetch Business Records
+  async fetchRecords(specId, statusFilter = 'ALL', limit = 100, offset = 0) {
+    try {
+      const res = await this.invoke(specId, 'FETCH_RECORDS', {
+        status_filter: statusFilter,
+        limit,
+        offset
+      })
+      return Array.isArray(res) ? res : []
+    } catch (_e) {
+      return []
+    }
+  }
+
+  // 3. Submit New Record & Start Workflow
+  async submit(specId, data, currentUser, options = {}) {
+    return await this.invoke(specId, 'SUBMIT', {
+      data,
+      user_id: currentUser?.id ? Number(currentUser.id) : 5,
+      user_name: currentUser?.name || 'User',
+      user_email: currentUser?.email || 'user@example.com',
+      ...options
+    })
+  }
+
+  // 4. Execute Human Approval / Rejection Action
+  async executeAction(specId, recordId, action, remarks, currentUser, extraVariables = {}) {
+    return await this.invoke(specId, 'ACTION', {
+      record_id: Number(recordId),
+      action: action.toUpperCase(),
+      user_id: currentUser?.id ? Number(currentUser.id) : 3,
+      role: currentUser?.role || 'MANAGER',
+      remarks: remarks || '',
+      variables: extraVariables
+    })
+  }
+
+  // 5. Fetch Pending Approval Tasks
+  async fetchMyTasks(specId = 'all', currentUser = {}) {
+    try {
+      const res = await this.invoke(specId, 'GET_TASKS', {
+        user_id: currentUser?.id ? Number(currentUser.id) : 3,
+        role: currentUser?.role || 'MANAGER'
+      })
+      return Array.isArray(res) ? res : []
+    } catch (_e) {
+      return []
+    }
+  }
+
+  // 6. Get Execution Audit Timeline
+  async getHistory(specId, recordId) {
+    return await this.invoke(specId, 'HISTORY', { record_id: Number(recordId) })
+  }
+
+  // 7. List All Available Catalog Workflows
+  async getCatalog() {
+    try {
+      const res = await this.invoke('all', 'CATALOG')
+      return Array.isArray(res) ? res : []
+    } catch (_e) {
+      return []
+    }
   }
 }
 
 export const genericWorkflowApi = new GenericWorkflowApi()
+export default genericWorkflowApi

@@ -96,7 +96,22 @@ class StudioExecutionAdapter:
             key_to_id = {}
             for n in nodes_data:
                 nid = str(n.get("id"))
-                ntype = str(n.get("type") or "ACTION").upper()
+                raw_type = str(n.get("type") or "ACTION").strip().upper().replace("-", "_")
+                if raw_type in ("USERTASK", "USER_TASK", "HUMANTASK", "HUMAN_TASK", "APPROVAL", "FORM", "USERACTIVITY", "TASK"):
+                    ntype = "APPROVAL"
+                elif raw_type in ("START", "STARTEVENT"):
+                    ntype = "START"
+                elif raw_type in ("END", "ENDEVENT"):
+                    ntype = "END"
+                elif raw_type in ("DECISION", "GATEWAY", "CONDITION", "CONDITIONAL", "EXCLUSIVEGATEWAY"):
+                    ntype = "CONDITION"
+                elif raw_type in ("COMMUNICATION", "EMAIL", "NOTIFICATION", "SEND_EMAIL", "SENDTASK"):
+                    ntype = "COMMUNICATION"
+                elif raw_type in ("RECORD", "DB", "DATABASE", "SQL", "SERVICETASK"):
+                    ntype = "RECORD"
+                else:
+                    ntype = raw_type
+
                 ndata = n.get("data", {})
                 nname = ndata.get("label") or ndata.get("name") or nid
                 pos = n.get("position", {})
@@ -656,7 +671,7 @@ class StudioExecutionAdapter:
                 (SpiffHumanTask.task_spec_id == task_code)
             ).first()
 
-            if not active_task and current_node.node_type in ("APPROVAL", "USER_TASK"):
+            if not active_task and current_node.node_type.upper().replace("-", "_") in ("APPROVAL", "USER_TASK", "USERTASK", "HUMAN_TASK", "HUMANTASK", "FORM", "TASK"):
                 raise HTTPException(
                     status_code=409,
                     detail=f"Task '{current_node.name}' has already been completed or is not in READY state."
@@ -871,7 +886,7 @@ class StudioExecutionAdapter:
             )
 
             # Handle Node Types:
-            if target_type in ("APPROVAL", "USER_TASK"):
+            if target_type in ("APPROVAL", "USER_TASK", "USERTASK", "HUMAN_TASK", "HUMANTASK", "FORM", "TASK", "USERACTIVITY"):
                 # Human interaction node: Create SpiffHumanTask and pause execution
                 assignment_cfg = node_cfg.get("assignment", {}) if isinstance(node_cfg.get("assignment"), dict) else {}
                 role_code = (
@@ -977,6 +992,13 @@ class StudioExecutionAdapter:
                 action = "SUCCESS"
                 continue
 
+            elif target_type in ("TIMER", "DELAY", "WAIT"):
+                # Delay / timer node: logs transition and advances down timeout/success path
+                cls._log_history(db, instance, target_node, "COMPLETED", user_id, variables)
+                current_node = target_node
+                action = "TIMEOUT"
+                continue
+
             elif target_type == "CONDITION":
                 # Decision node evaluates condition and continues
                 cls._log_history(db, instance, target_node, "EVALUATED", user_id, variables)
@@ -1044,6 +1066,14 @@ class StudioExecutionAdapter:
         try:
             ActionRegistry.execute("SEND_EMAIL", config, ctx)
             variables.update(ctx)
+            # Instantly dispatch the newly queued email in the background
+            import threading
+            from app.workflow.services.email_dispatcher import EmailDispatcher
+            threading.Thread(
+                target=EmailDispatcher.process_pending_email_jobs,
+                kwargs={"conn_id": conn_id, "limit": 10},
+                daemon=True
+            ).start()
         except Exception as e:
             logger.warning(f"StudioEngine: Email node dispatch warning: {e}")
 

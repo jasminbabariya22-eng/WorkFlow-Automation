@@ -56,18 +56,23 @@ class DatabaseTriggerWorker:
 
     @classmethod
     def _scan_and_execute(cls):
+        # 1. Process pending email jobs from mst_email_job via SMTP
+        try:
+            from app.workflow.services.email_dispatcher import EmailDispatcher
+            EmailDispatcher.process_pending_email_jobs(limit=15)
+        except Exception as email_err:
+            logger.debug(f"DatabaseTriggerWorker email dispatch tick error: {email_err}")
+
+        # 2. Discover and execute published workflows with Database Start Node triggers
         db = WorkflowSessionLocal()
         try:
-            # 1. Discover all published workflows with Database Start Node triggers
             triggers = cls._discover_active_triggers(db)
-            if not triggers:
-                return
-
-            for trig in triggers:
-                try:
-                    cls._process_table_trigger(db, trig)
-                except Exception as ex:
-                    logger.error(f"Error processing trigger for workflow '{trig.get('workflow_name')}': {ex}")
+            if triggers:
+                for trig in triggers:
+                    try:
+                        cls._process_table_trigger(db, trig)
+                    except Exception as ex:
+                        logger.error(f"Error processing trigger for workflow '{trig.get('workflow_name')}': {ex}")
         finally:
             db.close()
 

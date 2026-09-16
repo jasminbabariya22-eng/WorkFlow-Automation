@@ -43,5 +43,7 @@ Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
 *.sw?
+*.db
+*.sqlite3
+*.sqlite

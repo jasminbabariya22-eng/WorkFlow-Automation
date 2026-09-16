@@ -1,8 +1,7 @@
 /**
  * workflowSocket.js
- * Lightweight Zero-Dependency Native WebSocket Service for ClientApp.
- * Connects directly to the Workflow Engine's real-time event pipeline.
- * Minimum code footprint: 1-line subscription for any module.
+ * Native WebSocket Service for ClientApp.
+ * Completely passive - does not connect automatically when disconnected.
  */
 
 class WorkflowSocket {
@@ -13,26 +12,30 @@ class WorkflowSocket {
     this.reconnectTimer = null
     this.pingTimer = null
     this.isConnected = false
-    this.listeners = new Map() // eventType -> Set of callbacks
-    this.anyListeners = new Set() // generic event listeners
+    this.listeners = new Map()
+    this.anyListeners = new Set()
     this.statusListeners = new Set()
   }
 
-  /**
-   * Derives ws:// or wss:// URL from standard http server URL
-   */
   resolveWsUrl(serverHttpUrl) {
-    const base = (serverHttpUrl || 'http://localhost:8000').trim().replace(/\/+$/, '')
+    if (!serverHttpUrl) return ''
+    const base = serverHttpUrl.trim().replace(/\/+$/, '')
     const wsProto = base.startsWith('https') ? 'wss://' : 'ws://'
     const host = base.replace(/^https?:\/\//, '')
     return `${wsProto}${host}/ws/workflow`
   }
 
-  /**
-   * Connects to the backend workflow WebSocket
-   */
   connect(options = {}) {
-    const serverUrl = options.serverUrl || localStorage.getItem('workflow_server_url') || 'http://localhost:8000'
+    const rawUrl = options.serverUrl !== undefined ? options.serverUrl : localStorage.getItem('workflow_server_url')
+    if (!rawUrl || !rawUrl.trim()) {
+      this.disconnect()
+      if (options.onEvent) this.onAny(options.onEvent)
+      return () => {
+        if (options.onEvent) this.offAny(options.onEvent)
+      }
+    }
+
+    const serverUrl = rawUrl.trim()
     this.userId = options.userId || null
     this.url = this.resolveWsUrl(serverUrl)
 
@@ -54,6 +57,7 @@ class WorkflowSocket {
   }
 
   _initSocket() {
+    if (!this.url) return
     try {
       const fullUrl = this.userId ? `${this.url}?user_id=${encodeURIComponent(this.userId)}` : this.url
       this.ws = new WebSocket(fullUrl)
@@ -69,22 +73,18 @@ class WorkflowSocket {
           if (event.data === 'pong') return
           const payload = JSON.parse(event.data)
           this._dispatch(payload)
-        } catch (_e) {
-          // Non-JSON message, ignore
-        }
+        } catch (_e) {}
       }
 
       this.ws.onclose = () => {
         this._cleanup()
-        this._scheduleReconnect()
       }
 
       this.ws.onerror = () => {
         this._cleanup()
-        this._scheduleReconnect()
       }
     } catch (_err) {
-      this._scheduleReconnect()
+      this._cleanup()
     }
   }
 
@@ -92,14 +92,6 @@ class WorkflowSocket {
     this.isConnected = false
     this._stopHeartbeat()
     this._notifyStatus(false)
-  }
-
-  _scheduleReconnect() {
-    if (this.reconnectTimer) return
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      this._initSocket()
-    }, 3000)
   }
 
   _startHeartbeat() {
@@ -144,9 +136,6 @@ class WorkflowSocket {
     })
   }
 
-  /**
-   * Listen to a specific event type (e.g. 'TASK_READY', 'WORKFLOW_STARTED')
-   */
   on(eventType, callback) {
     if (!this.listeners.has(eventType)) {
       this.listeners.set(eventType, new Set())
@@ -160,9 +149,6 @@ class WorkflowSocket {
     if (s) s.delete(callback)
   }
 
-  /**
-   * Listen to ANY workflow event (for auto-refreshing UI lists & badges)
-   */
   onAny(callback) {
     this.anyListeners.add(callback)
     return () => this.offAny(callback)
@@ -172,9 +158,6 @@ class WorkflowSocket {
     this.anyListeners.delete(callback)
   }
 
-  /**
-   * Listen to connection status changes (connected = true/false)
-   */
   onStatusChange(callback) {
     this.statusListeners.add(callback)
     callback(this.isConnected)

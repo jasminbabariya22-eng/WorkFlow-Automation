@@ -1622,7 +1622,9 @@ def list_workflow_catalog(
     from app.workflow.persistence.models import BPMNDefinition, DatabaseConnection
     from app.workflow_studio.bindings import WorkflowModuleBinding
 
-    query = db.query(BPMNDefinition)
+    query = db.query(BPMNDefinition).filter(
+        (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+    )
     if status:
         query = query.filter(BPMNDefinition.status.ilike(status))
     definitions = query.order_by(BPMNDefinition.id.desc()).all()

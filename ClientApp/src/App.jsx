@@ -78,7 +78,7 @@ export default function App() {
           </span>
           <span>&bull;</span>
           <span>
-            🌐 <strong>Workflow Server</strong>: {workflowClient.getServerUrl()}
+            🌐 <strong>Workflow Server</strong>: {workflowClient.getServerUrl() || 'Disconnected (No Server / Optional)'}
           </span>
           <span>&bull;</span>
           <span>

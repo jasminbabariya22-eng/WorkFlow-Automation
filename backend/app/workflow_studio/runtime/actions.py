@@ -532,8 +532,13 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     try:
         eng = DynamicEnginePool.get_engine(conn_id)
         target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
+        candidate_tables = []
+        for t in ["mst_email_job", "email_jobs", "email_queue"]:
+            if target_schema:
+                candidate_tables.append(f"{target_schema}.{t}")
+            candidate_tables.append(t)
         with eng.begin() as conn:
-            for mail_tbl in [f"{target_schema}.mst_email_job", "mst_email_job", "ers.mst_email_job", "email_jobs"]:
+            for mail_tbl in candidate_tables:
                 try:
                     res = conn.execute(
                         text(f"""
@@ -590,8 +595,28 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                             break
                     except Exception:
                         continue
-    except Exception:
-        pass
+    except Exception as queue_err:
+        logger.debug(f"ActionRegistry: Email queue insert skipped: {queue_err}")
+
+    # 4. If not queued in client DB (no email job table), send directly via SMTP
+    send_status = "New" if email_job_id else "Pending"
+    if not email_job_id:
+        try:
+            from app.workflow.services.email_dispatcher import EmailDispatcher
+            smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id)
+            if smtp_cfg:
+                EmailDispatcher.send_smtp_email(
+                    smtp_cfg=smtp_cfg,
+                    to_email=to_email,
+                    subject=subject,
+                    body=final_email_body,
+                    email_type=email_type_val,
+                    cc=cc_email
+                )
+                send_status = "Sent"
+                logger.info(f"ActionRegistry: Direct SMTP email sent to {to_email} with subject '{subject}'")
+        except Exception as direct_err:
+            logger.warning(f"ActionRegistry: Direct SMTP email sending warning: {direct_err}")
 
     context_vars["email_to"] = to_email
     if cc_email:
@@ -606,7 +631,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         "email_cc": cc_email,
         "email_bcc": bcc_email,
         "email_subject": subject,
-        "send_status": "New"
+        "send_status": send_status
     }
 
 

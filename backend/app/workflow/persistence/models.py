@@ -22,6 +22,7 @@ class BPMNDefinition(WorkflowBase):
     tags = Column(String(500))
     connection_id = Column(Integer, nullable=True)  # Bound Client Database Connection ID
     created_by = Column(Integer)
+    is_deleted = Column(Integer, default=0, nullable=False)
     created_on = Column(DateTime, default=datetime.now, nullable=False)
     updated_on = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
     published_on = Column(DateTime)

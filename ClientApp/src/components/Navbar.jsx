@@ -27,7 +27,14 @@ export default function Navbar({
   const [socketLive, setSocketLive] = useState(workflowSocket.isConnected)
   const [checking, setChecking] = useState(false)
 
+  const isConfigured = Boolean(workflowClient.getServerUrl())
+
   const checkHealth = async () => {
+    if (!workflowClient.getServerUrl()) {
+      setServerOnline(false)
+      setChecking(false)
+      return
+    }
     setChecking(true)
     const res = await workflowClient.testConnection()
     setServerOnline(res.success)
@@ -35,6 +42,11 @@ export default function Navbar({
   }
 
   useEffect(() => {
+    if (!workflowClient.getServerUrl()) {
+      setServerOnline(false)
+      setSocketLive(false)
+      return
+    }
     checkHealth()
     const interval = setInterval(checkHealth, 30000)
     const unsubSocket = workflowSocket.onStatusChange((isLive) => {
@@ -116,14 +128,32 @@ export default function Navbar({
       <div className="nav-right-actions">
         {/* Remote Server & Real-Time Socket Indicator */}
         <button
-          className={`server-status-pill ${socketLive ? 'online' : (serverOnline ? 'online' : 'offline')}`}
+          className={`server-status-pill ${
+            !isConfigured
+              ? 'disconnected'
+              : socketLive
+              ? 'online'
+              : serverOnline
+              ? 'online'
+              : 'offline'
+          }`}
           onClick={onOpenServerModal}
-          title={socketLive ? 'Workflow Engine: Real-Time WebSocket Connected' : 'Click to configure Central Workflow Server'}
+          title={
+            !isConfigured
+              ? 'Workflow Server: Disconnected (Optional). Click to configure.'
+              : socketLive
+              ? 'Workflow Engine: Real-Time WebSocket Connected'
+              : 'Click to configure Central Workflow Server'
+          }
         >
           <span className="pulse-dot" />
           <Server size={13} />
           <span className="server-label">
-            {socketLive ? '⚡ Live Socket' : workflowClient.getServerUrl().replace('http://', '').replace('https://', '')}
+            {!isConfigured
+              ? 'No Connection (Optional)'
+              : socketLive
+              ? '⚡ Live Socket'
+              : workflowClient.getServerUrl().replace('http://', '').replace('https://', '')}
           </span>
           <Settings size={12} className="opacity-60" />
         </button>

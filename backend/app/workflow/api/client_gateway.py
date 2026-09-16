@@ -173,6 +173,13 @@ def execute_client_query(
         # -------------------------------------------------------------
         elif operation == "INSERT":
             vals = payload.values or {}
+            
+            # Auto-fill timestamps if present in table
+            now_dt = datetime.utcnow()
+            for ts_col in ("created_at", "updated_at", "submitted_at"):
+                if ts_col in valid_cols and ts_col not in vals:
+                    vals[ts_col] = now_dt
+
             filtered_vals = {k: v for k, v in vals.items() if k in valid_cols}
             if not filtered_vals:
                 raise HTTPException(status_code=400, detail="No valid column values provided for INSERT.")

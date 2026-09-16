@@ -189,6 +189,16 @@ body {
   box-shadow: 0 0 8px #ef4444;
 }
 
+.server-status-pill.disconnected {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.server-status-pill.disconnected .pulse-dot {
+  background: #64748b;
+  box-shadow: none;
+}
+
 /* User Switcher */
 .user-dropdown-wrapper {
   position: relative;
@@ -433,6 +443,12 @@ body {
   color: #fff;
 }
 
+.preset-btn.active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+  color: #fff;
+}
+
 /* Modals */
 .modal-overlay {
   position: fixed;
@@ -592,6 +608,19 @@ body {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: #f87171;
+}
+
+.status-banner.neutral {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+}
+
+.info-banner {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 
 .routing-preview-box {

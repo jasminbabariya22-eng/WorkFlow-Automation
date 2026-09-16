@@ -225,13 +225,10 @@ def delete_workflow_definition(
         if not definition:
             raise HTTPException(status_code=404, detail="Workflow definition not found")
 
-        # Active production workflows cannot be deleted directly
-        if definition.is_active:
-            raise HTTPException(status_code=400, detail="Active production workflow versions cannot be deleted. Deactivate it first.")
-
-        db.delete(definition)
+        definition.is_deleted = 1
+        definition.is_active = False
         db.commit()
-        return success_response(message="Workflow version deleted successfully")
+        return success_response(message="Workflow definition deleted successfully")
     except Exception as e:
         db.rollback()
         return error_response(message=str(e), status_code=400)

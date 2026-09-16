@@ -1,7 +1,6 @@
 /**
  * clientDb.js
  * In-Memory Directory for PostgreSQL Users & Leave Types.
- * No local persistence or mock storage simulation.
  */
 
 export const USERS = [
@@ -21,15 +20,6 @@ export const LEAVE_TYPES = [
 ]
 
 class ClientDatabase {
-  constructor() {
-    // Clear any legacy storage on startup
-    try {
-      Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('clientdb_')) localStorage.removeItem(k)
-      })
-    } catch (_e) {}
-  }
-
   getUsers() {
     return USERS
   }

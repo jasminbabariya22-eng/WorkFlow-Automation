@@ -16,15 +16,18 @@ import {
   ArrowRight,
   FileText,
   Building,
-  Info
+  Info,
+  Zap,
+  RefreshCw
 } from 'lucide-react'
 import { clientDb } from '../services/clientDb'
 import { genericWorkflowApi } from '../services/genericWorkflowApi'
 
-const MODULE_KEY = 'leave_requests'
+const WORKFLOW_KEY = 'emp_leave_request'
 
 export default function LeaveModule({ currentUser, onDataChanged }) {
   const [leavesList, setLeavesList] = useState([])
+  const [userBalances, setUserBalances] = useState([])
   const [isLoading, setIsLoading] = useState(false)
 
   // Roles
@@ -32,7 +35,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const isHR = currentUser?.role === 'HR'
   const canApprove = isManager || isHR
 
-  // Subtabs: For Manager, allow switching between 'approvals' and 'my_requests'
+  // Subtabs
   const [activeSubTab, setActiveSubTab] = useState(isManager ? 'approvals' : 'my_requests')
 
   // Search & Filter state
@@ -51,7 +54,6 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const [rejectionError, setRejectionError] = useState('')
 
   // Form State
-  const [selectedWorkflowKey, setSelectedWorkflowKey] = useState('emp_leave_request')
   const [leaveTypeId, setLeaveTypeId] = useState(1)
   const [startDate, setStartDate] = useState('2026-09-10')
   const [endDate, setEndDate] = useState('2026-09-12')
@@ -61,9 +63,8 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [actionLoadingId, setActionLoadingId] = useState(null)
   const [feedbackBanner, setFeedbackBanner] = useState(null)
-  const [userBalances, setUserBalances] = useState([])
 
-  // Leave types from directory
+  // Leave types
   const leaveTypes = useMemo(() => clientDb.getLeaveTypes(), [])
 
   // Manager record for current user
@@ -71,12 +72,12 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     return clientDb.getManagerForUser(currentUser?.id)
   }, [currentUser])
 
-  // Generic records fetch from Python Gateway
+  // 1. Fetch live records directly from Server ClientDB & Workflow API
   const loadRecords = async () => {
     try {
       setIsLoading(true)
-      const data = await genericWorkflowApi.fetchRecords(MODULE_KEY)
-      if (Array.isArray(data)) {
+      const data = await genericWorkflowApi.fetchRecords(WORKFLOW_KEY)
+      if (Array.isArray(data) && data.length > 0) {
         const users = clientDb.getUsers()
         const types = clientDb.getLeaveTypes()
         const mapped = data.map(r => {
@@ -84,29 +85,31 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
           const mgr = u ? clientDb.getManagerForUser(u.id) : null
           const lt = types.find(t => Number(t.id) === Number(r.leave_type_id))
           return {
-            id: r.leave_request_id,
+            id: r.leave_request_id || r.id,
             employeeId: String(r.employee_id),
-            employeeName: u ? u.name : `Employee #${r.employee_id}`,
-            employeeEmail: u ? u.email : 'employee@company.com',
+            employeeName: u ? u.name : (r.employee_name || `Employee #${r.employee_id}`),
+            employeeEmail: u ? u.email : (r.employee_email || 'employee@company.com'),
             managerId: mgr ? String(mgr.id) : (u?.manager_id ? String(u.manager_id) : '3'),
             managerName: mgr ? mgr.name : 'Rajesh Kumar',
             leaveTypeId: r.leave_type_id,
-            leaveType: lt ? lt.name : 'Annual Leave',
+            leaveType: lt ? lt.name : (r.leave_type || 'Annual Leave'),
             startDate: r.start_date,
             endDate: r.end_date || r.start_date,
             days: Number(r.days) || 1,
             status: String(r.status || 'PENDING').toUpperCase(),
             reason: r.reason || 'Leave Request',
-            moduleKey: Number(r.leave_type_id) === 5 ? 'wfh_requests' : MODULE_KEY,
-            submittedAt: r.submitted_at ? new Date(r.submitted_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : 'Recent'
+            submittedAt: r.submitted_at
+              ? new Date(r.submitted_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+              : 'Recent'
           }
         })
         setLeavesList(mapped)
       } else {
+        // If server returns empty array
         setLeavesList([])
       }
 
-      // Also fetch live leave balances from clientDB
+      // Fetch live leave balances from API
       try {
         const bData = await genericWorkflowApi.fetchRecords('leave_balances')
         if (Array.isArray(bData)) {
@@ -122,7 +125,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
             })
           setUserBalances(myB)
         }
-      } catch (_bErr) { }
+      } catch (_bErr) {}
     } catch (_e) {
       setLeavesList([])
     } finally {
@@ -132,6 +135,11 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
   useEffect(() => {
     loadRecords()
+    if (isManager) {
+      setActiveSubTab('approvals')
+    } else {
+      setActiveSubTab('my_requests')
+    }
   }, [currentUser])
 
   // Data Slices
@@ -141,7 +149,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
   const pendingApprovals = useMemo(() => {
     return canApprove
-      ? leavesList.filter(r => (r.status === 'PENDING' || r.status === 'PENDING_MANAGER' || r.status === 'PENDING_CANCELLATION') && String(r.managerId) === String(currentUser?.id))
+      ? leavesList.filter(r => (r.status === 'PENDING' || r.status === 'PENDING_MANAGER' || r.status === 'PENDING_APPROVAL') && String(r.managerId) === String(currentUser?.id))
       : []
   }, [leavesList, currentUser, canApprove])
 
@@ -160,7 +168,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
   const summaryMetrics = useMemo(() => {
     const list = myRequests
     const total = list.length
-    const pending = list.filter(r => r.status === 'PENDING' || r.status === 'PENDING_MANAGER').length
+    const pending = list.filter(r => r.status === 'PENDING' || r.status === 'PENDING_MANAGER' || r.status === 'PENDING_APPROVAL').length
     const approved = list.filter(r => r.status === 'APPROVED').length
     const rejected = list.filter(r => r.status === 'REJECTED').length
     return { total, pending, approved, rejected }
@@ -179,7 +187,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
       const matchesStatus =
         statusFilter === 'ALL' ||
-        (statusFilter === 'PENDING' && (item.status === 'PENDING' || item.status === 'PENDING_MANAGER')) ||
+        (statusFilter === 'PENDING' && (item.status === 'PENDING' || item.status === 'PENDING_MANAGER' || item.status === 'PENDING_APPROVAL')) ||
         item.status === statusFilter
 
       const matchesType = typeFilter === 'ALL' || item.leaveType === typeFilter
@@ -198,6 +206,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setLeaveTypeId(1)
   }
 
+  // 2. Submit Leave Application via Server Workflow API (Writes to ClientDB & triggers engine)
   const handleSubmitLeave = async (e) => {
     e.preventDefault()
     if (isSubmitting) return
@@ -208,22 +217,26 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     const typeName = selectedTypeObj ? selectedTypeObj.name : 'Annual Leave'
 
     try {
-      // 1. Generic submission through Python Gateway (routes to wfh_requests if leave_type_id is 5, else selectedWorkflowKey)
-      const targetKey = Number(leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey
-      const res = await genericWorkflowApi.submit(targetKey, {
+      const res = await genericWorkflowApi.submit(WORKFLOW_KEY, {
         employee_id: Number(currentUser.id) || 5,
         leave_type_id: Number(leaveTypeId) || 1,
         start_date: startDate,
         end_date: endDate,
         days: Number(calculatedDays) || 1,
-        reason: reason || (Number(leaveTypeId) === 5 ? 'Work From Home' : 'Leave Request'),
+        reason: reason || 'Leave Request',
         status: 'PENDING'
       }, currentUser)
 
+      setFeedbackBanner({
+        type: 'success',
+        message: `✓ Leave Request submitted! Saved in ClientDB & Workflow instance launched.`
+      })
+
       await loadRecords()
+      if (onDataChanged) onDataChanged()
 
       setSubmissionResult({
-        id: res.record_id,
+        id: res.record_id || res.id,
         leaveType: typeName,
         startDate,
         endDate,
@@ -234,7 +247,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
-        message: err.message || 'Unable to submit leave request.'
+        message: `Error submitting to server: ${err.message}`
       })
     } finally {
       setIsSubmitting(false)
@@ -247,16 +260,14 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setApprovalComment('')
   }
 
+  // 3. Confirm Approve via Server API (Updates ClientDB record & advances SpiffWorkflow engine)
   const handleConfirmApprove = async () => {
     if (!approveConfirmItem || actionLoadingId) return
     const requestId = approveConfirmItem.id
     setActionLoadingId(requestId)
-    const targetKey = approveConfirmItem.status === 'PENDING_CANCELLATION'
-      ? 'leave_cancellation'
-      : (approveConfirmItem.moduleKey || (Number(approveConfirmItem.leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey))
 
     try {
-      await genericWorkflowApi.executeAction(targetKey, requestId, 'APPROVE', approvalComment, currentUser, {
+      await genericWorkflowApi.executeAction(WORKFLOW_KEY, requestId, 'APPROVE', approvalComment, currentUser, {
         employee_id: Number(approveConfirmItem.employeeId),
         leave_type_id: Number(approveConfirmItem.leaveTypeId),
         days: Number(approveConfirmItem.days) || 1,
@@ -266,15 +277,14 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
       setFeedbackBanner({
         type: 'success',
-        message: approveConfirmItem.status === 'PENDING_CANCELLATION'
-          ? `✓ Leave cancellation for #LR-${requestId} has been approved. Status is now CANCELLED.`
-          : `✓ Leave request #LR-${requestId} approved successfully.`
+        message: `✓ Leave request #LR-${requestId} approved! ClientDB updated & workflow completed.`
       })
 
       setApproveConfirmItem(null)
       await loadRecords()
+      if (onDataChanged) onDataChanged()
     } catch (err) {
-      setFeedbackBanner({ type: 'error', message: err.message })
+      setFeedbackBanner({ type: 'error', message: `Approval error: ${err.message}` })
     } finally {
       setActionLoadingId(null)
     }
@@ -287,6 +297,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
     setRejectionError('')
   }
 
+  // 4. Confirm Reject via Server API (Updates ClientDB record & rejects workflow)
   const handleConfirmReject = async () => {
     if (!rejectConfirmItem || actionLoadingId) return
     if (!rejectionReason.trim()) {
@@ -296,12 +307,9 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
     const requestId = rejectConfirmItem.id
     setActionLoadingId(requestId)
-    const targetKey = rejectConfirmItem.status === 'PENDING_CANCELLATION'
-      ? 'leave_cancellation'
-      : (rejectConfirmItem.moduleKey || (Number(rejectConfirmItem.leaveTypeId) === 5 ? 'wfh_requests' : selectedWorkflowKey))
 
     try {
-      await genericWorkflowApi.executeAction(targetKey, requestId, 'REJECT', rejectionReason, currentUser, {
+      await genericWorkflowApi.executeAction(WORKFLOW_KEY, requestId, 'REJECT', rejectionReason, currentUser, {
         employee_id: Number(rejectConfirmItem.employeeId),
         leave_type_id: Number(rejectConfirmItem.leaveTypeId),
         days: Number(rejectConfirmItem.days) || 1,
@@ -310,39 +318,16 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
 
       setFeedbackBanner({
         type: 'success',
-        message: rejectConfirmItem.status === 'PENDING_CANCELLATION'
-          ? `✓ Leave cancellation for #LR-${requestId} was rejected. Status remains APPROVED.`
-          : `✓ Leave request #LR-${requestId} rejected.`
+        message: `✓ Leave request #LR-${requestId} rejected! ClientDB updated.`
       })
 
       setRejectConfirmItem(null)
       await loadRecords()
+      if (onDataChanged) onDataChanged()
     } catch (err) {
-      setFeedbackBanner({ type: 'error', message: err.message })
+      setFeedbackBanner({ type: 'error', message: `Rejection error: ${err.message}` })
     } finally {
       setActionLoadingId(null)
-    }
-  }
-
-  const handleRequestCancellation = async (req, e) => {
-    if (e) e.stopPropagation()
-    try {
-      await genericWorkflowApi.submit('leave_cancellation', {
-        employee_id: Number(currentUser.id),
-        leave_type_id: req.leaveTypeId || 1,
-        start_date: req.startDate,
-        end_date: req.endDate,
-        reason: `Cancellation requested for Leave #LR-${req.id}`,
-        status: 'PENDING_CANCELLATION'
-      }, currentUser)
-
-      setFeedbackBanner({
-        type: 'success',
-        message: `✓ Leave cancellation requested for #LR-${req.id}! Workflow #1122 (leave_cancellation_wf) launched.`
-      })
-      await loadRecords()
-    } catch (err) {
-      setFeedbackBanner({ type: 'error', message: err.message })
     }
   }
 
@@ -371,40 +356,29 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </span>
       )
     }
-    if (s === 'CANCELLED') {
-      return (
-        <span className="status-pill badge-neutral" style={{ background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}>
-          <XCircle size={12} />
-          <span>Cancelled</span>
-        </span>
-      )
-    }
-    if (s === 'PENDING_CANCELLATION') {
-      return (
-        <span className="status-pill warning" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-          <Clock size={12} />
-          <span>Pending Cancellation</span>
-        </span>
-      )
-    }
     return (
       <span className="status-pill pending">
         <Clock size={12} />
-        <span>Pending Manager Approval</span>
+        <span>Pending Approval</span>
       </span>
     )
   }
 
   return (
     <div className="module-container">
-      {/* 1. Header Section */}
+      {/* Header Section */}
       <div className="module-header-row">
         <div>
-          <h2 className="module-title">🌴 Leave Management</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="module-title">🌴 Leave Management</h2>
+            <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+              ⚡ emp_leave_request
+            </span>
+          </div>
           <p className="module-subtitle">
             {isManager
-              ? 'Review employee leave applications and manage your personal leave requests'
-              : 'Request and track your leave applications with your reporting manager'}
+              ? 'Review employee leave applications and manage personal leave requests'
+              : 'Submit leave applications directly to your workflow server'}
           </p>
         </div>
 
@@ -424,11 +398,11 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* Live Leave Quota & Balance Cards */}
+      {/* Live Leave Balance Cards */}
       {userBalances.length > 0 && (
         <div className="leave-balance-grid mb-6">
           {userBalances.map((b) => (
-            <div key={b.balance_id} className="leave-balance-card">
+            <div key={b.balance_id || b.id} className="leave-balance-card">
               <div className="balance-card-header">
                 <span className="balance-type-title">{b.leaveTypeName}</span>
                 {Number(b.pending_days) > 0 && (
@@ -449,7 +423,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* 2. Manager Subtabs Navigation (if user is Manager) */}
+      {/* Manager Subtabs Navigation (if user is Manager) */}
       {isManager && (
         <div className="leave-subtabs-row">
           <div className="leave-subtabs">
@@ -474,7 +448,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* 3. MANAGER PENDING APPROVALS VIEW */}
+      {/* MANAGER PENDING APPROVALS VIEW */}
       {isManager && activeSubTab === 'approvals' && (
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -482,7 +456,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
               Assigned Leave Requests ({pendingApprovals.length})
             </div>
             <div className="text-xs text-muted">
-              Only requests from your direct reports are shown here.
+              Live records from clientDB awaiting your review.
             </div>
           </div>
 
@@ -544,7 +518,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                         )}
 
                         <div className="text-xs text-muted">
-                          Submitted: <span className="text-slate-300">{req.submittedAt || req.createdOn}</span>
+                          Submitted: <span className="text-slate-300">{req.submittedAt}</span>
                         </div>
                       </div>
                     </div>
@@ -587,7 +561,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* 4. MY REQUESTS & EMPLOYEE DASHBOARD VIEW */}
+      {/* MY REQUESTS & EMPLOYEE DASHBOARD VIEW */}
       {(!isManager || activeSubTab === 'my_requests') && (
         <div>
           {/* Summary Metrics Bar */}
@@ -704,7 +678,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                     <td colSpan={7} style={{ textAlign: 'center', padding: '36px' }}>
                       <div className="text-muted text-sm">
                         {myRequests.length === 0
-                          ? 'No leave requests found.'
+                          ? 'No leave requests found in clientDB.'
                           : 'No requests match the selected filters.'}
                       </div>
                       {myRequests.length === 0 && (
@@ -755,15 +729,6 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                             <Eye size={12} />
                             <span>View Details</span>
                           </button>
-                          {req.status === 'APPROVED' && (
-                            <button
-                              className="btn btn-danger-outline text-xs"
-                              title="Trigger 2nd Workflow: Leave Cancellation"
-                              onClick={(e) => handleRequestCancellation(req, e)}
-                            >
-                              <span>Cancel Leave</span>
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -775,7 +740,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* 5. APPLY FOR LEAVE MODAL */}
+      {/* APPLY FOR LEAVE MODAL */}
       {showApplyModal && (
         <div className="modal-overlay" onClick={() => !isSubmitting && setShowApplyModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -791,7 +756,7 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                     Request #LR-{submissionResult.id}
                   </div>
                   <p className="text-sm text-muted text-center max-w-sm mb-4">
-                    Your leave request for <strong>{submissionResult.days} day(s)</strong> has been submitted to{' '}
+                    Your leave request for <strong>{submissionResult.days} day(s)</strong> has been saved in ClientDB and submitted to{' '}
                     <strong className="text-white">{submissionResult.managerName}</strong> for approval.
                   </p>
                   <div className="status-pill pending mb-4">
@@ -811,20 +776,19 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                     <button
                       className="btn btn-primary"
                       onClick={() => {
-                        const item = submissionResult
-                        setShowApplyModal(false)
                         setSubmissionResult(null)
-                        handleViewDetails(item)
+                        setStartDate('2026-09-15')
+                        setEndDate('2026-09-16')
+                        setReason('')
                       }}
                     >
-                      <Eye size={14} />
-                      <span>View Request</span>
+                      Apply Another
                     </button>
                   </div>
                 </div>
               </div>
             ) : (
-              /* Application Form */
+              /* Apply Form */
               <form onSubmit={handleSubmitLeave}>
                 <div className="modal-header">
                   <div className="flex items-center gap-2">
@@ -842,35 +806,6 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                 </div>
 
                 <div className="modal-body">
-                  {/* Triggered Workflow Process */}
-                  <div className="field-group mb-3">
-                    <label className="field-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Triggered Workflow Process</span>
-                      <span style={{ fontSize: '10px', background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.3)', fontWeight: '600' }}>
-                        STUDIO BINDING
-                      </span>
-                    </label>
-                    <select
-                      className="select-input"
-                      value={selectedWorkflowKey}
-                      onChange={(e) => setSelectedWorkflowKey(e.target.value)}
-                      disabled={isSubmitting || Number(leaveTypeId) === 5}
-                      style={{ borderColor: selectedWorkflowKey === 'emp_leave_request' ? '#38bdf8' : '#818cf8' }}
-                    >
-                      <option value="emp_leave_request">
-                        ⚡ Employee Leave Request (Workflow #112 - Standard Manager Review & Notice)
-                      </option>
-                      <option value="leave_requests">
-                        ⚡ Leave Balance Tracking & Deduction (Workflow #1125 - Quota Check & Auto-Deduction)
-                      </option>
-                    </select>
-                    {Number(leaveTypeId) === 5 && (
-                      <div style={{ fontSize: '11px', color: '#38bdf8', marginTop: '4px' }}>
-                        ℹ️ Automatically routes to Work From Home Workflow (wfh_requests #1124)
-                      </div>
-                    )}
-                  </div>
-
                   {/* Leave Type */}
                   <div className="field-group mb-3">
                     <label className="field-label">Leave Type</label>
@@ -919,45 +854,29 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                     </div>
                   </div>
 
-                  {/* Duration & Reporting Manager (Both Read-Only) */}
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div className="field-group">
-                      <label className="field-label">Duration (Calculated)</label>
-                      <div className="read-only-field">
-                        <Clock size={14} />
-                        <span>
-                          {calculatedDays} Day{calculatedDays > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="field-group">
-                      <label className="field-label">Reporting Manager</label>
-                      <div className="read-only-field">
-                        <User size={14} />
-                        <span className="text-white font-semibold">
-                          {reportingManager ? reportingManager.name : 'Bob Roberts (Default)'}
-                        </span>
-                      </div>
-                    </div>
+                  <div className="text-xs text-muted mb-3 flex items-center gap-1">
+                    <span>Duration:</span>
+                    <strong className="text-white font-mono">{calculatedDays} Day{calculatedDays > 1 ? 's' : ''}</strong>
+                    <span className="text-slate-500 ml-2">&bull; Reporting Manager:</span>
+                    <strong className="text-slate-300">{reportingManager?.name || 'Rajesh Kumar'}</strong>
                   </div>
 
                   {/* Reason */}
                   <div className="field-group mb-2">
                     <label className="field-label">Reason / Notes</label>
                     <textarea
+                      className="text-input"
                       rows={3}
-                      className="textarea-input"
-                      placeholder="Please provide a brief reason for your leave request..."
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
+                      placeholder="Briefly state reason for leave request..."
                       disabled={isSubmitting}
                       required
                     />
                   </div>
                 </div>
 
-                <div className="modal-footer flex justify-end gap-2">
+                <div className="modal-footer flex justify-between items-center">
                   <button
                     type="button"
                     className="btn btn-outline"
@@ -966,13 +885,14 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                   >
                     Cancel
                   </button>
+
                   <button
                     type="submit"
                     className="btn btn-primary"
                     disabled={isSubmitting}
                   >
-                    <Send size={14} />
-                    <span>{isSubmitting ? 'Submitting...' : 'Submit Leave Request'}</span>
+                    <Send size={13} />
+                    <span>{isSubmitting ? 'Submitting to Server...' : 'Submit Application'}</span>
                   </button>
                 </div>
               </form>
@@ -981,188 +901,16 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
         </div>
       )}
 
-      {/* 6. REQUEST DETAILS MODAL */}
-      {selectedRequest && (
-        <div className="modal-overlay" onClick={() => setSelectedRequest(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2">
-                <FileText size={18} color="#818cf8" />
-                <span className="modal-title font-mono">
-                  Leave Request #LR-{selectedRequest.id}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="icon-btn-sm"
-                onClick={() => setSelectedRequest(null)}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              {/* Top Status */}
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs text-muted uppercase font-bold">Current Status:</span>
-                <div>{getStatusBadge(selectedRequest.status)}</div>
-              </div>
-
-              {/* Meta Grid */}
-              <div className="detail-meta-grid">
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Employee</span>
-                  <span className="detail-meta-value flex items-center gap-1">
-                    <User size={14} color="#818cf8" />
-                    {selectedRequest.employeeName || selectedRequest.userName}
-                  </span>
-                </div>
-
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Leave Type</span>
-                  <span className="detail-meta-value">{selectedRequest.leaveType}</span>
-                </div>
-
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Dates</span>
-                  <span className="detail-meta-value">
-                    {selectedRequest.startDate}{' '}
-                    {selectedRequest.endDate && selectedRequest.endDate !== selectedRequest.startDate
-                      ? `→ ${selectedRequest.endDate}`
-                      : ''}
-                  </span>
-                </div>
-
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Duration</span>
-                  <span className="detail-meta-value">
-                    {selectedRequest.days} Day{selectedRequest.days > 1 ? 's' : ''}
-                  </span>
-                </div>
-
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Reporting Manager</span>
-                  <span className="detail-meta-value">
-                    {selectedRequest.managerName || 'Assigned Manager'}
-                  </span>
-                </div>
-
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Submitted</span>
-                  <span className="detail-meta-value text-xs">
-                    {selectedRequest.submittedAt || selectedRequest.createdOn}
-                  </span>
-                </div>
-              </div>
-
-              {/* Reason */}
-              {selectedRequest.reason && (
-                <div className="mb-3">
-                  <label className="field-label mb-1">Reason</label>
-                  <div className="read-only-field" style={{ color: '#e2e8f0' }}>
-                    {selectedRequest.reason}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Details (Approved/Rejected) */}
-              {selectedRequest.status === 'APPROVED' && selectedRequest.actionedBy && (
-                <div className="status-banner success mb-3 text-xs">
-                  <div>
-                    <strong>Approved By:</strong> {selectedRequest.actionedBy}
-                    {selectedRequest.actionedAt && ` on ${selectedRequest.actionedAt}`}
-                    {selectedRequest.approvalComment && (
-                      <div className="mt-1">
-                        <em>"{selectedRequest.approvalComment}"</em>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {selectedRequest.status === 'REJECTED' && selectedRequest.actionedBy && (
-                <div className="status-banner error mb-3 text-xs">
-                  <div>
-                    <strong>Rejected By:</strong> {selectedRequest.actionedBy}
-                    {selectedRequest.actionedAt && ` on ${selectedRequest.actionedAt}`}
-                    {selectedRequest.rejectionReason && (
-                      <div className="mt-1 font-semibold">
-                        Rejection Reason: <em>"{selectedRequest.rejectionReason}"</em>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Approval History Timeline */}
-              {Array.isArray(selectedRequest.history) && selectedRequest.history.length > 0 && (
-                <div className="timeline-section">
-                  <div className="timeline-title">Approval History</div>
-                  <div className="timeline-list">
-                    {selectedRequest.history.map((h, idx) => (
-                      <div key={idx} className="timeline-item">
-                        <div className={`timeline-dot ${(h.type || '').toLowerCase()}`} />
-                        <div className="timeline-item-header">
-                          <span>{h.title || h.type}</span>
-                          <span className="text-muted font-normal">&bull;</span>
-                          <span className="text-slate-300 font-normal">{h.actor}</span>
-                        </div>
-                        <div className="timeline-item-meta">{h.timestamp}</div>
-                        {h.note && <div className="timeline-item-note">{h.note}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="modal-footer flex justify-between items-center">
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => setSelectedRequest(null)}
-              >
-                Close
-              </button>
-
-              {/* Manager Actions (Only visible if current user is manager of this request and request is PENDING) */}
-              {canApprove &&
-                String(selectedRequest.managerId) === String(currentUser.id) &&
-                (selectedRequest.status === 'PENDING' || selectedRequest.status === 'PENDING_MANAGER') && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="btn btn-danger-outline"
-                      onClick={() => handleOpenRejectModal(selectedRequest)}
-                    >
-                      <XCircle size={14} />
-                      <span>Reject</span>
-                    </button>
-                    <button
-                      className="btn btn-success"
-                      onClick={() => handleOpenApproveModal(selectedRequest)}
-                    >
-                      <Check size={14} />
-                      <span>Approve</span>
-                    </button>
-                  </div>
-                )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 7. APPROVE CONFIRMATION MODAL */}
+      {/* APPROVE CONFIRMATION MODAL */}
       {approveConfirmItem && (
         <div className="modal-overlay" onClick={() => !actionLoadingId && setApproveConfirmItem(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={18} color="#34d399" />
-                <span className="modal-title">Approve Leave Request?</span>
+                <CheckCircle2 size={18} color="#4ade80" />
+                <span className="modal-title">Approve Leave Request</span>
               </div>
               <button
-                type="button"
                 className="icon-btn-sm"
                 onClick={() => setApproveConfirmItem(null)}
                 disabled={Boolean(actionLoadingId)}
@@ -1172,48 +920,41 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
             </div>
 
             <div className="modal-body">
-              <div className="detail-meta-grid mb-3">
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Employee</span>
-                  <span className="detail-meta-value">{approveConfirmItem.employeeName}</span>
+              <p className="text-sm text-slate-300 mb-3">
+                Are you sure you want to approve the leave request for{' '}
+                <strong className="text-white">{approveConfirmItem.employeeName}</strong>?
+              </p>
+
+              <div className="bg-card-subtle p-3 rounded-md mb-3 text-xs">
+                <div className="flex justify-between mb-1">
+                  <span className="text-muted">Request #:</span>
+                  <span className="font-mono text-white font-bold">#LR-{approveConfirmItem.id}</span>
                 </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Leave Type</span>
-                  <span className="detail-meta-value">{approveConfirmItem.leaveType}</span>
+                <div className="flex justify-between mb-1">
+                  <span className="text-muted">Type:</span>
+                  <span className="text-white">{approveConfirmItem.leaveType}</span>
                 </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Dates</span>
-                  <span className="detail-meta-value">
-                    {approveConfirmItem.startDate}{' '}
-                    {approveConfirmItem.endDate && approveConfirmItem.endDate !== approveConfirmItem.startDate
-                      ? `→ ${approveConfirmItem.endDate}`
-                      : ''}
-                  </span>
-                </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Duration</span>
-                  <span className="detail-meta-value">
-                    {approveConfirmItem.days} Day{approveConfirmItem.days > 1 ? 's' : ''}
-                  </span>
+                <div className="flex justify-between mb-1">
+                  <span className="text-muted">Dates:</span>
+                  <span className="text-white">{approveConfirmItem.startDate} &rarr; {approveConfirmItem.endDate} ({approveConfirmItem.days}d)</span>
                 </div>
               </div>
 
-              <div className="field-group mb-2">
-                <label className="field-label">Approval Comment (Optional)</label>
+              <div className="field-group">
+                <label className="field-label">Approval Remarks (Optional)</label>
                 <textarea
+                  className="text-input"
                   rows={2}
-                  className="textarea-input"
-                  placeholder="Add an optional comment for the employee..."
                   value={approvalComment}
                   onChange={(e) => setApprovalComment(e.target.value)}
+                  placeholder="e.g. Approved. Have a good break!"
                   disabled={Boolean(actionLoadingId)}
                 />
               </div>
             </div>
 
-            <div className="modal-footer flex justify-end gap-2">
+            <div className="modal-footer flex justify-between">
               <button
-                type="button"
                 className="btn btn-outline"
                 onClick={() => setApproveConfirmItem(null)}
                 disabled={Boolean(actionLoadingId)}
@@ -1221,30 +962,28 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                 Cancel
               </button>
               <button
-                type="button"
                 className="btn btn-success"
                 onClick={handleConfirmApprove}
                 disabled={Boolean(actionLoadingId)}
               >
                 <Check size={14} />
-                <span>{actionLoadingId ? 'Approving...' : 'Confirm Approval'}</span>
+                <span>{actionLoadingId ? 'Approving on Server...' : 'Confirm Approval'}</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 8. REJECT CONFIRMATION MODAL */}
+      {/* REJECT CONFIRMATION MODAL */}
       {rejectConfirmItem && (
         <div className="modal-overlay" onClick={() => !actionLoadingId && setRejectConfirmItem(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="flex items-center gap-2">
                 <XCircle size={18} color="#f87171" />
-                <span className="modal-title">Reject Leave Request?</span>
+                <span className="modal-title">Reject Leave Request</span>
               </div>
               <button
-                type="button"
                 className="icon-btn-sm"
                 onClick={() => setRejectConfirmItem(null)}
                 disabled={Boolean(actionLoadingId)}
@@ -1254,58 +993,35 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
             </div>
 
             <div className="modal-body">
-              <div className="detail-meta-grid mb-3">
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Employee</span>
-                  <span className="detail-meta-value">{rejectConfirmItem.employeeName}</span>
-                </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Leave Type</span>
-                  <span className="detail-meta-value">{rejectConfirmItem.leaveType}</span>
-                </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Dates</span>
-                  <span className="detail-meta-value">
-                    {rejectConfirmItem.startDate}{' '}
-                    {rejectConfirmItem.endDate && rejectConfirmItem.endDate !== rejectConfirmItem.startDate
-                      ? `→ ${rejectConfirmItem.endDate}`
-                      : ''}
-                  </span>
-                </div>
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Duration</span>
-                  <span className="detail-meta-value">
-                    {rejectConfirmItem.days} Day{rejectConfirmItem.days > 1 ? 's' : ''}
-                  </span>
-                </div>
-              </div>
+              <p className="text-sm text-slate-300 mb-3">
+                Reject leave request for <strong className="text-white">{rejectConfirmItem.employeeName}</strong>.
+              </p>
 
               <div className="field-group mb-2">
-                <label className="field-label">Rejection Reason *</label>
+                <label className="field-label">Rejection Reason (Required)</label>
                 <textarea
+                  className="text-input"
                   rows={3}
-                  className="textarea-input"
-                  placeholder="Please state why this request cannot be approved..."
                   value={rejectionReason}
                   onChange={(e) => {
                     setRejectionReason(e.target.value)
-                    if (e.target.value.trim()) setRejectionError('')
+                    setRejectionError('')
                   }}
+                  placeholder="State the reason for rejecting this leave request..."
                   disabled={Boolean(actionLoadingId)}
                   required
                 />
-                {rejectionError && (
-                  <span className="text-xs text-danger font-semibold mt-1 flex items-center gap-1">
-                    <AlertCircle size={12} />
-                    {rejectionError}
-                  </span>
-                )}
               </div>
+
+              {rejectionError && (
+                <div className="text-xs text-red-400 mt-1">
+                  {rejectionError}
+                </div>
+              )}
             </div>
 
-            <div className="modal-footer flex justify-end gap-2">
+            <div className="modal-footer flex justify-between">
               <button
-                type="button"
                 className="btn btn-outline"
                 onClick={() => setRejectConfirmItem(null)}
                 disabled={Boolean(actionLoadingId)}
@@ -1313,13 +1029,82 @@ export default function LeaveModule({ currentUser, onDataChanged }) {
                 Cancel
               </button>
               <button
-                type="button"
                 className="btn btn-danger"
                 onClick={handleConfirmReject}
                 disabled={Boolean(actionLoadingId)}
               >
                 <XCircle size={14} />
-                <span>{actionLoadingId ? 'Rejecting...' : 'Reject Request'}</span>
+                <span>{actionLoadingId ? 'Rejecting on Server...' : 'Confirm Rejection'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW DETAILS MODAL */}
+      {selectedRequest && (
+        <div className="modal-overlay" onClick={() => setSelectedRequest(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2">
+                <FileText size={18} color="#818cf8" />
+                <span className="modal-title">Leave Request #LR-{selectedRequest.id}</span>
+              </div>
+              <button className="icon-btn-sm" onClick={() => setSelectedRequest(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+                <div>
+                  <span className="text-muted">Employee:</span>
+                  <div className="font-bold text-white text-sm">{selectedRequest.employeeName}</div>
+                </div>
+                <div>
+                  <span className="text-muted">Status:</span>
+                  <div className="mt-1">{getStatusBadge(selectedRequest.status)}</div>
+                </div>
+                <div>
+                  <span className="text-muted">Leave Type:</span>
+                  <div className="font-medium text-white">{selectedRequest.leaveType}</div>
+                </div>
+                <div>
+                  <span className="text-muted">Workflow:</span>
+                  <div className="font-mono text-sky-400">emp_leave_request</div>
+                </div>
+                <div>
+                  <span className="text-muted">Dates:</span>
+                  <div className="text-white">{selectedRequest.startDate} &rarr; {selectedRequest.endDate}</div>
+                </div>
+                <div>
+                  <span className="text-muted">Duration:</span>
+                  <div className="text-white font-bold">{selectedRequest.days} Day(s)</div>
+                </div>
+              </div>
+
+              {selectedRequest.reason && (
+                <div className="field-group mb-3">
+                  <label className="field-label">Reason</label>
+                  <div className="p-2 bg-card-subtle rounded text-xs text-slate-300">
+                    {selectedRequest.reason}
+                  </div>
+                </div>
+              )}
+
+              {selectedRequest.remarks && (
+                <div className="field-group mb-3">
+                  <label className="field-label">Manager Remarks</label>
+                  <div className="p-2 bg-card-subtle rounded text-xs text-slate-300">
+                    {selectedRequest.remarks}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer flex justify-end">
+              <button className="btn btn-outline" onClick={() => setSelectedRequest(null)}>
+                Close
               </button>
             </div>
           </div>

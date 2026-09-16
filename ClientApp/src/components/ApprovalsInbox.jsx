@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Inbox, CheckCircle2, XCircle, AlertCircle, ArrowRight, User, Clock, Check } from 'lucide-react'
-import { genericWorkflowApi } from '../services/genericWorkflowApi'
+import { workflowClient } from '../services/workflowClient'
 
 export default function ApprovalsInbox({ currentUser, onDataChanged }) {
   const [tasks, setTasks] = useState([])
@@ -10,10 +10,10 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
   const [feedback, setFeedback] = useState(null)
 
   const reloadTasks = async () => {
-    if (!currentUser?.id) return
+    if (!currentUser?.role) return
     try {
       setIsLoading(true)
-      const list = await genericWorkflowApi.fetchMyTasks(currentUser.id)
+      const list = await workflowClient.getPendingTasks(currentUser.role)
       setTasks(Array.isArray(list) ? list : [])
       if (onDataChanged) onDataChanged()
     } catch (_e) {
@@ -28,18 +28,29 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
   }, [currentUser])
 
   const handleAction = async (task, actionType) => {
-    const moduleKey = task.entity_type || 'leave_requests'
-    const recordId = task.entity_id || task.task_id
-    const actionKey = `${moduleKey}_${recordId}_${actionType}`
+    const taskId = task.task_id
+    const actionKey = `${taskId}_${actionType}`
     setActionLoading(actionKey)
     setFeedback(null)
-    const remarks = remarksMap[`${moduleKey}_${recordId}`] || ''
+    const remarks = remarksMap[taskId] || ''
 
     try {
-      await genericWorkflowApi.executeAction(moduleKey, recordId, actionType, remarks, currentUser)
+      if (actionType === 'REJECT') {
+        await workflowClient.rejectTask(taskId, remarks, {
+          user_id: currentUser.id,
+          user_role: currentUser.role,
+          rejected_by: currentUser.name
+        })
+      } else {
+        await workflowClient.completeTask(taskId, actionType, remarks, {
+          user_id: currentUser.id,
+          user_role: currentUser.role,
+          approved_by: currentUser.name
+        })
+      }
       setFeedback({
         success: true,
-        message: `✓ Task '${task.task_name || 'Approval'}' (${actionType}) completed.`
+        message: `✓ Task #${taskId} (${actionType}) completed successfully via Direct Workflow API.`
       })
       await reloadTasks()
     } catch (err) {
@@ -88,18 +99,17 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
         /* Task Cards List */
         <div className="tasks-grid">
           {tasks.map((t) => {
-            const entityType = t.entity_type || 'leave_requests'
-            const entityId = t.entity_id || t.task_id
-            const itemKey = `${entityType}_${entityId}`
-            const isApproving = actionLoading === `${itemKey}_APPROVE`
-            const isRejecting = actionLoading === `${itemKey}_REJECT`
+            const taskId = t.task_id
+            const itemKey = `task_${taskId}`
+            const isApproving = actionLoading === `${taskId}_APPROVE`
+            const isRejecting = actionLoading === `${taskId}_REJECT`
 
             return (
               <div key={itemKey} className="task-approval-card">
                 <div className="task-card-header">
                   <div className="flex items-center gap-2">
                     <span className="badge badge-workflow font-mono">
-                      {entityType} #{entityId}
+                      Task #{taskId} • Instance #{t.instance_id}
                     </span>
                     <span className="badge badge-neutral">
                       Role: {t.role_code || currentUser.role}
@@ -112,9 +122,9 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
                 </div>
 
                 <div className="task-card-body">
-                  <div className="task-title font-semibold text-white">{t.task_name || 'Manager Approval'}</div>
+                  <div className="task-title font-semibold text-white">{t.task_name || t.task_spec_id || 'Manager Approval'}</div>
                   <div className="text-xs text-muted mt-1">
-                    Requires action for <strong>{entityType}</strong> record #{entityId}.
+                    Requires action from <strong>{t.role_code || currentUser.role}</strong> for workflow instance #{t.instance_id}.
                   </div>
 
                   {/* Remarks input */}
@@ -123,9 +133,9 @@ export default function ApprovalsInbox({ currentUser, onDataChanged }) {
                       type="text"
                       className="text-input text-xs"
                       placeholder="Optional approval remarks or feedback..."
-                      value={remarksMap[itemKey] || ''}
+                      value={remarksMap[taskId] || ''}
                       onChange={(e) =>
-                        setRemarksMap({ ...remarksMap, [itemKey]: e.target.value })
+                        setRemarksMap({ ...remarksMap, [taskId]: e.target.value })
                       }
                     />
                   </div>

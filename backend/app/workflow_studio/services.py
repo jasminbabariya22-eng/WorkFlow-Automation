@@ -463,12 +463,20 @@ class WorkflowStudioService:
             SpiffWorkflowInstance.status == "Running"
         ).count()
 
-        if active_instances > 0:
-            workflow.status = "ARCHIVED"
-            db.commit()
-            return {"message": f"Workflow {workflow_id} has running instances and was marked ARCHIVED."}
+        workflow.is_deleted = 1
+        workflow.status = "ARCHIVED"
 
-        db.delete(workflow)
+        # Also mark matching BPMNDefinitions as deleted
+        from app.workflow.persistence.models import BPMNDefinition
+        bpmns = db.query(BPMNDefinition).filter(
+            (BPMNDefinition.id == workflow_id) | 
+            (BPMNDefinition.spec_id == workflow.workflow_key) | 
+            (BPMNDefinition.name == workflow.name)
+        ).all()
+        for b in bpmns:
+            b.is_deleted = 1
+            b.is_active = False
+
         db.commit()
         return {"message": f"Workflow {workflow_id} deleted successfully."}
 
