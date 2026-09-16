@@ -39,6 +39,21 @@ class DynamicEnginePool:
     _cached_engines: Dict[int, Engine] = {}
 
     @classmethod
+    def normalize_db_type(cls, db_type: Optional[str]) -> str:
+        t = (db_type or "postgresql").lower().strip().replace(" ", "").replace("_", "").replace("-", "")
+        if t in ("postgresql", "postgres", "psql", "pg"):
+            return "postgresql"
+        if t in ("mysql", "mariadb"):
+            return "mysql"
+        if t in ("mssql", "sqlserver", "microsoftsqlserver", "msql", "mssqlserver"):
+            return "mssql"
+        if t in ("sqlite", "sqlite3"):
+            return "sqlite"
+        if t in ("oracle",):
+            return "oracle"
+        return t
+
+    @classmethod
     def build_connection_url(
         cls,
         db_type: str,
@@ -49,23 +64,25 @@ class DynamicEnginePool:
         password: str,
         ssl_mode: str = "disable"
     ) -> str:
-        db_type = (db_type or "postgresql").lower().strip()
+        clean_type = cls.normalize_db_type(db_type)
         encoded_pwd = quote_plus(password) if password else ""
         encoded_user = quote_plus(username) if username else ""
         
-        if db_type in ("postgresql", "postgres"):
+        if clean_type == "postgresql":
             url = f"postgresql+psycopg2://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
             if ssl_mode and ssl_mode != "disable":
                 url += f"?sslmode={ssl_mode}"
             return url
-        elif db_type in ("mysql", "mariadb"):
+        elif clean_type == "mysql":
             return f"mysql+pymysql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
-        elif db_type in ("mssql", "sqlserver"):
+        elif clean_type == "mssql":
             return f"mssql+pymssql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
-        elif db_type in ("sqlite",):
+        elif clean_type == "sqlite":
             return f"sqlite:///{database_name}"
+        elif clean_type == "oracle":
+            return f"oracle+cx_oracle://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
         else:
-            return f"{db_type}://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+            return f"{clean_type}://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
 
     @classmethod
     def parse_connection_error(
@@ -85,7 +102,7 @@ class DynamicEnginePool:
         # 1. Password or Login Authentication Failure
         if any(k in err_lower for k in [
             "password authentication failed", "access denied for user", 
-            "login failed for user", "fe_sendauth", "1045", "18456"
+            "login failed for user", "fe_sendauth", "1045", "18456", "adaptive server connection failed"
         ]):
             return f"Authentication failed: Incorrect password or invalid user '{username}'."
 
@@ -98,11 +115,12 @@ class DynamicEnginePool:
             "unknown database" in err_lower or "cannot open database" in err_lower or "1049" in err_lower):
             return f"Database not found: Database '{database_name}' does not exist on server '{host}:{port}'."
 
-        # 4. Host unreachable / Connection Refused / Wrong Port
+        # 4. Host unreachable / Connection Refused / Wrong Port / TDS server unavailable
         if any(k in err_lower for k in [
             "connection refused", "10061", "could not connect to server", 
             "is the server running", "getaddrinfo failed", "name or service not known",
-            "cant connect to mysql", "can't connect to", "adaptive server is unavailable"
+            "cant connect to mysql", "can't connect to", "adaptive server is unavailable",
+            "tds server is unavailable or does not exist", "unable to connect"
         ]):
             return f"Server unreachable: Could not connect to host '{host}' on port {port}. Please verify the host IP/name and check if the database server is running."
 
@@ -117,6 +135,9 @@ class DynamicEnginePool:
         # 7. Clean fallback
         clean = re.sub(r"\(Background on this error at:.*?\)", "", err_str, flags=re.DOTALL).strip()
         clean = re.sub(r"\(psycopg2\.[a-zA-Z]+\)", "", clean).strip()
+        clean = re.sub(r"\(pymssql\.[a-zA-Z]+\)", "", clean).strip()
+        clean = re.sub(r"\(pymysql\.[a-zA-Z]+\)", "", clean).strip()
+        clean = re.sub(r"DB-Lib error message \d+, severity \d+:", "", clean).strip()
         return clean or f"Connection failed: {err_str}"
 
     @classmethod
@@ -131,12 +152,29 @@ class DynamicEnginePool:
         default_schema: Optional[str] = None,
         ssl_mode: str = "disable"
     ) -> Dict[str, Any]:
+        clean_type = cls.normalize_db_type(db_type)
         url = cls.build_connection_url(db_type, host, port, database_name, username, password, ssl_mode)
         start_time = time.time()
-        temp_engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+        
+        connect_args = {}
+        if clean_type == "mssql":
+            connect_args = {"login_timeout": 5, "timeout": 5}
+        elif clean_type in ("postgresql", "mysql"):
+            connect_args = {"connect_timeout": 5}
+
+        temp_engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
         try:
             with temp_engine.connect() as conn:
-                res = conn.execute(text("SELECT version()")).scalar()
+                version_query = "SELECT @@VERSION" if clean_type == "mssql" else "SELECT version()"
+                try:
+                    res = conn.execute(text(version_query)).scalar()
+                except Exception:
+                    try:
+                        res = conn.execute(text("SELECT 1")).scalar()
+                        res = f"Connected ({db_type.upper()})"
+                    except Exception:
+                        res = "Connected"
+
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
                 return {
                     "success": True,
@@ -197,8 +235,16 @@ class DynamicEnginePool:
                     password=pwd,
                     ssl_mode=conn_rec.ssl_mode or "disable"
                 )
+                clean_type = cls.normalize_db_type(conn_rec.db_type)
+                connect_args = {}
+                if clean_type == "mssql":
+                    connect_args = {"login_timeout": 5, "timeout": 5}
+                elif clean_type in ("postgresql", "mysql"):
+                    connect_args = {"connect_timeout": 5}
+
                 new_engine = create_engine(
                     url,
+                    connect_args=connect_args,
                     pool_size=conn_rec.pool_size or 10,
                     max_overflow=20,
                     pool_pre_ping=True,
