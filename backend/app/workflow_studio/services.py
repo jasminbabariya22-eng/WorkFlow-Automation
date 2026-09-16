@@ -417,7 +417,9 @@ class WorkflowStudioService:
         limit: int = 200
     ) -> List[StudioWorkflowListItem]:
         from sqlalchemy.orm import selectinload
-        query = db.query(GenericWorkflow).options(selectinload(GenericWorkflow.versions))
+        query = db.query(GenericWorkflow).options(selectinload(GenericWorkflow.versions)).filter(
+            (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
+        )
         if entity_type:
             query = query.filter(GenericWorkflow.entity_type == entity_type)
         if status:
@@ -455,6 +457,12 @@ class WorkflowStudioService:
         workflow = db.query(GenericWorkflow).filter(GenericWorkflow.workflow_id == workflow_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail=f"Workflow with ID {workflow_id} not found.")
+
+        if workflow.status == "ACTIVE":
+            raise HTTPException(
+                status_code=400,
+                detail="Active workflows cannot be deleted. Please deactivate it first."
+            )
 
         # Check if active instances exist
         from app.workflow.persistence.models import SpiffWorkflowInstance

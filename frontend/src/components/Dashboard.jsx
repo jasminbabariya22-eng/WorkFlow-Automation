@@ -172,14 +172,26 @@ function Dashboard({ onOpenDesigner, showToast }) {
   }
 
   // Delete Version
-  const handleDelete = async (id, e) => {
+  const handleDelete = async (wf, e) => {
     e.stopPropagation()
+    const wfId = typeof wf === 'object' && wf !== null ? (wf.id || wf.workflow_id) : wf
+    const isActive = typeof wf === 'object' && wf !== null ? Boolean(wf.is_active || wf.status === 'Active' || wf.status === 'ACTIVE') : false
+
+    if (isActive) {
+      showToast('Active workflows cannot be deleted. Please deactivate it first.', 'error')
+      return
+    }
+
     if (!window.confirm('Are you sure you want to delete this workflow version? This action is permanent.')) {
       return
     }
-    await workflowStorage.deleteWorkflow(id)
-    showToast('Deleted successfully', 'success')
-    await fetchWorkflows()
+    try {
+      await workflowStorage.deleteWorkflow(wfId)
+      showToast('Deleted successfully', 'success')
+      await fetchWorkflows()
+    } catch (err) {
+      showToast(err.message || 'Failed to delete workflow', 'error')
+    }
   }
 
   // Export BPMN File
@@ -439,7 +451,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
                       <button className="btn btn-secondary btn-sm" title="Download BPMN File" onClick={(e) => handleExport(wf.id, wf.spec_id, wf.version, e)}>
                         <Download size={12} />
                       </button>
-                      <button className="btn btn-danger btn-sm" title="Delete Version" onClick={(e) => handleDelete(wf.id, e)}>
+                      <button className="btn btn-danger btn-sm" title="Delete Version" onClick={(e) => handleDelete(wf, e)}>
                         <Trash2 size={12} />
                       </button>
                     </div>

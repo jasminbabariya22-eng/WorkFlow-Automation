@@ -28,15 +28,19 @@ def _find_workflow_and_version(
 ):
     workflow = None
     if isinstance(id_or_code, str) and id_or_code.isdigit():
-        workflow = db.query(GenericWorkflow).filter(GenericWorkflow.workflow_id == int(id_or_code)).first()
+        workflow = db.query(GenericWorkflow).filter(
+            GenericWorkflow.workflow_id == int(id_or_code),
+            (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
+        ).first()
 
     if not workflow:
         key = str(id_or_code).strip()
         workflow = db.query(GenericWorkflow).filter(
-            (GenericWorkflow.workflow_key == key) |
+            ((GenericWorkflow.workflow_key == key) |
             (GenericWorkflow.name == key) |
             (GenericWorkflow.workflow_key.ilike(key)) |
-            (GenericWorkflow.name.ilike(key))
+            (GenericWorkflow.name.ilike(key))),
+            (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
         ).first()
 
     if not workflow:
@@ -88,7 +92,9 @@ def get_all_workflows(
     """
     Retrieves all workflows in the system with metadata, active versions, node/edge counts, and connection details.
     """
-    query = db.query(GenericWorkflow)
+    query = db.query(GenericWorkflow).filter(
+        (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
+    )
     if entity_type:
         query = query.filter(GenericWorkflow.entity_type.ilike(f"%{entity_type}%"))
     if status:

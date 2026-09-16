@@ -41,7 +41,9 @@ def list_workflow_definitions(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        query = db.query(BPMNDefinition)
+        query = db.query(BPMNDefinition).filter(
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+        )
         if status:
             query = query.filter(BPMNDefinition.status == status)
         if spec_id:
@@ -61,6 +63,7 @@ def list_workflow_definitions(
                 "json_content": d.json_content,
                 "is_active": d.is_active,
                 "status": d.status,
+                "is_deleted": d.is_deleted or 0,
                 "tags": d.tags,
                 "connection_id": d.connection_id,
                 "created_by": d.created_by,
@@ -82,7 +85,10 @@ def get_workflow_definition(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        d = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
+        d = db.query(BPMNDefinition).filter(
+            BPMNDefinition.id == id,
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+        ).first()
         if not d:
             raise HTTPException(status_code=404, detail="Workflow definition not found")
             
@@ -96,6 +102,7 @@ def get_workflow_definition(
             "json_content": d.json_content,
             "is_active": d.is_active,
             "status": d.status,
+            "is_deleted": d.is_deleted or 0,
             "tags": d.tags,
             "connection_id": d.connection_id,
             "created_by": d.created_by,
@@ -103,6 +110,8 @@ def get_workflow_definition(
             "updated_on": getattr(d, "updated_on", d.created_on),
             "published_on": getattr(d, "published_on", None)
         })
+    except HTTPException as he:
+        return error_response(message=he.detail, status_code=he.status_code)
     except Exception as e:
         return error_response(message=str(e), status_code=400)
 
@@ -225,10 +234,28 @@ def delete_workflow_definition(
         if not definition:
             raise HTTPException(status_code=404, detail="Workflow definition not found")
 
+        if definition.is_active or definition.status == "Active":
+            return error_response(
+                message="Active workflows cannot be deleted. Please deactivate it first.",
+                status_code=400
+            )
+
         definition.is_deleted = 1
         definition.is_active = False
+        definition.status = "Inactive"
+
+        # Also sync GenericWorkflow (workflow.wf_definition)
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.is_deleted = 1
+            wf.status = "ARCHIVED"
+
         db.commit()
         return success_response(message="Workflow definition deleted successfully")
+    except HTTPException as he:
+        return error_response(message=he.detail, status_code=he.status_code)
     except Exception as e:
         db.rollback()
         return error_response(message=str(e), status_code=400)

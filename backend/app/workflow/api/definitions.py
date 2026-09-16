@@ -145,10 +145,12 @@ def list_workflow_definitions(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Returns all workflow definitions directly from workflow.bpmn_definition table.
+    Returns all non-deleted workflow definitions directly from workflow.bpmn_definition table.
     """
     try:
-        bpmn_defs = db.query(BPMNDefinition).order_by(BPMNDefinition.id.desc()).all()
+        bpmn_defs = db.query(BPMNDefinition).filter(
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+        ).order_by(BPMNDefinition.id.desc()).all()
         seen_specs = {}
         for b in bpmn_defs:
             if b.spec_id not in seen_specs or (b.is_active and not seen_specs[b.spec_id].is_active):
@@ -168,6 +170,7 @@ def list_workflow_definitions(
                 "version": b.version or 1,
                 "status": "Active" if b.is_active or b.status == "Active" else (b.status or "Draft"),
                 "is_active": bool(b.is_active),
+                "is_deleted": b.is_deleted or 0,
                 "created_on": b.created_on.isoformat() if b.created_on else None,
                 "updated_on": b.created_on.isoformat() if b.created_on else None,
                 "tags": [b.spec_id.split('_')[0].upper()],
@@ -186,12 +189,18 @@ def get_workflow_definition_by_id(
     db: Session = Depends(get_workflow_db)
 ):
     """
-    Retrieves workflow definition by ID preserving exact original design layout.
+    Retrieves non-deleted workflow definition by ID preserving exact original design layout.
     """
     try:
-        b = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
+        b = db.query(BPMNDefinition).filter(
+            BPMNDefinition.id == id,
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+        ).first()
         if not b:
-            b = db.query(BPMNDefinition).filter(BPMNDefinition.spec_id == str(id)).first()
+            b = db.query(BPMNDefinition).filter(
+                BPMNDefinition.spec_id == str(id),
+                (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+            ).first()
 
         if b:
             name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
@@ -206,6 +215,7 @@ def get_workflow_definition_by_id(
                 "version": b.version or 1,
                 "status": "Active" if b.is_active or b.status == "Active" else (b.status or "Draft"),
                 "is_active": bool(b.is_active),
+                "is_deleted": b.is_deleted or 0,
                 "xml_content": b.xml_content,
                 "json_content": parsed_graph
             })
@@ -213,6 +223,48 @@ def get_workflow_definition_by_id(
         raise HTTPException(status_code=404, detail="Workflow definition not found")
     except Exception as e:
         return error_response(message=str(e), status_code=404)
+
+
+@router.delete("/{id}")
+def delete_workflow_definition(
+    id: int,
+    db: Session = Depends(get_workflow_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Soft deletes workflow definition by setting is_deleted=1.
+    Rejects deletion if workflow is currently active.
+    """
+    try:
+        definition = db.query(BPMNDefinition).filter(BPMNDefinition.id == id).first()
+        if not definition:
+            raise HTTPException(status_code=404, detail="Workflow definition not found")
+
+        if definition.is_active or definition.status == "Active":
+            return error_response(
+                message="Active workflows cannot be deleted. Please deactivate it first.",
+                status_code=400
+            )
+
+        definition.is_deleted = 1
+        definition.is_active = False
+        definition.status = "Inactive"
+
+        # Also sync GenericWorkflow (workflow.wf_definition)
+        wf_records = db.query(GenericWorkflow).filter(
+            (GenericWorkflow.workflow_key == definition.spec_id) | (GenericWorkflow.workflow_id == definition.id)
+        ).all()
+        for wf in wf_records:
+            wf.is_deleted = 1
+            wf.status = "ARCHIVED"
+
+        db.commit()
+        return success_response(message="Workflow definition deleted successfully")
+    except HTTPException as he:
+        return error_response(message=he.detail, status_code=he.status_code)
+    except Exception as e:
+        db.rollback()
+        return error_response(message=str(e), status_code=400)
 
 
 @router.post("/save")
@@ -419,11 +471,12 @@ def list_workflow_versions(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lists all available versions for a process definition.
+    Lists all available non-deleted versions for a process definition.
     """
     try:
         versions = db.query(BPMNDefinition).filter(
-            BPMNDefinition.spec_id == spec_id
+            BPMNDefinition.spec_id == spec_id,
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
         ).order_by(BPMNDefinition.version.desc()).all()
 
         result = []
@@ -434,6 +487,7 @@ def list_workflow_versions(
                 "version": v.version,
                 "description": v.description,
                 "is_active": v.is_active,
+                "is_deleted": v.is_deleted or 0,
                 "created_on": v.created_on
             })
 
@@ -449,17 +503,19 @@ def get_latest_definition(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Fetches the latest active BPMN XML definition. Falls back to default XML skeleton if empty.
+    Fetches the latest active non-deleted BPMN XML definition. Falls back to default XML skeleton if empty.
     """
     try:
         definition = db.query(BPMNDefinition).filter(
             BPMNDefinition.spec_id == spec_id,
-            BPMNDefinition.is_active == True
+            BPMNDefinition.is_active == True,
+            (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
         ).first()
 
         if not definition:
             definition = db.query(BPMNDefinition).filter(
-                BPMNDefinition.spec_id == spec_id
+                BPMNDefinition.spec_id == spec_id,
+                (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
             ).order_by(BPMNDefinition.version.desc()).first()
 
         if not definition:

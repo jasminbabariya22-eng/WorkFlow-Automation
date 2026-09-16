@@ -165,27 +165,30 @@ export const workflowStorage = {
       if (res.ok) {
         const json = await res.json()
         if (json && Array.isArray(json.data)) {
-          const list = json.data.map(w => ({
-            id: w.id,
-            workflow_id: w.id,
-            spec_id: w.spec_id,
-            name: w.name || w.spec_id,
-            description: w.description || '',
-            connection_id: w.connection_id || null,
-            version: w.version || 1,
-            status: w.is_active ? 'Active' : (w.status === 'Draft' ? 'Draft' : (w.status === 'Active' ? 'Inactive' : (w.status || 'Inactive'))),
-            is_active: Boolean(w.is_active),
-            created_on: w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : '',
-            updated_at: w.updated_on ? String(w.updated_on).slice(0, 19).replace('T', ' ') : (w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : ''),
-            tags: Array.isArray(w.tags)
-              ? w.tags
-              : (typeof w.tags === 'string' && w.tags.trim()
-                ? w.tags.split(',').map(t => t.trim()).filter(Boolean)
-                : []),
-            nodes_count: 3,
-            json_content: w.json_content,
-            xml_content: w.xml_content
-          }))
+          const list = json.data
+            .filter(w => w.is_deleted !== 1 && w.is_deleted !== true)
+            .map(w => ({
+              id: w.id,
+              workflow_id: w.id,
+              spec_id: w.spec_id,
+              name: w.name || w.spec_id,
+              description: w.description || '',
+              connection_id: w.connection_id || null,
+              version: w.version || 1,
+              status: w.is_active ? 'Active' : (w.status === 'Draft' ? 'Draft' : (w.status === 'Active' ? 'Inactive' : (w.status || 'Inactive'))),
+              is_active: Boolean(w.is_active),
+              is_deleted: Number(w.is_deleted || 0),
+              created_on: w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : '',
+              updated_at: w.updated_on ? String(w.updated_on).slice(0, 19).replace('T', ' ') : (w.created_on ? String(w.created_on).slice(0, 19).replace('T', ' ') : ''),
+              tags: Array.isArray(w.tags)
+                ? w.tags
+                : (typeof w.tags === 'string' && w.tags.trim()
+                  ? w.tags.split(',').map(t => t.trim()).filter(Boolean)
+                  : []),
+              nodes_count: 3,
+              json_content: w.json_content,
+              xml_content: w.xml_content
+            }))
           list.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0))
           try {
             localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(list))
@@ -199,11 +202,16 @@ export const workflowStorage = {
 
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
-      if (stored) return JSON.parse(stored)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed)) {
+          return parsed.filter(w => !w.is_deleted && w.is_deleted !== 1)
+        }
+      }
     } catch (e) {
       console.error('Local storage read error:', e)
     }
-    return DEFAULT_WORKFLOWS
+    return []
   },
 
   // 2. Get workflow by ID (from workflow.bpmn_definition table)
@@ -405,11 +413,29 @@ export const workflowStorage = {
           // 10. Delete Workflow
           deleteWorkflow: async (id) => {
             try {
-              await fetch(`/workflow/definitions/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(2000) })
+              const res = await fetch(`/workflow/definitions/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) })
+              if (!res.ok) {
+                const errJson = await res.json().catch(() => ({}))
+                const msg = errJson.detail || errJson.message || 'Failed to delete workflow'
+                throw new Error(msg)
+              } else {
+                const json = await res.json().catch(() => ({}))
+                if (json.status === 'error' || (json.code && json.code >= 400)) {
+                  throw new Error(json.message || 'Failed to delete workflow')
+                }
+              }
+            } catch (err) {
+              console.error('Delete workflow error:', err)
+              throw err
+            }
+            try {
+              const stored = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
+              if (stored) {
+                const list = JSON.parse(stored)
+                const updated = (Array.isArray(list) ? list : []).filter(w => Number(w.id) !== Number(id))
+                localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+              }
             } catch (_e) { }
-            const list = await workflowStorage.getWorkflows()
-            const updated = list.filter(w => Number(w.id) !== Number(id))
-            localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
             return true
           },
 
