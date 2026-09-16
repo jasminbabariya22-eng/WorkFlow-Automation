@@ -365,6 +365,13 @@ def submit_client_workflow_record(
     primary_key = pks[0] if pks else binding.get("primary_key", "id")
 
     col_names = {c["name"]: c for c in col_meta.get("columns", [])}
+    
+    # Auto-fill timestamps if table requires them
+    now_dt = datetime.utcnow()
+    for ts_col in ("created_at", "updated_at", "submitted_at"):
+        if ts_col in col_names and ts_col not in values:
+            values[ts_col] = now_dt
+
     filtered_vals = {k: v for k, v in values.items() if k in col_names}
     if not filtered_vals:
         raise HTTPException(status_code=400, detail="No matching columns found to insert.")

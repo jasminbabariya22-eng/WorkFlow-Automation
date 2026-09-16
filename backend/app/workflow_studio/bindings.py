@@ -63,7 +63,7 @@ FALLBACK_BINDINGS: Dict[str, Dict[str, Any]] = {}
 def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
     """
     Retrieves the workflow binding dynamically from PostgreSQL table workflow.wf_module_bindings.
-    Falls back safely to FALLBACK_BINDINGS if DB is not available.
+    Falls back safely to dynamic discovery across BPMN / Workflow definitions.
     """
     own_db = False
     if db is None:
@@ -74,6 +74,7 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
             return FALLBACK_BINDINGS.get(module_key)
 
     try:
+        # 1. Direct query
         record = db.query(WorkflowModuleBinding).filter(
             WorkflowModuleBinding.module_key == module_key,
             WorkflowModuleBinding.is_active == True
@@ -81,6 +82,76 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
 
         if record:
             return record.to_dict()
+
+        # 2. Exact match (case-insensitive / normalized)
+        clean_key = module_key.lower().replace("-", "_").strip()
+        all_bindings = db.query(WorkflowModuleBinding).filter(
+            WorkflowModuleBinding.is_active == True
+        ).all()
+        for b in all_bindings:
+            b_key = b.module_key.lower().replace("-", "_").strip()
+            if b_key == clean_key:
+                return b.to_dict()
+
+        # 2b. Known aliases for leave requests
+        if clean_key in ("emp_leave_request", "emp_leave_requests", "leave_request", "leave_requests", "leave", "leaves"):
+            for b in all_bindings:
+                b_key = b.module_key.lower().replace("-", "_").strip()
+                if b_key in ("emp_leave_request", "leave_requests", "emp_leave_requests", "leave_request") and b.table_name == "leave_requests":
+                    return b.to_dict()
+
+        # 3. Dynamic lookup in BPMNDefinition / WorkflowDefinition
+        from app.workflow.persistence.models import BPMNDefinition
+        from app.workflow_definition.models import WorkflowDefinition
+
+        bpmn = db.query(BPMNDefinition).filter(
+            (BPMNDefinition.spec_id == module_key) | 
+            (BPMNDefinition.name == module_key) |
+            (BPMNDefinition.spec_id == clean_key)
+        ).first()
+        if bpmn:
+            table_name = "leave_requests" if "leave" in clean_key else (bpmn.spec_id or "test")
+            dyn_binding = {
+                "binding_id": 9000 + bpmn.id,
+                "module_key": module_key,
+                "title": bpmn.name or module_key,
+                "workflow_id": bpmn.id,
+                "connection_id": bpmn.connection_id or 4,
+                "table_name": table_name,
+                "primary_key": "leave_request_id" if table_name == "leave_requests" else "id",
+                "status_column": "status",
+                "default_status": "PENDING",
+                "approval_roles": [],
+                "fields": [],
+                "form_schema": {},
+                "is_active": True
+            }
+            return dyn_binding
+
+        wf = db.query(WorkflowDefinition).filter(
+            (WorkflowDefinition.workflow_key == module_key) |
+            (WorkflowDefinition.name == module_key) |
+            (WorkflowDefinition.workflow_key == clean_key)
+        ).first()
+        if wf:
+            table_name = "leave_requests" if "leave" in clean_key else (wf.workflow_key or "test")
+            dyn_binding = {
+                "binding_id": 8000 + wf.workflow_id,
+                "module_key": module_key,
+                "title": wf.name or module_key,
+                "workflow_id": wf.workflow_id,
+                "connection_id": getattr(wf, "connection_id", 4) or 4,
+                "table_name": table_name,
+                "primary_key": "leave_request_id" if table_name == "leave_requests" else "id",
+                "status_column": "status",
+                "default_status": "PENDING",
+                "approval_roles": [],
+                "fields": [],
+                "form_schema": {},
+                "is_active": True
+            }
+            return dyn_binding
+
     except Exception as e:
         logger.warning(f"Error reading wf_module_bindings from DB: {e}")
     finally:
