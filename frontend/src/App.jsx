@@ -13,14 +13,14 @@ import {
 import capperLogo from '../LOGO/capperlogo.png'
 import massCapperLogo from '../LOGO/mass-capper.png'
 
-const Dashboard = lazy(() => import('./components/Dashboard'))
-const Designer = lazy(() => import('./components/Designer'))
-const Monitoring = lazy(() => import('./components/Monitoring'))
+import Dashboard from './components/Dashboard'
+import Designer from './components/Designer'
+import Monitoring from './components/Monitoring'
 
 const ViewLoader = () => (
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '300px', color: '#818cf8', gap: '8px' }}>
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '300px', color: '#6366f1', gap: '8px' }}>
     <Loader size={20} className="wf-spin" />
-    <span style={{ fontSize: '13px', color: '#94a3b8' }}>Loading workspace...</span>
+    <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Loading workspace...</span>
   </div>
 )
 
@@ -265,9 +265,9 @@ function App() {
                 }}
               />
             )}
-            {currentView === 'monitoring' && (
+            {/* {currentView === 'monitoring' && (
               <span className="view-title">Workflow Monitoring & Traces</span>
-            )}
+            )} */}
           </div>
         </div>
 

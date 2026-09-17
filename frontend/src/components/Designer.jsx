@@ -724,13 +724,68 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
   }, [setNodes, setEdges, showToast])
 
   // =========================================================================
-  // WORKFLOW LOADING FROM LOCAL STORAGE / DEFINITIONS
+  // WORKFLOW LOADING FROM LOCAL STORAGE / DEFINITIONS (INSTANT HYDRATION)
   // =========================================================================
   useEffect(() => {
     let isCancelled = false
-    setIsLoading(true)
     isInitializingRef.current = true
 
+    // Step 1: Optimistic instant load from cache
+    let foundInCache = false
+    if (workflowId) {
+      try {
+        const stored = localStorage.getItem('workflow_studio_definitions')
+        if (stored) {
+          const list = JSON.parse(stored)
+          const cached = list.find(w => Number(w.id) === Number(workflowId))
+          if (cached) {
+            setWorkflowName(cached.spec_id || cached.name || 'Untitled Workflow')
+            setVersionNumber(cached.version || 1)
+            setWorkflowStatus(cached.status || 'Draft')
+            setWorkflowConnectionId(cached.connection_id || null)
+
+            if (cached.json_content) {
+              const parsed = typeof cached.json_content === 'string' ? JSON.parse(cached.json_content) : cached.json_content
+              const rawNodes = parsed.nodes || []
+              const loadedNodes = rawNodes.map((n, idx) => ({
+                id: String(n.id || `node-${idx}`),
+                type: n.type || 'generic',
+                position: {
+                  x: n.position?.x ?? (n.position_x ?? 250 + (idx % 2) * 200),
+                  y: n.position?.y ?? (n.position_y ?? 50 + idx * 120)
+                },
+                data: {
+                  label: n.data?.label || n.name || n.id,
+                  name: n.data?.name || n.name || n.id,
+                  ...(n.data || n.config || {})
+                }
+              }))
+              const loadedEdges = (parsed.edges || parsed.connections || []).map((e, idx) => ({
+                id: e.id || `e-${e.source}-${e.target}-${idx}`,
+                source: String(e.source),
+                target: String(e.target),
+                type: e.type || 'workflow',
+                data: e.data || { label: e.label || e.condition || '' }
+              }))
+              setNodes(loadedNodes)
+              setEdges(loadedEdges)
+              setSaveStatus('saved')
+              historyRef.current = [{ nodes: loadedNodes, edges: loadedEdges }]
+              historyIndexRef.current = 0
+              foundInCache = true
+              setIsLoading(false)
+              setTimeout(() => fitView({ padding: 0.2, duration: 250 }), 50)
+            }
+          }
+        }
+      } catch (_cacheErr) { }
+    }
+
+    if (!foundInCache) {
+      setIsLoading(true)
+    }
+
+    // Step 2: Background revalidation from server
     const doLoad = async () => {
       try {
         const data = workflowId ? await workflowStorage.getWorkflowById(workflowId) : null
@@ -777,8 +832,8 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           setSaveStatus('saved')
           historyRef.current = [{ nodes: loadedNodes, edges: loadedEdges }]
           historyIndexRef.current = 0
-          setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 200)
-        } else {
+          setTimeout(() => fitView({ padding: 0.2, duration: 250 }), 80)
+        } else if (!foundInCache) {
           setNodes([])
           setEdges([])
           setWorkflowName('New Workflow')
@@ -786,11 +841,11 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           setSaveStatus('saved')
           historyRef.current = [{ nodes: [], edges: [] }]
           historyIndexRef.current = 0
-          setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 200)
+          setTimeout(() => fitView({ padding: 0.2, duration: 250 }), 80)
         }
       } catch (err) {
         console.error('Error loading workflow:', err)
-        if (!isCancelled) {
+        if (!isCancelled && !foundInCache) {
           setNodes([])
           setEdges([])
           setSaveStatus('saved')
@@ -798,13 +853,18 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       } finally {
         if (!isCancelled) {
           setIsLoading(false)
-          setTimeout(() => { isInitializingRef.current = false }, 500)
+          setTimeout(() => {
+            isInitializingRef.current = false
+          }, 150)
         }
       }
     }
 
     doLoad()
-    return () => { isCancelled = true }
+
+    return () => {
+      isCancelled = true
+    }
   }, [workflowId, fitView, setNodes, setEdges])
 
   // =========================================================================

@@ -25,8 +25,27 @@ function Dashboard({ onOpenDesigner, showToast }) {
   // Feature flag: Set to true if you want to re-enable the Test Run button on the Dashboard
   const ENABLE_DASHBOARD_TEST_RUN = false
 
-  const [workflows, setWorkflows] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Instant initial load from cache for 0ms render
+  const [workflows, setWorkflows] = useState(() => {
+    try {
+      const stored = localStorage.getItem('workflow_studio_definitions')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter(w => !w.is_deleted && w.is_deleted !== 1)
+        }
+      }
+    } catch {}
+    return []
+  })
+  const [loading, setLoading] = useState(() => {
+    try {
+      const stored = localStorage.getItem('workflow_studio_definitions')
+      return !stored
+    } catch {
+      return true
+    }
+  })
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   
@@ -44,27 +63,27 @@ function Dashboard({ onOpenDesigner, showToast }) {
   const [importDraft, setImportDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '', file: null })
   const [submitting, setSubmitting] = useState(false)
 
-  // Fetch all workflow definitions & database connections
-  const fetchWorkflows = async () => {
-    setLoading(true)
+  // Fetch all workflow definitions & database connections without blocking UI
+  const fetchWorkflows = async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner) setLoading(true)
     try {
-      const [wfData, connData, bindingsData] = await Promise.allSettled([
-        workflowStorage.getWorkflows(),
-        workflowStorage.getDatabaseConnections(),
-        workflowStorage.getWorkflowBindings()
-      ])
-      if (wfData.status === 'fulfilled') setWorkflows(wfData.value || [])
-      if (connData.status === 'fulfilled') setDbConnections(connData.value || [])
-      if (bindingsData.status === 'fulfilled') setActiveBindings(bindingsData.value || {})
+      const wfList = await workflowStorage.getWorkflows()
+      if (Array.isArray(wfList)) {
+        setWorkflows(wfList)
+      }
+      setLoading(false)
+
+      // Background non-blocking connection loader
+      workflowStorage.getDatabaseConnections().then(conns => {
+        if (conns) setDbConnections(conns)
+      }).catch(() => {})
     } catch (error) {
-      showToast('Error while loading definitions', 'error')
-    } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchWorkflows()
+    fetchWorkflows(workflows.length === 0)
   }, [])
 
   // Create Draft Definition

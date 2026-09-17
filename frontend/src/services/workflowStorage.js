@@ -858,12 +858,22 @@ export const workflowStorage = {
                                               }
                                             },
 
-                                              // 17. Client Database Connections & Data Connectors Management
-                                              getDatabaseConnections: async () => {
-                                                const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(6000) })
-                                                if (!res.ok) throw new Error(`Failed to fetch database connections (${res.status})`)
-                                                const data = await res.json()
-                                                return Array.isArray(data) ? data : (data.data || [])
+                                              // 17. Client Database Connections & Data Connectors Management (Cached)
+                                              getDatabaseConnections: async (forceRefresh = false) => {
+                                                const cached = getCachedMetadata('db_connections_list')
+                                                if (!forceRefresh && cached && Array.isArray(cached) && cached.length > 0) {
+                                                  return cached
+                                                }
+                                                try {
+                                                  const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(3000) })
+                                                  if (res.ok) {
+                                                    const data = await res.json()
+                                                    const list = Array.isArray(data) ? data : (data.data || [])
+                                                    setCachedMetadata('db_connections_list', list)
+                                                    return list
+                                                  }
+                                                } catch (_e) { }
+                                                return cached || []
                                               },
 
                                                 getConnections: async () => {
