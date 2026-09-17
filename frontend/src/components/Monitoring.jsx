@@ -415,7 +415,7 @@ function Monitoring({ showToast }) {
                         <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '17px', fontWeight: '600' }}>
                           Instance #{selectedInstance.instance_id} Execution Trace
                         </h3>
-                        <span style={{ fontSize: '11px', background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)', fontWeight: '600' }}>
+                        <span style={{ fontSize: '11px', background: '#e0e7ff', color: '#4338ca', padding: '2px 8px', borderRadius: '6px', border: '1px solid #c7d2fe', fontWeight: '600' }}>
                           ⚡ {selectedInstance.workflow_name || `Workflow #${selectedInstance.bpmn_definition_id}`}
                         </span>
                       </div>
@@ -493,7 +493,7 @@ function Monitoring({ showToast }) {
                                 <tbody>
                                   {Object.entries(variables).map(([k, v]) => (
                                     <tr key={k}>
-                                      <td style={{ fontWeight: '600', color: '#38bdf8' }}>{k}</td>
+                                      <td style={{ fontWeight: '600', color: '#0284c7' }}>{k}</td>
                                       <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
                                         {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
                                       </td>
@@ -531,7 +531,7 @@ function Monitoring({ showToast }) {
                                         {log.activity_name || log.activity_id}
                                       </td>
                                       <td style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                                        <span style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>
+                                        <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>
                                           {log.activity_type}
                                         </span>
                                       </td>
@@ -579,7 +579,7 @@ function Monitoring({ showToast }) {
                                       </td>
                                       <td style={{ fontWeight: '500' }}>User #{h.performed_by}</td>
                                       <td>
-                                        <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>
+                                        <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>
                                           {h.performed_role}
                                         </span>
                                       </td>
@@ -702,7 +702,7 @@ function Monitoring({ showToast }) {
 
             {/* Search Bar */}
             <div style={{ position: 'relative', flexGrow: 1, maxWidth: '360px' }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '9px', color: '#64748b' }} />
+              <Search size={13} style={{ position: 'absolute', left: '10px', top: '10px', color: '#64748b' }} />
               <input
                 id="monitoring-telemetry-search"
                 name="telemetry_search"
@@ -713,12 +713,12 @@ function Monitoring({ showToast }) {
                 onChange={(e) => setTelemetrySearch(e.target.value)}
                 style={{
                   width: '100%',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
                   borderRadius: '6px',
                   padding: '6px 10px 6px 30px',
                   fontSize: '12px',
-                  color: '#fff',
+                  color: '#0f172a',
                   outline: 'none'
                 }}
               />
@@ -726,7 +726,7 @@ function Monitoring({ showToast }) {
 
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label htmlFor="monitoring-auto-refresh-toggle" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
+              <label htmlFor="monitoring-auto-refresh-toggle" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#475569', cursor: 'pointer' }}>
                 <input
                   id="monitoring-auto-refresh-toggle"
                   name="auto_refresh"
@@ -744,13 +744,13 @@ function Monitoring({ showToast }) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  padding: '6px 10px',
+                  padding: '6px 12px',
                   borderRadius: '6px',
                   fontSize: '12px',
                   fontWeight: '600',
-                  background: 'rgba(255, 255, 255, 0.06)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: '#fff',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  color: '#334155',
                   cursor: 'pointer'
                 }}
               >
@@ -764,13 +764,13 @@ function Monitoring({ showToast }) {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  padding: '6px 10px',
+                  padding: '6px 12px',
                   borderRadius: '6px',
                   fontSize: '12px',
                   fontWeight: '600',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  color: '#f87171',
+                  background: '#fee2e2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
                   cursor: 'pointer'
                 }}
               >
@@ -787,13 +787,14 @@ function Monitoring({ showToast }) {
             aria-label="Telemetry event stream console" 
             style={{
               flexGrow: 1,
-              background: '#090d16',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '10px',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
               overflowY: 'auto',
               padding: '12px',
               fontFamily: 'monospace',
-              fontSize: '12px'
+              fontSize: '12px',
+              boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.02)'
             }}
           >
             {telemetryLogs.length === 0 ? (
@@ -805,10 +806,11 @@ function Monitoring({ showToast }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {telemetryLogs.map((log) => {
                   const isExpanded = expandedLogId === log.id
-                  const levelColor = 
-                    log.level === 'ERROR' ? '#ef4444' :
-                    log.level === 'AUDIT' ? '#10b981' :
-                    log.level === 'WARN' ? '#f59e0b' : '#38bdf8'
+                  const levelStyles = 
+                    log.level === 'ERROR' ? { color: '#dc2626', bg: '#fee2e2', border: '#fecaca' } :
+                    log.level === 'AUDIT' ? { color: '#15803d', bg: '#dcfce7', border: '#bbf7d0' } :
+                    log.level === 'WARN' ? { color: '#b45309', bg: '#fef3c7', border: '#fde68a' } :
+                    { color: '#0369a1', bg: '#e0f2fe', border: '#bae6fd' }
 
                   return (
                     <div
@@ -816,11 +818,11 @@ function Monitoring({ showToast }) {
                       style={{
                         background: '#ffffff',
                         border: `1px solid ${isExpanded ? '#6366f1' : '#e2e8f0'}`,
-                        borderRadius: '6px',
-                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        padding: '9px 12px',
                         cursor: 'pointer',
-                        transition: 'all 0.1s ease',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
                       }}
                       onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
                     >
@@ -831,11 +833,11 @@ function Monitoring({ showToast }) {
                           <span style={{
                             fontSize: '10px',
                             fontWeight: '700',
-                            padding: '1px 5px',
+                            padding: '1px 6px',
                             borderRadius: '4px',
-                            background: `${levelColor}18`,
-                            color: levelColor,
-                            border: `1px solid ${levelColor}44`
+                            background: levelStyles.bg,
+                            color: levelStyles.color,
+                            border: `1px solid ${levelStyles.border}`
                           }}>
                             {log.level}
                           </span>
