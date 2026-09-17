@@ -496,7 +496,7 @@ export const TimerNode = memo(({ id, data, selected }) => {
           <div className="wf-category-tag wf-tag-control">TIMING & DELAY</div>
           <div className="wf-title">{title}</div>
           <div className="wf-subtitle-row">
-            <span className="wf-badge-sub font-semibold" style={{ color: '#fbbf24', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+            <span className="wf-badge-sub font-semibold" style={{ color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a' }}>
               ⏱️ {timeDisplay}
             </span>
           </div>
@@ -505,11 +505,11 @@ export const TimerNode = memo(({ id, data, selected }) => {
       </div>
 
       <div className="wf-card-body" style={{ padding: '4px 10px 8px 10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>
           <span>Delay Mode:</span>
-          <span className="font-mono text-xs text-slate-300 font-semibold uppercase">{timerType}</span>
+          <span className="font-mono text-xs text-slate-700 font-semibold uppercase">{timerType}</span>
         </div>
-        <div style={{ height: '4px', width: '100%', background: 'rgba(245, 158, 11, 0.2)', borderRadius: '2px', overflow: 'hidden' }}>
+        <div style={{ height: '4px', width: '100%', background: '#fef3c7', borderRadius: '2px', overflow: 'hidden' }}>
           <div style={{ height: '100%', width: '100%', background: 'linear-gradient(90deg, #f59e0b, #d97706)', borderRadius: '2px' }} />
         </div>
       </div>
@@ -550,11 +550,12 @@ export const CommunicationNode = memo(({ id, data, selected }) => {
           <div className="wf-category-tag wf-tag-execution">EXECUTION NODE</div>
           <div className="wf-title">{title}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, flexShrink: 0 }}>To:</span>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, flexShrink: 0 }}>To:</span>
             <span
               style={{
                 fontSize: '11px',
-                color: '#cbd5e1',
+                color: '#334155',
+                fontWeight: 500,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -569,11 +570,12 @@ export const CommunicationNode = memo(({ id, data, selected }) => {
           </div>
           {isEmail && data?.cc && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, flexShrink: 0 }}>CC:</span>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, flexShrink: 0 }}>CC:</span>
               <span
                 style={{
                   fontSize: '11px',
-                  color: '#cbd5e1',
+                  color: '#334155',
+                  fontWeight: 500,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

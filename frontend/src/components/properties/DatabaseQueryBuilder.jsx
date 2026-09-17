@@ -16,7 +16,9 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
-  Link2
+  Link2,
+  ShieldAlert,
+  Shield
 } from 'lucide-react'
 import { workflowStorage } from '../../services/workflowStorage'
 

@@ -3822,26 +3822,29 @@ textarea.form-control {
 }
 
 .wf-eval-expr-box {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  padding: 5px 8px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 10px;
   margin-top: 8px;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 11.5px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .wf-eval-label {
-  font-size: 9px;
-  font-weight: 700;
-  color: #94a3b8;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #64748b;
   display: block;
   margin-bottom: 2px;
+  letter-spacing: 0.04em;
 }
 
 .wf-eval-expr-box code {
-  color: #fbbf24;
-  font-family: monospace;
+  color: #b45309;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3850,11 +3853,12 @@ textarea.form-control {
 
 /* Connectors / Handles */
 .wf-handle {
-  width: 9px !important;
-  height: 9px !important;
-  background: #818cf8 !important;
-  border: 2px solid #0c0e15 !important;
+  width: 10px !important;
+  height: 10px !important;
+  background: #6366f1 !important;
+  border: 2px solid #ffffff !important;
   border-radius: 50% !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2) !important;
   transition: transform 0.15s ease;
 }
 
@@ -4513,87 +4517,96 @@ textarea.form-control {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .wf-mode-toggle-group {
   display: flex;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  padding: 2px;
-  gap: 2px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
 }
 
 .wf-mode-toggle-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
+  padding: 4px 10px;
   font-size: 11px;
-  font-weight: 500;
-  color: #94a3b8;
-  border-radius: 4px;
+  font-weight: 600;
+  color: #64748b;
+  border-radius: 5px;
   background: transparent;
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
+.wf-mode-toggle-btn:hover {
+  color: #0f172a;
+}
+
 .wf-mode-toggle-btn.active {
   background: #3b82f6;
   color: #ffffff;
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
 }
 
 .wf-op-pills {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .wf-op-pill {
-  padding: 5px 2px;
+  padding: 6px 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-align: center;
-  border-radius: 4px;
-  background: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .wf-op-pill:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+  background: #f1f5f9;
 }
 
 .wf-op-pill.active.select {
-  background: rgba(14, 165, 233, 0.2);
-  border-color: #0ea5e9;
-  color: #38bdf8;
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0284c7;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.15);
 }
 
 .wf-op-pill.active.update {
-  background: rgba(234, 179, 8, 0.2);
-  border-color: #eab308;
-  color: #fde047;
+  background: #fef3c7;
+  border-color: #d97706;
+  color: #b45309;
+  box-shadow: 0 1px 4px rgba(217, 119, 6, 0.15);
 }
 
 .wf-op-pill.active.insert {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: #22c55e;
-  color: #4ade80;
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #15803d;
+  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.15);
 }
 
 .wf-op-pill.active.delete {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  color: #f87171;
+  background: #fee2e2;
+  border-color: #dc2626;
+  color: #b91c1c;
+  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.15);
 }
 
 .wf-qb-column-chips {
@@ -4602,46 +4615,48 @@ textarea.form-control {
   gap: 4px;
   max-height: 140px;
   overflow-y: auto;
-  padding: 6px;
-  background: rgba(15, 23, 42, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
 }
 
 .wf-col-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
-  font-size: 10.5px;
+  padding: 3px 8px;
+  font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #94a3b8;
-  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 0.12s ease;
 }
 
 .wf-col-chip:hover {
-  border-color: #38bdf8;
-  color: #f1f5f9;
+  border-color: #0284c7;
+  color: #0284c7;
+  background: #f0f9ff;
 }
 
 .wf-col-chip.selected {
-  background: rgba(14, 165, 233, 0.2);
-  border-color: #0ea5e9;
-  color: #38bdf8;
-  font-weight: 600;
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+  font-weight: 700;
 }
 
 .wf-chip-pk {
   font-size: 8px;
-  background: #f59e0b;
-  color: #000;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  color: #b45309;
   font-weight: 800;
-  padding: 0 3px;
-  border-radius: 2px;
+  padding: 0 4px;
+  border-radius: 3px;
 }
 
 .wf-qb-filter-list {
@@ -4654,26 +4669,27 @@ textarea.form-control {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+  padding: 5px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
   font-size: 11px;
   font-family: monospace;
 }
 
 .wf-filter-col {
-  color: #38bdf8;
-  font-weight: 600;
+  color: #0284c7;
+  font-weight: 700;
 }
 
 .wf-filter-op {
-  color: #f59e0b;
+  color: #d97706;
   font-weight: bold;
 }
 
 .wf-filter-val {
-  color: #a78bfa;
+  color: #4f46e5;
+  font-weight: 600;
   flex: 1;
 }
 
@@ -4686,35 +4702,37 @@ textarea.form-control {
 
 .wf-qb-preview-box {
   margin-top: 10px;
-  background: #090d16;
-  border: 1px solid rgba(56, 189, 248, 0.2);
-  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .wf-qb-preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
-  background: rgba(15, 23, 42, 0.8);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 10px;
+  padding: 6px 10px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 10.5px;
   font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.05em;
+  color: #475569;
+  letter-spacing: 0.04em;
 }
 
 .wf-qb-sql-text {
   margin: 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #38bdf8;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #0369a1;
+  background: #ffffff;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 100px;
+  max-height: 110px;
   overflow-y: auto;
 }
 
