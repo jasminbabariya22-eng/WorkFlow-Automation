@@ -565,20 +565,20 @@ export default function EmailNodeSection({
                 <span className="wf-preview-val font-mono">{preview.bcc}</span>
               </div>
             )}
-            <div className="wf-preview-meta-row" style={{ borderBottom: '1px solid #334155', paddingBottom: '8px' }}>
+            <div className="wf-preview-meta-row" style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
               <span className="wf-preview-label">Subject:</span>
-              <span className="wf-preview-val font-semibold text-white">{preview.subject || '<No Subject>'}</span>
+              <span className="wf-preview-val font-semibold" style={{ color: '#0f172a' }}>{preview.subject || '<No Subject>'}</span>
             </div>
 
             {/* Email Body Preview */}
-            <div style={{ padding: '14px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', minHeight: '80px' }}>
-              <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: '12px', color: '#e2e8f0', lineHeight: 1.6 }}>
+            <div style={{ padding: '14px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', minHeight: '80px', marginTop: '6px' }}>
+              <p style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: '12px', color: '#334155', lineHeight: 1.6 }}>
                 {preview.body || 'No message content defined.'}
               </p>
             </div>
           </div>
           <div style={{ marginTop: '8px', textAlign: 'center' }}>
-            <span style={{ fontSize: '10px', color: 'var(--wf-text-muted)' }}>
+            <span style={{ fontSize: '10.5px', color: '#64748b' }}>
               Variables like <code>&#123;&#123;id&#125;&#125;</code> and <code>&#123;&#123;status&#125;&#125;</code> are previewed with live sample data.
             </span>
           </div>
