@@ -84,12 +84,12 @@ function GenericSearchableSelect({
     <div style={{ position: 'relative', width: '100%' }} ref={dropdownRef}>
       {label && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <label style={{ fontSize: '12px', fontWeight: '600', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span>{label}</span>
             {required && <span style={{ color: '#f43f5e' }}>*</span>}
           </label>
           {sublabel && (
-            <span style={{ fontSize: '10.5px', color: '#818cf8', fontWeight: '500' }}>{sublabel}</span>
+            <span style={{ fontSize: '10.5px', color: '#4f46e5', fontWeight: '500' }}>{sublabel}</span>
           )}
         </div>
       )}
@@ -104,22 +104,22 @@ function GenericSearchableSelect({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: isOpen ? 'rgba(30, 41, 59, 0.9)' : 'rgba(15, 23, 42, 0.75)',
-          border: isOpen ? '1px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.12)',
+          background: isOpen ? '#ffffff' : '#ffffff',
+          border: isOpen ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
           borderRadius: '10px',
           padding: '10px 14px',
-          color: selectedOpt ? '#f8fafc' : '#94a3b8',
+          color: selectedOpt ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
           fontSize: '13px',
           cursor: loading ? 'not-allowed' : 'pointer',
           transition: 'all 0.18s ease',
-          boxShadow: isOpen ? '0 0 0 3px rgba(99, 102, 241, 0.25), 0 8px 20px rgba(0,0,0,0.4)' : 'none',
+          boxShadow: isOpen ? '0 0 0 3px rgba(99, 102, 241, 0.15), 0 4px 12px rgba(0,0,0,0.06)' : '0 1px 2px rgba(0,0,0,0.04)',
           outline: 'none'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
           <div style={{
-            background: 'rgba(99, 102, 241, 0.15)',
-            color: '#818cf8',
+            background: 'rgba(99, 102, 241, 0.1)',
+            color: '#4f46e5',
             borderRadius: '6px',
             padding: '5px',
             display: 'flex',
@@ -132,10 +132,10 @@ function GenericSearchableSelect({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textAlign: 'left' }}>
             {loading ? (
-              <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '12px' }}>Loading...</span>
+              <span style={{ color: '#64748b', fontStyle: 'italic', fontSize: '12px' }}>Loading...</span>
             ) : selectedOpt ? (
               <>
-                <span style={{ fontWeight: '600', color: '#f8fafc', fontFamily: selectedOpt.value.includes('_') ? 'monospace' : 'inherit', fontSize: '12.5px' }}>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontFamily: selectedOpt.value.includes('_') ? 'monospace' : 'inherit', fontSize: '12.5px' }}>
                   {selectedOpt.label}
                 </span>
                 {selectedOpt.badge && (
@@ -143,24 +143,24 @@ function GenericSearchableSelect({
                     fontSize: '10px',
                     padding: '2px 6px',
                     borderRadius: '4px',
-                    background: 'rgba(99, 102, 241, 0.2)',
-                    color: '#a5b4fc',
+                    background: 'rgba(99, 102, 241, 0.12)',
+                    color: '#4338ca',
                     fontWeight: '700',
-                    border: '1px solid rgba(99, 102, 241, 0.3)'
+                    border: '1px solid rgba(99, 102, 241, 0.25)'
                   }}>
                     {selectedOpt.badge}
                   </span>
                 )}
               </>
             ) : (
-              <span style={{ color: '#64748b' }}>{placeholder}</span>
+              <span style={{ color: '#94a3b8' }}>{placeholder}</span>
             )}
           </div>
         </div>
 
         <ChevronDown
           size={16}
-          color="#94a3b8"
+          color="#64748b"
           style={{
             transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.2s ease',
@@ -178,17 +178,17 @@ function GenericSearchableSelect({
             left: 0,
             right: 0,
             zIndex: 1000,
-            background: '#131929',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
             borderRadius: '12px',
-            boxShadow: '0 15px 35px -5px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.15)',
+            boxShadow: '0 15px 35px -5px rgba(0, 0, 0, 0.12), 0 0 20px rgba(99, 102, 241, 0.08)',
             overflow: 'hidden',
             animation: 'fadeIn 0.15s ease'
           }}
         >
           {/* Filter Search Input */}
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Search size={14} color="#818cf8" />
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Search size={14} color="#6366f1" />
             <input
               ref={searchInputRef}
               type="text"
@@ -199,7 +199,7 @@ function GenericSearchableSelect({
                 width: '100%',
                 background: 'transparent',
                 border: 'none',
-                color: '#f8fafc',
+                color: '#0f172a',
                 fontSize: '12px',
                 outline: 'none',
                 padding: '4px 0'
@@ -211,7 +211,7 @@ function GenericSearchableSelect({
                 aria-label="Clear filter query"
                 title="Clear filter query"
                 onClick={() => setQuery('')}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '2px' }}
               >
                 <X size={13} />
               </button>
@@ -247,12 +247,12 @@ function GenericSearchableSelect({
                       padding: '8px 10px',
                       borderRadius: '8px',
                       cursor: 'pointer',
-                      background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-                      color: isSelected ? '#fff' : '#cbd5e1',
+                      background: isSelected ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                      color: isSelected ? '#4338ca' : '#1e293b',
                       transition: 'background 0.12s ease'
                     }}
                     onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'
+                      if (!isSelected) e.currentTarget.style.background = '#f1f5f9'
                     }}
                     onMouseLeave={(e) => {
                       if (!isSelected) e.currentTarget.style.background = 'transparent'
@@ -263,7 +263,7 @@ function GenericSearchableSelect({
                         fontSize: '12.5px',
                         fontWeight: isSelected ? '700' : '500',
                         fontFamily: opt.value.includes('_') ? 'monospace' : 'inherit',
-                        color: isSelected ? '#818cf8' : '#e2e8f0'
+                        color: isSelected ? '#4338ca' : '#1e293b'
                       }}>
                         {opt.label}
                       </span>
@@ -272,8 +272,8 @@ function GenericSearchableSelect({
                           fontSize: '10px',
                           padding: '1px 6px',
                           borderRadius: '4px',
-                          background: 'rgba(99, 102, 241, 0.25)',
-                          color: '#c7d2fe',
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          color: '#4338ca',
                           fontWeight: '700'
                         }}>
                           {opt.badge}
@@ -285,7 +285,7 @@ function GenericSearchableSelect({
                       {opt.hint && (
                         <span style={{ fontSize: '10.5px', color: '#64748b' }}>{opt.hint}</span>
                       )}
-                      {isSelected && <Check size={14} color="#818cf8" />}
+                      {isSelected && <Check size={14} color="#4338ca" />}
                     </div>
                   </div>
                 )
@@ -582,29 +582,29 @@ export default function ClientAppBindingModal({
   }))
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 9999, background: 'rgba(5, 8, 22, 0.82)', backdropFilter: 'blur(10px)' }}>
+    <div className="modal-overlay" style={{ zIndex: 9999, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(8px)' }}>
       <div 
         className="modal-container" 
         style={{ 
           maxWidth: '680px', 
           width: '94%', 
-          background: 'linear-gradient(180deg, #131728 0%, #0d111d 100%)', 
-          border: '1px solid rgba(99, 102, 241, 0.35)',
+          background: '#ffffff', 
+          border: '1px solid #e2e8f0',
           borderRadius: '16px',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 35px rgba(99, 102, 241, 0.18)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
           padding: '24px',
           overflow: 'hidden'
         }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '16px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '16px', borderBottom: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ 
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(168, 85, 247, 0.3))', 
-              border: '1px solid rgba(99, 102, 241, 0.45)', 
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.15))', 
+              border: '1px solid rgba(99, 102, 241, 0.3)', 
               padding: '10px', 
               borderRadius: '12px', 
-              color: '#a5b4fc',
+              color: '#4f46e5',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
@@ -613,21 +613,21 @@ export default function ClientAppBindingModal({
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#f8fafc', margin: 0, letterSpacing: '-0.02em' }}>
+                <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
                   Bind Workflow to ClientApp
                 </h3>
                 {existingBinding ? (
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#4ade80', background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '2px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#15803d', background: '#dcfce7', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <CheckCircle2 size={11} />
                     <span>Active Bridge</span>
                   </span>
                 ) : (
-                  <span style={{ fontSize: '11px', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 8px', borderRadius: '999px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '2px 8px', borderRadius: '999px' }}>
                     Generic Multi-Process Bridge
                   </span>
                 )}
               </div>
-              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0 0' }}>
+              <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0 0' }}>
                 Connect any workflow process to any client database entity with 0 custom API code
               </p>
             </div>
@@ -638,7 +638,7 @@ export default function ClientAppBindingModal({
             disabled={submitting}
             aria-label="Close dialog"
             title="Close dialog"
-            style={{ color: '#94a3b8', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '6px' }}
+            style={{ color: '#64748b', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px' }}
           >
             <X size={18} />
           </button>
@@ -646,8 +646,8 @@ export default function ClientAppBindingModal({
 
         {loading ? (
           <div style={{ padding: '60px', textAlign: 'center' }}>
-            <Loader className="spinner" size={32} color="#818cf8" style={{ margin: '0 auto 12px' }} />
-            <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '500' }}>Inspecting database catalog & active bindings...</span>
+            <Loader className="spinner" size={32} color="#6366f1" style={{ margin: '0 auto 12px' }} />
+            <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Inspecting database catalog & active bindings...</span>
           </div>
         ) : (
           <form 
@@ -660,23 +660,22 @@ export default function ClientAppBindingModal({
             
             {/* 1. VISUAL INTERACTIVE FLOW ARCHITECTURE */}
             <div style={{
-              background: 'rgba(30, 41, 59, 0.45)',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
               borderRadius: '12px',
               padding: '12px 16px',
               marginBottom: '18px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '8px',
-              boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.3)'
+              gap: '8px'
             }}>
               {/* Step 1: ClientApp */}
-              <div style={{ flex: 1, textAlign: 'center', padding: '8px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#38bdf8', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
+              <div style={{ flex: 1, textAlign: 'center', padding: '8px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#0284c7', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
                   1. ClientApp Module
                 </span>
-                <span style={{ fontSize: '12px', fontWeight: '700', color: '#f1f5f9', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a', fontFamily: 'monospace' }}>
                   '{moduleKey || 'module_key'}'
                 </span>
               </div>
@@ -684,11 +683,11 @@ export default function ClientAppBindingModal({
               <ArrowRight size={16} color="#6366f1" style={{ flexShrink: 0 }} />
 
               {/* Step 2: Workflow Engine */}
-              <div style={{ flex: 1.2, textAlign: 'center', padding: '8px', background: 'rgba(99, 102, 241, 0.12)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
-                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#a5b4fc', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
+              <div style={{ flex: 1.2, textAlign: 'center', padding: '8px', background: '#eef2ff', borderRadius: '8px', border: '1px solid #c7d2fe' }}>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#4f46e5', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
                   2. Workflow Engine
                 </span>
-                <span style={{ fontSize: '12px', fontWeight: '700', color: '#fff' }} title={workflow?.name}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#312e81' }} title={workflow?.name}>
                   ID #{workflow?.id || workflow?.workflow_id}
                 </span>
               </div>
@@ -696,11 +695,11 @@ export default function ClientAppBindingModal({
               <ArrowRight size={16} color="#6366f1" style={{ flexShrink: 0 }} />
 
               {/* Step 3: Client Database */}
-              <div style={{ flex: 1, textAlign: 'center', padding: '8px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#4ade80', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
+              <div style={{ flex: 1, textAlign: 'center', padding: '8px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#16a34a', fontWeight: '800', display: 'block', marginBottom: '2px' }}>
                   3. ClientDB Entity
                 </span>
-                <span style={{ fontSize: '12px', fontWeight: '700', color: '#f1f5f9', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a', fontFamily: 'monospace' }}>
                   {tableName || 'select table'}
                 </span>
               </div>
@@ -710,19 +709,19 @@ export default function ClientAppBindingModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
               {/* CARD 1: BRIDGE IDENTITY */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '16px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                  <Layers size={15} color="#818cf8" />
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  <Layers size={15} color="#4f46e5" />
+                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                     1. ClientApp Bridge Identity
                   </span>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div>
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', fontWeight: '600', color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
                       <span>ClientApp Module Key <span style={{ color: '#f43f5e' }}>*</span></span>
-                      <span style={{ fontSize: '10.5px', color: '#818cf8', fontWeight: '400' }}>Generic Keyword</span>
+                      <span style={{ fontSize: '10.5px', color: '#4f46e5', fontWeight: '500' }}>Generic Keyword</span>
                     </label>
                     <input
                       type="text"
@@ -731,12 +730,12 @@ export default function ClientAppBindingModal({
                       onChange={(e) => setModuleKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
                       placeholder="e.g. orders, tickets, leave_requests"
                       required
-                      style={{ fontFamily: 'monospace', fontSize: '13px', background: 'rgba(0,0,0,0.3)', borderColor: 'rgba(99, 102, 241, 0.3)' }}
+                      style={{ fontFamily: 'monospace', fontSize: '13px', background: '#ffffff', borderColor: '#cbd5e1' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
                       Display Title
                     </label>
                     <input
@@ -745,25 +744,25 @@ export default function ClientAppBindingModal({
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       placeholder="e.g. Purchase Order Approval Process"
-                      style={{ fontSize: '13px', background: 'rgba(0,0,0,0.3)' }}
+                      style={{ fontSize: '13px', background: '#ffffff', borderColor: '#cbd5e1' }}
                     />
                   </div>
                 </div>
               </div>
 
               {/* CARD 2: DATABASE & ROOT TRIGGER TABLE */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '16px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Database size={15} color="#38bdf8" />
-                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    <Database size={15} color="#0284c7" />
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                       2. Database & Primary Trigger Table
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowMultiTableInfo(!showMultiTableInfo)}
-                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0 }}
+                    style={{ background: 'transparent', border: 'none', color: '#0284c7', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0 }}
                   >
                     <HelpCircle size={12} />
                     <span>Multiple Tables Support?</span>
@@ -773,13 +772,13 @@ export default function ClientAppBindingModal({
                 {/* Multi-table explanation accordion */}
                 {showMultiTableInfo && (
                   <div style={{ 
-                    background: 'rgba(56, 189, 248, 0.08)', 
-                    border: '1px solid rgba(56, 189, 248, 0.25)', 
+                    background: '#e0f2fe', 
+                    border: '1px solid #bae6fd', 
                     borderRadius: '8px', 
                     padding: '10px 12px', 
                     marginBottom: '14px',
                     fontSize: '11.5px',
-                    color: '#bae6fd',
+                    color: '#0369a1',
                     lineHeight: '1.5'
                   }}>
                     <strong>💡 Generic Multi-Table Architecture:</strong>
@@ -817,10 +816,10 @@ export default function ClientAppBindingModal({
               </div>
 
               {/* CARD 3: SCHEMA & COLUMN MAPPINGS */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '16px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                  <Key size={15} color="#fbbf24" />
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  <Key size={15} color="#d97706" />
+                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                     3. Auto-Detected Column Mappings
                   </span>
                 </div>
@@ -852,7 +851,7 @@ export default function ClientAppBindingModal({
 
                   {/* Initial Default Status */}
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
                       Initial State
                     </label>
                     <input
@@ -861,23 +860,23 @@ export default function ClientAppBindingModal({
                       value={defaultStatus}
                       onChange={(e) => setDefaultStatus(e.target.value)}
                       placeholder="PENDING"
-                      style={{ fontFamily: 'monospace', fontSize: '12.5px', background: 'rgba(0,0,0,0.3)', padding: '10px 12px' }}
+                      style={{ fontFamily: 'monospace', fontSize: '12.5px', background: '#ffffff', borderColor: '#cbd5e1', padding: '10px 12px' }}
                     />
                   </div>
                 </div>
               </div>
 
               {/* CARD 4: LIVE CODE SNIPPET */}
-              <div style={{ background: 'rgba(10, 14, 26, 0.75)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '10px', padding: '12px 14px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Code2 size={13} color="#a5b4fc" />
+                  <span style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Code2 size={13} color="#4f46e5" />
                     <span>How ClientApp triggers this generic process:</span>
                   </span>
-                  <span style={{ fontSize: '10.5px', color: '#4ade80', fontWeight: '600' }}>100% Generic API</span>
+                  <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: '700' }}>100% Generic API</span>
                 </div>
-                <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: '#e2e8f0', background: 'rgba(0,0,0,0.4)', padding: '8px 10px', borderRadius: '6px', overflowX: 'auto' }}>
-                  <span style={{ color: '#c084fc' }}>await</span> genericWorkflowApi.<span style={{ color: '#60a5fa' }}>submit</span>(<span style={{ color: '#34d399' }}>'{moduleKey || 'module_key'}'</span>, formData, currentUser)
+                <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: '#0f172a', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '8px 10px', borderRadius: '6px', overflowX: 'auto' }}>
+                  <span style={{ color: '#9333ea', fontWeight: '600' }}>await</span> genericWorkflowApi.<span style={{ color: '#2563eb', fontWeight: '600' }}>submit</span>(<span style={{ color: '#059669' }}>'{moduleKey || 'module_key'}'</span>, formData, currentUser)
                 </div>
               </div>
 
@@ -891,7 +890,7 @@ export default function ClientAppBindingModal({
                 alignItems: 'center', 
                 marginTop: '20px', 
                 paddingTop: '16px', 
-                borderTop: '1px solid rgba(255, 255, 255, 0.08)' 
+                borderTop: '1px solid #e2e8f0' 
               }}
             >
               {existingBinding ? (
@@ -924,15 +923,15 @@ export default function ClientAppBindingModal({
                   className="btn btn-primary"
                   disabled={submitting}
                   style={{ 
-                    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', 
-                    borderColor: '#818cf8', 
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', 
+                    borderColor: '#4f46e5', 
                     display: 'flex', 
                     alignItems: 'center', 
                     gap: '8px',
                     fontSize: '13px',
                     fontWeight: '700',
                     padding: '8px 22px',
-                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)'
+                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.25)'
                   }}
                 >
                   {submitting ? <Loader className="spinner" size={15} /> : <Link2 size={15} />}

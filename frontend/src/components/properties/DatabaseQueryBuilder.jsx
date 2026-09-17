@@ -989,10 +989,10 @@ export default function DatabaseQueryBuilder({
 
               {/* 4. Conflict Resolution (ON CONFLICT) for Create Record (INSERT) */}
               {isCreate && (
-                <div style={{ marginTop: '10px', padding: '8px 10px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px' }}>
+                <div style={{ marginTop: '10px', padding: '8px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <label htmlFor="qb-conflict-resolution" style={{ margin: 0, fontSize: '11px', fontWeight: '600', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <ShieldAlert size={13} style={{ color: '#fbbf24' }} />
+                    <label htmlFor="qb-conflict-resolution" style={{ margin: 0, fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <ShieldAlert size={13} style={{ color: '#d97706' }} />
                       <span>Duplicate Conflict Rule</span>
                     </label>
                     <span style={{ fontSize: '9px', color: '#64748b', fontFamily: 'monospace' }}>ON CONFLICT</span>
@@ -1300,8 +1300,8 @@ export default function DatabaseQueryBuilder({
 
         {/* Optional Test Parameter Config (Shown only for SELECT/UPDATE/DELETE where record ID is required) */}
         {operation !== 'INSERT' && (
-          <div style={{ padding: '4px 8px', background: 'rgba(15, 23, 42, 0.6)', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px' }}>
-            <label htmlFor="qb-test-param-id" style={{ color: '#94a3b8', margin: 0 }}>Test parameter <code>:entity_id</code> (Target Record ID):</label>
+          <div style={{ padding: '4px 8px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px' }}>
+            <label htmlFor="qb-test-param-id" style={{ color: '#64748b', margin: 0 }}>Test parameter <code>:entity_id</code> (Target Record ID):</label>
             <input
               id="qb-test-param-id"
               name="test_param_entity_id"
@@ -1321,24 +1321,24 @@ export default function DatabaseQueryBuilder({
         {testResult && (
           <div style={{
             marginTop: '8px',
-            background: testResult.status === 'SUCCESS' ? 'rgba(6, 78, 59, 0.25)' : 'rgba(127, 29, 29, 0.25)',
-            border: `1px solid ${testResult.status === 'SUCCESS' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+            background: testResult.status === 'SUCCESS' ? '#f0fdf4' : '#fef2f2',
+            border: `1px solid ${testResult.status === 'SUCCESS' ? '#bbf7d0' : '#fecaca'}`,
             borderRadius: '6px',
             padding: '8px 10px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '600' }}>
                 {testResult.status === 'SUCCESS' ? (
-                  <CheckCircle2 size={13} className="text-emerald-400" />
+                  <CheckCircle2 size={13} className="text-emerald-600" />
                 ) : (
-                  <AlertCircle size={13} className="text-rose-400" />
+                  <AlertCircle size={13} className="text-rose-600" />
                 )}
-                <span style={{ color: testResult.status === 'SUCCESS' ? '#34d399' : '#f87171' }}>
+                <span style={{ color: testResult.status === 'SUCCESS' ? '#15803d' : '#b91c1c' }}>
                   {testResult.status === 'SUCCESS' ? 'Query Executed Successfully' : 'Execution Failed'}
                 </span>
               </div>
               {testResult.execution_time_ms && (
-                <span style={{ fontSize: '10px', color: '#94a3b8', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>
                   {testResult.execution_time_ms} ms
                 </span>
               )}
@@ -1349,16 +1349,16 @@ export default function DatabaseQueryBuilder({
                 {/* SELECT RESULTS */}
                 {testResult.operation === 'SELECT' && (
                   <>
-                    <div style={{ fontSize: '10px', color: '#a7f3d0', marginBottom: '4px' }}>
+                    <div style={{ fontSize: '10px', color: '#15803d', marginBottom: '4px' }}>
                       Returned {testResult.row_count} {testResult.row_count === 1 ? 'row' : 'rows'}:
                     </div>
                     {testResult.rows && testResult.rows.length > 0 ? (
-                      <div style={{ overflowX: 'auto', maxHeight: '160px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ overflowX: 'auto', maxHeight: '160px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
                         <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse', textAlign: 'left', fontFamily: 'monospace' }}>
                           <thead>
-                            <tr style={{ background: 'rgba(15, 23, 42, 0.9)', color: '#cbd5e1' }}>
+                            <tr style={{ background: '#f8fafc', color: '#334155' }}>
                               {testResult.columns.map(c => (
-                                <th key={c} style={{ padding: '3px 6px', borderBottom: '1px solid rgba(255,255,255,0.1)', whiteSpace: 'nowrap' }}>
+                                <th key={c} style={{ padding: '3px 6px', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>
                                   {c}
                                 </th>
                               ))}
@@ -1366,7 +1366,7 @@ export default function DatabaseQueryBuilder({
                           </thead>
                           <tbody>
                             {testResult.rows.map((row, rIdx) => (
-                              <tr key={rIdx} style={{ background: rIdx % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent', color: '#e2e8f0' }}>
+                              <tr key={rIdx} style={{ background: rIdx % 2 === 0 ? '#ffffff' : '#f8fafc', color: '#0f172a' }}>
                                 {testResult.columns.map(c => (
                                   <td key={c} style={{ padding: '3px 6px', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap' }}>
                                     {row[c] !== null && row[c] !== undefined ? String(row[c]) : <span style={{ color: '#64748b' }}>NULL</span>}

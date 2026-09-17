@@ -1638,7 +1638,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
             snapGrid={[15, 15]}
             defaultEdgeOptions={{ type: 'workflow' }}
           >
-            {showGrid && <Background gap={20} size={1} color="rgba(255, 255, 255, 0.08)" />}
+            {showGrid && <Background gap={20} size={1} color="rgba(0, 0, 0, 0.12)" />}
             <MiniMap
               nodeColor={(n) => {
                 if (n.type === 'start') return '#22c55e'
@@ -1649,9 +1649,9 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
                 if (n.type === 'communication') return '#6366f1'
                 if (n.type === 'record') return '#06b6d4'
                 if (n.type === 'action') return '#14b8a6'
-                return '#64748b'
+                return '#94a3b8'
               }}
-              maskColor="rgba(15, 18, 25, 0.75)"
+              maskColor="rgba(241, 245, 249, 0.75)"
               className="wf-minimap"
             />
           </ReactFlow>

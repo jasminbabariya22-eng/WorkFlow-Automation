@@ -178,11 +178,11 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
         {/* Modal Body */}
         <div className="modal-body execution-body" tabIndex={0} role="region" aria-label="Workflow execution runner details">
           {/* Input Section */}
-          <div className="runner-config-card" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '16px' }}>
+          <div className="runner-config-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
             
             {/* Direct Entity ID Input */}
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#f8fafc', textTransform: 'uppercase', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: 'var(--color-text-primary)', textTransform: 'uppercase', marginBottom: '6px' }}>
                 Entity ID / Target Record ID
               </label>
               
@@ -196,13 +196,13 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
                     placeholder="Enter Record ID (e.g. 5213)"
                     style={{
                       width: '100%',
-                      background: 'rgba(0, 0, 0, 0.4)',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      background: '#ffffff',
+                      border: '1px solid #cbd5e1',
                       borderRadius: '8px',
                       padding: '8px 12px 8px 32px',
                       fontSize: '14px',
                       fontWeight: '600',
-                      color: '#38bdf8',
+                      color: '#0284c7',
                       outline: 'none'
                     }}
                   />
@@ -228,7 +228,7 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
                   </button>
                 </div>
               </div>
-              <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
+              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
                 The workflow will dynamically execute against this database record.
               </span>
             </div>
@@ -241,7 +241,7 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#94a3b8',
+                  color: 'var(--color-text-muted)',
                   fontSize: '11px',
                   fontWeight: '600',
                   cursor: 'pointer',
@@ -263,7 +263,7 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
                     value={extraVariables}
                     onChange={e => handleJsonChange(e.target.value)}
                     placeholder='{\n  "priority": "HIGH"\n}'
-                    style={{ width: '100%', fontFamily: 'monospace', fontSize: '12px', background: 'rgba(0,0,0,0.5)', borderRadius: '6px', padding: '8px', color: '#cbd5e1' }}
+                    style={{ width: '100%', fontFamily: 'monospace', fontSize: '12px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '8px', color: '#0f172a' }}
                   />
                   {jsonError && (
                     <span style={{ color: '#ef4444', fontSize: '11px', marginTop: '4px', display: 'block' }}>

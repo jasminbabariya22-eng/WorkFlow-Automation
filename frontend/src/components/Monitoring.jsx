@@ -175,11 +175,11 @@ function Monitoring({ showToast }) {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        background: 'rgba(15, 23, 42, 0.65)',
-        backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
         borderRadius: '12px',
-        padding: '12px 20px'
+        padding: '12px 20px',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
@@ -190,22 +190,22 @@ function Monitoring({ showToast }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)'
+            boxShadow: '0 2px 8px rgba(14, 165, 233, 0.3)'
           }}>
             <Activity size={20} color="#fff" />
           </div>
           <div>
-            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: '#f8fafc', letterSpacing: '-0.01em' }}>
+            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: '#0f172a', letterSpacing: '-0.01em' }}>
               Workflow Monitoring & Observability
             </h2>
-            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
               Live execution tracing, distributed telemetry, process variables & audit logs
             </p>
           </div>
         </div>
 
         {/* Mode Toggle Buttons */}
-        <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.35)', padding: '4px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+        <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
           <button
             onClick={() => setViewMode('instances')}
             style={{
@@ -218,8 +218,9 @@ function Monitoring({ showToast }) {
               fontWeight: '600',
               border: 'none',
               cursor: 'pointer',
-              background: viewMode === 'instances' ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'transparent',
-              color: viewMode === 'instances' ? '#fff' : '#94a3b8',
+              background: viewMode === 'instances' ? '#ffffff' : 'transparent',
+              color: viewMode === 'instances' ? '#0284c7' : '#64748b',
+              boxShadow: viewMode === 'instances' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.15s ease'
             }}
           >
@@ -238,15 +239,16 @@ function Monitoring({ showToast }) {
               fontWeight: '600',
               border: 'none',
               cursor: 'pointer',
-              background: viewMode === 'telemetry' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
-              color: viewMode === 'telemetry' ? '#fff' : '#94a3b8',
+              background: viewMode === 'telemetry' ? '#ffffff' : 'transparent',
+              color: viewMode === 'telemetry' ? '#059669' : '#64748b',
+              boxShadow: viewMode === 'telemetry' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.15s ease'
             }}
           >
             <Radio size={13} />
             <span>Live Observability Stream</span>
             {metrics.total_logged_events > 0 && (
-              <span style={{ fontSize: '10px', background: 'rgba(255, 255, 255, 0.2)', padding: '1px 5px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '10px', background: '#e2e8f0', color: '#334155', padding: '1px 5px', borderRadius: '10px' }}>
                 {metrics.total_logged_events}
               </span>
             )}
@@ -580,40 +582,40 @@ function Monitoring({ showToast }) {
             gridTemplateColumns: 'repeat(5, 1fr)',
             gap: '12px'
           }}>
-            <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '12px 16px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>Engine Health</div>
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' }}>Engine Health</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                <ShieldCheck size={16} color={metrics.status === 'HEALTHY' ? '#10b981' : '#f59e0b'} />
-                <span style={{ fontSize: '15px', fontWeight: '700', color: metrics.status === 'HEALTHY' ? '#10b981' : '#f59e0b' }}>
+                <ShieldCheck size={16} color={metrics.status === 'HEALTHY' ? '#16a34a' : '#d97706'} />
+                <span style={{ fontSize: '15px', fontWeight: '700', color: metrics.status === 'HEALTHY' ? '#16a34a' : '#d97706' }}>
                   {metrics.status}
                 </span>
               </div>
             </div>
 
-            <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '12px 16px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>Total Step Runs</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: '#38bdf8', marginTop: '4px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' }}>Total Step Runs</div>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: '#0284c7', marginTop: '4px' }}>
                 {metrics.total_step_executions}
               </div>
             </div>
 
-            <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '12px 16px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>Avg Step Latency</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: '#a855f7', marginTop: '4px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' }}>Avg Step Latency</div>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: '#7c3aed', marginTop: '4px' }}>
                 {metrics.average_step_latency_ms} ms
               </div>
             </div>
 
-            <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '12px 16px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>Error Rate</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: metrics.error_rate_percentage > 0 ? '#ef4444' : '#10b981', marginTop: '4px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' }}>Error Rate</div>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: metrics.error_rate_percentage > 0 ? '#dc2626' : '#16a34a', marginTop: '4px' }}>
                 {metrics.error_rate_percentage}% ({metrics.total_errors} errors)
               </div>
             </div>
 
-            <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '12px 16px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>Buffer Size</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: '#f8fafc', marginTop: '4px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '700' }}>Buffer Size</div>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', marginTop: '4px' }}>
                 {metrics.total_logged_events} / {metrics.buffer_capacity || 500}
               </div>
             </div>
@@ -624,11 +626,12 @@ function Monitoring({ showToast }) {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: 'rgba(15, 23, 42, 0.6)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
             borderRadius: '10px',
             padding: '10px 16px',
-            gap: '12px'
+            gap: '12px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
           }}>
             {/* Level Filter Pills */}
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -641,12 +644,14 @@ function Monitoring({ showToast }) {
                     borderRadius: '6px',
                     fontSize: '11px',
                     fontWeight: '700',
-                    border: 'none',
+                    border: '1px solid transparent',
                     cursor: 'pointer',
                     background: telemetryLevel === lvl ? 
-                      (lvl === 'ERROR' ? '#ef4444' : lvl === 'AUDIT' ? '#10b981' : lvl === 'WARN' ? '#f59e0b' : '#0284c7') 
-                      : 'rgba(255, 255, 255, 0.05)',
-                    color: telemetryLevel === lvl ? '#fff' : '#94a3b8'
+                      (lvl === 'ERROR' ? '#fee2e2' : lvl === 'AUDIT' ? '#dcfce7' : lvl === 'WARN' ? '#fef3c7' : '#e0f2fe') 
+                      : '#f1f5f9',
+                    color: telemetryLevel === lvl ? 
+                      (lvl === 'ERROR' ? '#dc2626' : lvl === 'AUDIT' ? '#15803d' : lvl === 'WARN' ? '#b45309' : '#0369a1') 
+                      : '#64748b'
                   }}
                 >
                   {lvl}
@@ -768,42 +773,43 @@ function Monitoring({ showToast }) {
                     <div
                       key={log.id}
                       style={{
-                        background: 'rgba(15, 23, 42, 0.65)',
-                        border: `1px solid ${isExpanded ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.05)'}`,
+                        background: '#ffffff',
+                        border: `1px solid ${isExpanded ? '#6366f1' : '#e2e8f0'}`,
                         borderRadius: '6px',
                         padding: '8px 12px',
                         cursor: 'pointer',
-                        transition: 'all 0.1s ease'
+                        transition: 'all 0.1s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                       }}
                       onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                          {isExpanded ? <ChevronDown size={12} color="#94a3b8" /> : <ChevronRight size={12} color="#94a3b8" />}
+                          {isExpanded ? <ChevronDown size={12} color="#64748b" /> : <ChevronRight size={12} color="#64748b" />}
                           <span style={{ color: '#64748b', fontSize: '11px', whiteSpace: 'nowrap' }}>{log.timestamp}</span>
                           <span style={{
                             fontSize: '10px',
                             fontWeight: '700',
                             padding: '1px 5px',
                             borderRadius: '4px',
-                            background: `${levelColor}22`,
+                            background: `${levelColor}18`,
                             color: levelColor,
                             border: `1px solid ${levelColor}44`
                           }}>
                             {log.level}
                           </span>
-                          <span style={{ color: '#cbd5e1', fontWeight: '500', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          <span style={{ color: '#0f172a', fontWeight: '500', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                             {log.message}
                           </span>
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
                           {log.duration_ms !== null && log.duration_ms !== undefined && (
-                            <span style={{ color: '#a855f7', fontSize: '11px', background: 'rgba(168, 85, 247, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                            <span style={{ color: '#7c3aed', fontSize: '11px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: '4px' }}>
                               ⚡ {log.duration_ms}ms
                             </span>
                           )}
-                          <span style={{ color: '#64748b', fontSize: '10px', background: 'rgba(255, 255, 255, 0.04)', padding: '1px 5px', borderRadius: '3px' }}>
+                          <span style={{ color: '#64748b', fontSize: '10px', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '1px 5px', borderRadius: '3px' }}>
                             {log.trace_id}
                           </span>
                         </div>
@@ -814,13 +820,13 @@ function Monitoring({ showToast }) {
                         <div style={{
                           marginTop: '8px',
                           padding: '10px',
-                          background: 'rgba(0, 0, 0, 0.5)',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
                           borderRadius: '6px',
                           fontSize: '11px'
                         }}>
-                          <div style={{ color: '#38bdf8', fontWeight: '600', marginBottom: '4px' }}>Structured Telemetry Payload:</div>
-                          <pre style={{ margin: 0, color: '#94a3b8', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <div style={{ color: '#0284c7', fontWeight: '600', marginBottom: '4px' }}>Structured Telemetry Payload:</div>
+                          <pre style={{ margin: 0, color: '#334155', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                             {JSON.stringify(log, null, 2)}
                           </pre>
                         </div>

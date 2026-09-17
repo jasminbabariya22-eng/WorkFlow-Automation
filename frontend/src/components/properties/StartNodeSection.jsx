@@ -54,8 +54,8 @@ export default function StartNodeSection({
       {/* 2. Database Event Configuration */}
       {triggerType === 'Database' && (
         <div style={{
-          background: 'rgba(15, 23, 42, 0.4)',
-          border: '1px solid rgba(99, 102, 241, 0.25)',
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
           borderRadius: '8px',
           padding: '12px',
           marginTop: '8px'
@@ -64,12 +64,12 @@ export default function StartNodeSection({
           <div className="wf-field-group" style={{ marginBottom: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label className="wf-field-label" htmlFor="start-db-table" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <Table size={12} color="#38bdf8" />
+                <Table size={12} color="#0284c7" />
                 <span>Target Database Table</span>
                 <span style={{ color: '#f43f5e' }}>*</span>
               </label>
               {currentTable && (
-                <span style={{ fontSize: '10px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '10px', color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: '4px' }}>
                   {availableFields.length} columns
                 </span>
               )}
@@ -116,9 +116,9 @@ export default function StartNodeSection({
                     textAlign: 'left',
                     cursor: 'pointer',
                     gridColumn: evt.id === 'INSERT_OR_UPDATE' ? 'span 2' : 'span 1',
-                    border: eventType === evt.id ? '1px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.08)',
-                    background: eventType === evt.id ? 'rgba(99, 102, 241, 0.18)' : 'rgba(0, 0, 0, 0.25)',
-                    color: eventType === evt.id ? '#e0e7ff' : '#94a3b8',
+                    border: eventType === evt.id ? '1.5px solid #6366f1' : '1px solid #e2e8f0',
+                    background: eventType === evt.id ? '#eef2ff' : '#ffffff',
+                    color: eventType === evt.id ? '#4338ca' : '#475569',
                     transition: 'all 0.15s ease'
                   }}
                 >

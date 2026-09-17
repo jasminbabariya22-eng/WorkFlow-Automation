@@ -211,13 +211,13 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content execution-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '780px', width: '92%' }}>
         {/* Header */}
-        <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '16px' }}>
+        <div className="modal-header" style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div className="runner-icon-badge" style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
-              <Database size={20} color="#38bdf8" />
+              <Database size={20} color="#0284c7" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#0f172a' }}>
                 Client Database Connectors
               </h3>
               <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
@@ -231,7 +231,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
         </div>
 
         {/* View Switcher Bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button 
               className={`btn btn-sm ${view === 'list' ? 'btn-primary' : 'btn-secondary'}`}
@@ -279,10 +279,10 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                   <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', marginTop: '8px' }}>Loading database connection profiles...</p>
                 </div>
               ) : connections.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed rgba(255,255,255,0.1)' }}>
-                  <Database size={32} color="#64748b" style={{ margin: '0 auto 12px' }} />
-                  <h4 style={{ margin: '0 0 6px 0', color: '#f8fafc' }}>No Database Connections Configured</h4>
-                  <p style={{ color: '#94a3b8', fontSize: '13px', maxWidth: '400px', margin: '0 auto 16px' }}>
+                <div style={{ textAlign: 'center', padding: '40px', background: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
+                  <Database size={32} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
+                  <h4 style={{ margin: '0 0 6px 0', color: '#0f172a' }}>No Database Connections Configured</h4>
+                  <p style={{ color: '#64748b', fontSize: '13px', maxWidth: '400px', margin: '0 auto 16px' }}>
                     Connect your PostgreSQL, MySQL, or SQL Server database to enable dynamic workflow operations.
                   </p>
                   <button className="btn btn-primary btn-sm" onClick={handleOpenCreate}>
@@ -296,14 +296,15 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                     <div 
                       key={conn.connection_id}
                       style={{
-                        background: conn.is_default ? 'rgba(56, 189, 248, 0.05)' : 'rgba(30, 41, 59, 0.4)',
-                        border: conn.is_default ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        background: conn.is_default ? '#f0f9ff' : '#ffffff',
+                        border: conn.is_default ? '1.5px solid #7dd3fc' : '1px solid #e2e8f0',
                         borderRadius: '10px',
                         padding: '16px',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        gap: '16px'
+                        gap: '16px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
                       }}
                     >
                       {/* Info */}
@@ -312,25 +313,25 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                           width: '42px',
                           height: '42px',
                           borderRadius: '8px',
-                          background: conn.is_default ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                          background: conn.is_default ? '#e0f2fe' : '#f1f5f9',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          border: '1px solid rgba(255, 255, 255, 0.08)'
+                          border: conn.is_default ? '1px solid #bae6fd' : '1px solid #e2e8f0'
                         }}>
-                          <Database size={20} color={conn.is_default ? '#38bdf8' : '#94a3b8'} />
+                          <Database size={20} color={conn.is_default ? '#0284c7' : '#64748b'} />
                         </div>
 
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontWeight: '700', fontSize: '15px', color: '#f8fafc' }}>
+                            <span style={{ fontWeight: '700', fontSize: '15px', color: '#0f172a' }}>
                               {conn.connection_name}
                             </span>
                             {conn.is_default && (
                               <span style={{
-                                background: 'rgba(56, 189, 248, 0.2)',
-                                border: '1px solid rgba(56, 189, 248, 0.4)',
-                                color: '#38bdf8',
+                                background: '#e0f2fe',
+                                border: '1px solid #bae6fd',
+                                color: '#0369a1',
                                 fontSize: '10px',
                                 fontWeight: '700',
                                 padding: '2px 6px',
@@ -342,7 +343,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                             )}
                           </div>
 
-                          <div style={{ display: 'flex', gap: '14px', marginTop: '4px', fontSize: '12px', color: '#94a3b8' }}>
+                          <div style={{ display: 'flex', gap: '14px', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
                             <span><strong>Type:</strong> {conn.db_type?.toUpperCase()}</span>
                             <span><strong>Host:</strong> {conn.host}:{conn.port}</span>
                             <span><strong>Database:</strong> {conn.database_name}</span>
@@ -355,7 +356,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button 
                           className="btn btn-secondary btn-sm"
-                          style={{ borderColor: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}
+                          style={{ borderColor: 'rgba(56, 189, 248, 0.3)', color: '#0284c7' }}
                           onClick={() => handleTestCard(conn)}
                           disabled={testingCardId === conn.connection_id}
                           title="Live Test Connection & Inspect Tables"
@@ -371,7 +372,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                         {!conn.is_default && (
                           <button 
                             className="btn btn-secondary btn-sm"
-                            style={{ borderColor: 'rgba(250, 204, 21, 0.3)', color: '#facc15' }}
+                            style={{ borderColor: 'rgba(250, 204, 21, 0.4)', color: '#b45309' }}
                             onClick={() => handleSetDefault(conn.connection_id)}
                             title="Set as Default Active Database"
                           >
