@@ -393,6 +393,7 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
                             <button 
                               className="wf-add-node-btn"
                               title="Click to add to canvas center"
+                              aria-label={`Add ${item.name} to canvas`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 onAddNode({

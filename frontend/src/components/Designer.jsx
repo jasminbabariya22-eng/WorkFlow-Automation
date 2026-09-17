@@ -972,15 +972,17 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
     if (sourceNode && sourceNode.type === 'end') {
       return false
     }
-    // 4. Start and User Task nodes can only have one outgoing connection
-    if (sourceNode && (sourceNode.type === 'start' || sourceNode.type === 'userTask')) {
+    // 4. Single-outgoing nodes can only have one outgoing connection
+    const singleOutgoingTypes = ['start', 'userTask', 'timer', 'delay', 'wait', 'communication', 'email', 'sendEmail', 'sendTask', 'notification', 'record', 'action', 'generic']
+    if (sourceNode && singleOutgoingTypes.includes(sourceNode.type)) {
       const existingOutgoing = edges.filter(e => e.source === connection.source)
       if (existingOutgoing.length >= 1) {
         return false
       }
     }
-    // 5. Condition node cannot have duplicate outgoing connections from the same sourceHandle
-    if (sourceNode && sourceNode.type === 'condition') {
+    // 5. Multi-port nodes (condition, approval, switch, parallel) cannot have duplicate outgoing connections from the same sourceHandle
+    const multiPortTypes = ['condition', 'approval', 'switch', 'parallel']
+    if (sourceNode && multiPortTypes.includes(sourceNode.type)) {
       const existingSameHandle = edges.filter(e => e.source === connection.source && e.sourceHandle === connection.sourceHandle)
       if (existingSameHandle.length >= 1) {
         return false
@@ -1008,24 +1010,20 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       showToast('End node cannot have outgoing connections', 'error')
       return
     }
-    if (sourceNode && sourceNode.type === 'start') {
+    const singleOutgoingTypes = ['start', 'userTask', 'timer', 'delay', 'wait', 'communication', 'email', 'sendEmail', 'sendTask', 'notification', 'record', 'action', 'generic']
+    if (sourceNode && singleOutgoingTypes.includes(sourceNode.type)) {
       const existingOutgoing = edges.filter(e => e.source === params.source)
       if (existingOutgoing.length >= 1) {
-        showToast('Start node can only have one outgoing connection', 'error')
+        const typeLabel = sourceNode.type === 'start' ? 'Start node' : 'This node'
+        showToast(`${typeLabel} can only have one outgoing connection`, 'error')
         return
       }
     }
-    if (sourceNode && sourceNode.type === 'userTask') {
-      const existingOutgoing = edges.filter(e => e.source === params.source)
-      if (existingOutgoing.length >= 1) {
-        showToast('User Task can only have one outgoing connection', 'error')
-        return
-      }
-    }
-    if (sourceNode && sourceNode.type === 'condition') {
+    const multiPortTypes = ['condition', 'approval', 'switch', 'parallel']
+    if (sourceNode && multiPortTypes.includes(sourceNode.type)) {
       const existingSameHandle = edges.filter(e => e.source === params.source && e.sourceHandle === params.sourceHandle)
       if (existingSameHandle.length >= 1) {
-        showToast(`Action "${params.sourceHandle}" already has an outgoing connection`, 'error')
+        showToast(`Port "${params.sourceHandle || 'Default'}" already has an outgoing connection`, 'error')
         return
       }
     }
@@ -1173,7 +1171,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       pushHistoryState(nextNodes, edges)
       return nextNodes
     })
-    setSelectedNode((prev) => (prev && prev.id === nodeId ? { ...prev, data: { ...prev.data, ...nextData } } : prev))
+    setSelectedNode((prev) => (prev && prev.id === nodeId ? { ...prev, type: nextData.nodeType || prev.type, data: { ...prev.data, ...nextData } } : prev))
   }, [setNodes, edges, pushHistoryState])
 
   // Update Edge Data from Properties Panel

@@ -1,14 +1,17 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react'
-import { 
-  LayoutDashboard, 
-  GitBranch, 
-  Activity, 
-  User, 
-  CheckCircle2, 
+import {
+  LayoutDashboard,
+  GitBranch,
+  Activity,
+  User,
+  CheckCircle2,
   AlertTriangle,
   X,
   Loader
 } from 'lucide-react'
+
+import capperLogo from '../LOGO/capperlogo.png'
+import massCapperLogo from '../LOGO/mass-capper.png'
 
 const Dashboard = lazy(() => import('./components/Dashboard'))
 const Designer = lazy(() => import('./components/Designer'))
@@ -44,7 +47,7 @@ class ErrorBoundary extends React.Component {
           <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', maxWidth: '500px', marginBottom: '20px' }}>
             {this.state.error?.message || 'An unexpected rendering error occurred while inspecting the node.'}
           </p>
-          <button 
+          <button
             className="btn btn-primary"
             onClick={() => {
               this.setState({ hasError: false, error: null })
@@ -66,7 +69,7 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const viewParam = params.get('view')
     const idParam = params.get('id')
-    
+
     const savedView = localStorage.getItem('studio_active_view') || 'dashboard'
     const savedId = localStorage.getItem('studio_active_wf_id')
 
@@ -116,21 +119,21 @@ function App() {
           switch (currentView) {
             case 'dashboard':
               return (
-                <Dashboard 
+                <Dashboard
                   onOpenDesigner={(id) => {
                     navigateTo('designer', id)
-                  }} 
+                  }}
                   showToast={showToast}
                 />
               )
             case 'designer':
               return (
                 <ErrorBoundary>
-                  <Designer 
-                    workflowId={selectedWorkflowId} 
+                  <Designer
+                    workflowId={selectedWorkflowId}
                     onClose={() => {
                       navigateTo('dashboard', null)
-                    }} 
+                    }}
                     showToast={showToast}
                   />
                 </ErrorBoundary>
@@ -139,10 +142,10 @@ function App() {
               return <Monitoring showToast={showToast} />
             default:
               return (
-                <Dashboard 
+                <Dashboard
                   onOpenDesigner={(id) => {
                     navigateTo('designer', id)
-                  }} 
+                  }}
                   showToast={showToast}
                 />
               )
@@ -170,9 +173,9 @@ function App() {
       <div className="app-container-fullscreen">
         <Suspense fallback={<ViewLoader />}>
           <ErrorBoundary>
-            <Designer 
-              workflowId={activeWfId} 
-              onClose={() => navigateTo('dashboard', null)} 
+            <Designer
+              workflowId={activeWfId}
+              onClose={() => navigateTo('dashboard', null)}
               showToast={showToast}
             />
           </ErrorBoundary>
@@ -193,22 +196,30 @@ function App() {
       {/* Sidebar Navigation */}
       <div className="sidebar">
         <div>
-          <div className="brand-section">
-            <div className="brand-logo">
-              <GitBranch size={20} color="#fff" />
-            </div>
-            <span className="brand-name">Studio</span>
+          <div className="brand-section" style={{ display: 'flex', alignItems: 'center', marginBottom: '36px' }}>
+            <img 
+              src={capperLogo} 
+              alt="Capper" 
+              className="brand-logo-img"
+              style={{
+                height: '32px',
+                width: 'auto',
+                maxWidth: '150px',
+                objectFit: 'contain',
+                display: 'block'
+              }}
+            />
           </div>
 
           <ul className="nav-links">
-            <li 
+            <li
               className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`}
               onClick={() => navigateTo('dashboard', null)}
             >
               <LayoutDashboard size={18} />
               <span>Dashboard</span>
             </li>
-            <li 
+            <li
               className={`nav-item ${currentView === 'designer' ? 'active' : ''}`}
               onClick={() => {
                 if (selectedWorkflowId) {
@@ -221,7 +232,7 @@ function App() {
               <GitBranch size={18} />
               <span>Designer</span>
             </li>
-            <li 
+            <li
               className={`nav-item ${currentView === 'monitoring' ? 'active' : ''}`}
               onClick={() => navigateTo('monitoring', null)}
             >
@@ -241,10 +252,23 @@ function App() {
       {/* Main Workspace Pane */}
       <div className="main-content">
         <div className="top-bar">
-          <span className="view-title">
-            {currentView === 'dashboard' && 'Workflow Specifications'}
-            {currentView === 'monitoring' && 'Workflow Monitoring & Traces'}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {currentView === 'dashboard' && (
+              <img 
+                src={massCapperLogo} 
+                alt="MASSCapper" 
+                style={{
+                  height: '32px',
+                  width: 'auto',
+                  objectFit: 'contain',
+                  display: 'block'
+                }}
+              />
+            )}
+            {currentView === 'monitoring' && (
+              <span className="view-title">Workflow Monitoring & Traces</span>
+            )}
+          </div>
         </div>
 
         {renderActiveView()}

@@ -78,10 +78,10 @@ function Monitoring({ showToast }) {
     try {
       let data = await workflowStorage.getInstances()
       if (statusFilter) {
-        data = data.filter(i => i.status === statusFilter)
+        data = (data || []).filter(i => String(i.status || '').toLowerCase() === statusFilter.toLowerCase())
       }
       if (entityFilter) {
-        data = data.filter(i => i.entity_type === entityFilter)
+        data = (data || []).filter(i => String(i.entity_type || '').toLowerCase() === entityFilter.toLowerCase())
       }
       setInstances(data || [])
       if (data && data.length > 0 && !selectedInstance) {
