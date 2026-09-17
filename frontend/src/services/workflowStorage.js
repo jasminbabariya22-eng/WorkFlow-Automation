@@ -875,43 +875,57 @@ export const workflowStorage = {
 
                                               createDatabaseConnection: async (payload) => {
                                                 _metadataCacheMap.delete('db_connections_list')
-                                                const res = await fetch('/workflow-studio/connections', {
-                                                  method: 'POST',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify(payload),
-                                                  signal: AbortSignal.timeout(3500)
-                                                })
-                                                if (!res.ok) {
-                                                  const err = await res.json().catch(() => ({}))
-                                                  throw new Error(err.detail || err.Error_message || 'Failed to create database connection')
+                                                try {
+                                                  const res = await fetch('/workflow-studio/connections', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify(payload),
+                                                    signal: AbortSignal.timeout(10000)
+                                                  })
+                                                  if (!res.ok) {
+                                                    const err = await res.json().catch(() => ({}))
+                                                    throw new Error(err.detail || err.Error_message || 'Failed to create database connection')
+                                                  }
+                                                  const created = await res.json()
+                                                  _metadataCacheMap.delete('db_connections_list')
+                                                  return created
+                                                } catch (err) {
+                                                  if (err.name === 'TimeoutError' || err.message?.includes('timed out')) {
+                                                    throw new Error('Connection request timed out. Please check your database host and network connection.')
+                                                  }
+                                                  throw err
                                                 }
-                                                const created = await res.json()
-                                                _metadataCacheMap.delete('db_connections_list')
-                                                return created
                                               },
 
                                               updateDatabaseConnection: async (connectionId, payload) => {
                                                 _metadataCacheMap.delete('db_connections_list')
-                                                const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
-                                                  method: 'PUT',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify(payload),
-                                                  signal: AbortSignal.timeout(3500)
-                                                })
-                                                if (!res.ok) {
-                                                  const err = await res.json().catch(() => ({}))
-                                                  throw new Error(err.detail || err.Error_message || 'Failed to update database connection')
+                                                try {
+                                                  const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
+                                                    method: 'PUT',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify(payload),
+                                                    signal: AbortSignal.timeout(10000)
+                                                  })
+                                                  if (!res.ok) {
+                                                    const err = await res.json().catch(() => ({}))
+                                                    throw new Error(err.detail || err.Error_message || 'Failed to update database connection')
+                                                  }
+                                                  const updated = await res.json()
+                                                  _metadataCacheMap.delete('db_connections_list')
+                                                  return updated
+                                                } catch (err) {
+                                                  if (err.name === 'TimeoutError' || err.message?.includes('timed out')) {
+                                                    throw new Error('Connection request timed out. Please check your database host and network connection.')
+                                                  }
+                                                  throw err
                                                 }
-                                                const updated = await res.json()
-                                                _metadataCacheMap.delete('db_connections_list')
-                                                return updated
                                               },
 
                                               deleteDatabaseConnection: async (connectionId) => {
                                                 _metadataCacheMap.delete('db_connections_list')
                                                 const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
                                                   method: 'DELETE',
-                                                  signal: AbortSignal.timeout(3500)
+                                                  signal: AbortSignal.timeout(8000)
                                                 })
                                                 if (!res.ok) {
                                                   const err = await res.json().catch(() => ({}))
@@ -922,36 +936,58 @@ export const workflowStorage = {
                                               },
 
                                               testDatabaseConnection: async (payload) => {
-                                                const res = await fetch('/workflow-studio/connections/test', {
-                                                  method: 'POST',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify(payload),
-                                                  signal: AbortSignal.timeout(3000)
-                                                })
-                                                if (!res.ok) {
-                                                  const err = await res.json().catch(() => ({}))
-                                                  throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                try {
+                                                  const res = await fetch('/workflow-studio/connections/test', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify(payload),
+                                                    signal: AbortSignal.timeout(12000)
+                                                  })
+                                                  if (!res.ok) {
+                                                    const err = await res.json().catch(() => ({}))
+                                                    throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                  }
+                                                  return await res.json()
+                                                } catch (err) {
+                                                  if (err.name === 'TimeoutError' || err.message?.includes('timed out') || err.message?.includes('signal')) {
+                                                    return {
+                                                      success: false,
+                                                      error: `Connection timed out: Server at '${payload.host || 'localhost'}:${payload.port || 5432}' took too long to respond. Please check the host address and network/firewall.`,
+                                                      message: `Connection timed out: Server at '${payload.host || 'localhost'}:${payload.port || 5432}' took too long to respond.`
+                                                    }
+                                                  }
+                                                  throw err
                                                 }
-                                                return await res.json()
                                               },
 
                                               testSavedConnection: async (connectionId) => {
-                                                const res = await fetch(`/workflow-studio/connections/${connectionId}/test`, {
-                                                  method: 'POST',
-                                                  signal: AbortSignal.timeout(3000)
-                                                })
-                                                if (!res.ok) {
-                                                  const err = await res.json().catch(() => ({}))
-                                                  throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                try {
+                                                  const res = await fetch(`/workflow-studio/connections/${connectionId}/test`, {
+                                                    method: 'POST',
+                                                    signal: AbortSignal.timeout(12000)
+                                                  })
+                                                  if (!res.ok) {
+                                                    const err = await res.json().catch(() => ({}))
+                                                    throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                  }
+                                                  return await res.json()
+                                                } catch (err) {
+                                                  if (err.name === 'TimeoutError' || err.message?.includes('timed out') || err.message?.includes('signal')) {
+                                                    return {
+                                                      success: false,
+                                                      error: 'Connection timed out: The database server took too long to respond.',
+                                                      message: 'Connection timed out: The database server took too long to respond.'
+                                                    }
+                                                  }
+                                                  throw err
                                                 }
-                                                return await res.json()
                                               },
 
                                               setDefaultDatabaseConnection: async (connectionId) => {
                                                 _metadataCacheMap.delete('db_connections_list')
                                                 const res = await fetch(`/workflow-studio/connections/${connectionId}/set-default`, {
                                                   method: 'POST',
-                                                  signal: AbortSignal.timeout(3500)
+                                                  signal: AbortSignal.timeout(8000)
                                                 })
                                                 if (!res.ok) {
                                                   const err = await res.json().catch(() => ({}))

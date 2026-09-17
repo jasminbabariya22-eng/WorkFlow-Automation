@@ -152,65 +152,31 @@ class DynamicEnginePool:
         default_schema: Optional[str] = None,
         ssl_mode: str = "disable"
     ) -> Dict[str, Any]:
-        import socket
         from sqlalchemy.pool import NullPool
 
         clean_type = cls.normalize_db_type(db_type)
         start_time = time.time()
 
-        # 1. Fast Socket Reachability Pre-check for Network Databases
-        if clean_type != "sqlite" and host:
-            target_port = int(port) if port else (5432 if clean_type == "postgresql" else 3306 if clean_type == "mysql" else 1433 if clean_type == "mssql" else 1521)
-            try:
-                # Fast 1.5s TCP ping to catch closed ports or dead hosts in milliseconds
-                with socket.create_connection((host, target_port), timeout=1.5):
-                    pass
-            except (socket.timeout, TimeoutError):
-                elapsed_ms = round((time.time() - start_time) * 1000, 2)
-                return {
-                    "success": False,
-                    "latency_ms": elapsed_ms,
-                    "error": f"Connection timed out: Host '{host}:{target_port}' did not respond within 1.5s. Please verify host address and network firewall.",
-                    "message": f"Connection timed out: Host '{host}:{target_port}' is unreachable."
-                }
-            except ConnectionRefusedError:
-                elapsed_ms = round((time.time() - start_time) * 1000, 2)
-                return {
-                    "success": False,
-                    "latency_ms": elapsed_ms,
-                    "error": f"Connection refused: No active database service listening on '{host}:{target_port}'. Ensure database service is started.",
-                    "message": f"Connection refused on '{host}:{target_port}'."
-                }
-            except socket.gaierror:
-                elapsed_ms = round((time.time() - start_time) * 1000, 2)
-                return {
-                    "success": False,
-                    "latency_ms": elapsed_ms,
-                    "error": f"DNS resolution failed: Host '{host}' could not be resolved.",
-                    "message": f"Unknown host '{host}'"
-                }
-            except Exception:
-                # Non-fatal socket check error, fall through to DBAPI driver
-                pass
-
-        # 2. Build URL and configure fail-fast driver arguments
+        # Build connection URL
         url = cls.build_connection_url(db_type, host or "localhost", port or 5432, database_name, username, password, ssl_mode)
+        
+        # Configure fail-safe driver connection arguments (4s timeout)
         connect_args = {}
         if clean_type == "mssql":
-            connect_args = {"login_timeout": 2, "timeout": 2}
+            connect_args = {"login_timeout": 4, "timeout": 4}
         elif clean_type == "mysql":
-            connect_args = {"connect_timeout": 2, "read_timeout": 2, "write_timeout": 2}
+            connect_args = {"connect_timeout": 4, "read_timeout": 4, "write_timeout": 4}
         elif clean_type == "postgresql":
-            connect_args = {"connect_timeout": 2}
+            connect_args = {"connect_timeout": 4}
         elif clean_type == "oracle":
-            connect_args = {"tcp_connect_timeout": 2}
+            connect_args = {"tcp_connect_timeout": 4}
 
-        # NullPool avoids connection pool overhead, making single-shot test instantaneous
+        # NullPool avoids connection pool overhead, making single-shot test direct and fast
         temp_engine = create_engine(
             url,
             poolclass=NullPool,
             connect_args=connect_args,
-            execution_options={"timeout": 2}
+            execution_options={"timeout": 4}
         )
         try:
             with temp_engine.connect() as conn:
