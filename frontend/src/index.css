@@ -727,7 +727,7 @@ textarea.form-control {
   background: var(--bg-card-hover) !important;
 }
 
-/* n8n Node Toolbox Buttons */
+/* Workflow Node Toolbox Buttons */
 .palette-node-btn {
   font-size: 11.5px !important;
   font-weight: 500 !important;
@@ -2342,15 +2342,16 @@ textarea.form-control {
 }
 
 .wf-btn-primary {
-  background: #6366f1;
+  background: #4f46e5;
   color: #ffffff;
-  border: 1px solid #4f46e5;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  border: 1px solid #4338ca;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
 }
 
 .wf-btn-primary:hover {
-  background: #4f46e5;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45);
+  background: #4338ca;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.5);
 }
 
 .wf-btn-icon {
@@ -2688,9 +2689,9 @@ textarea.form-control {
 }
 
 .wf-add-node-btn:hover {
-  background: #6366f1;
+  background: #4f46e5;
   color: #ffffff;
-  border-color: #6366f1;
+  border-color: #4f46e5;
 }
 
 .wf-drag-handle {
@@ -4060,7 +4061,7 @@ textarea.form-control {
 .wf-sim-badge {
   width: 22px;
   height: 22px;
-  background: #6366f1;
+  background: #4f46e5;
   color: #fff;
   border-radius: 50%;
   display: flex;
@@ -4388,8 +4389,8 @@ textarea.form-control {
 }
 
 .wf-step-card.active-step .wf-step-num {
-  background: #6366f1;
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+  background: #4f46e5;
+  box-shadow: 0 0 10px rgba(79, 70, 229, 0.5);
 }
 
 .wf-step-card.done-step .wf-step-num {

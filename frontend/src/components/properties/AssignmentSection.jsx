@@ -1,3 +1,5 @@
+import React from 'react'
+
 export default function AssignmentSection({
   assignmentType,
   handleAssignmentTypeChange,
@@ -17,14 +19,15 @@ export default function AssignmentSection({
       <div className="wf-section-divider">ASSIGNMENT</div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Assignment Type</label>
-        <div className="wf-type-toggle-buttons">
+        <label className="wf-field-label" id="assignment-type-label">Assignment Type</label>
+        <div className="wf-type-toggle-buttons" role="group" aria-labelledby="assignment-type-label">
           {['user', 'role', 'department'].map(t => (
             <button
               key={t}
               type="button"
               className={`wf-preset-btn ${assignmentType === t ? 'active' : ''}`}
               onClick={() => handleAssignmentTypeChange(t)}
+              aria-label={`Assign by ${t}`}
             >
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
@@ -35,13 +38,16 @@ export default function AssignmentSection({
       {assignmentType === 'role' && (
         <div className="wf-field-group">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <label className="wf-field-label" style={{ margin: 0 }}>Role</label>
+            <label className="wf-field-label" htmlFor={backendRoles.length > 0 ? "assignment-role-select" : "assignment-role-input"} style={{ margin: 0 }}>Role</label>
             {backendRoles.length === 0 && (
               <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: '500' }}>⚠️ No role table in DB</span>
             )}
           </div>
           {backendRoles.length > 0 ? (
             <select
+              id="assignment-role-select"
+              name="role_id"
+              aria-label="Select Assigned Role"
               className="wf-select"
               value={assignment.roleId || ''}
               onChange={(e) => handleRoleSelect(e.target.value)}
@@ -53,6 +59,9 @@ export default function AssignmentSection({
             </select>
           ) : (
             <input
+              id="assignment-role-input"
+              name="role_name"
+              aria-label="Assigned Role Name"
               type="text"
               className="wf-input font-mono uppercase"
               value={assignment.roleName || data.role || ''}
@@ -74,13 +83,16 @@ export default function AssignmentSection({
       {assignmentType === 'user' && (
         <div className="wf-field-group">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <label className="wf-field-label" style={{ margin: 0 }}>User</label>
+            <label className="wf-field-label" htmlFor={backendUsers.length > 0 ? "assignment-user-select" : "assignment-user-input"} style={{ margin: 0 }}>User</label>
             {backendUsers.length === 0 && (
               <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: '500' }}>⚠️ No users table in DB</span>
             )}
           </div>
           {backendUsers.length > 0 ? (
             <select
+              id="assignment-user-select"
+              name="user_id"
+              aria-label="Select Assigned User"
               className="wf-select"
               value={assignment.userId || ''}
               onChange={(e) => handleUserSelect(e.target.value)}
@@ -92,6 +104,9 @@ export default function AssignmentSection({
             </select>
           ) : (
             <input
+              id="assignment-user-input"
+              name="user_name"
+              aria-label="Assigned User Identifier"
               type="text"
               className="wf-input font-mono"
               value={assignment.userName || data.user || ''}
@@ -113,13 +128,16 @@ export default function AssignmentSection({
       {assignmentType === 'department' && (
         <div className="wf-field-group">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <label className="wf-field-label" style={{ margin: 0 }}>Department</label>
+            <label className="wf-field-label" htmlFor={backendDepartments.length > 0 ? "assignment-dept-select" : "assignment-dept-input"} style={{ margin: 0 }}>Department</label>
             {backendDepartments.length === 0 && (
               <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: '500' }}>⚠️ No department table in DB</span>
             )}
           </div>
           {backendDepartments.length > 0 ? (
             <select
+              id="assignment-dept-select"
+              name="department_id"
+              aria-label="Select Assigned Department"
               className="wf-select"
               value={assignment.departmentId || ''}
               onChange={(e) => handleDepartmentSelect(e.target.value)}
@@ -131,6 +149,9 @@ export default function AssignmentSection({
             </select>
           ) : (
             <input
+              id="assignment-dept-input"
+              name="department_name"
+              aria-label="Assigned Department Name"
               type="text"
               className="wf-input"
               value={assignment.departmentName || data.department || ''}

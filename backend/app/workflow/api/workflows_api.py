@@ -14,7 +14,7 @@ from app.workflow_studio.services import WorkflowStudioService
 router = APIRouter(prefix="/workflows", tags=["Workflow Retrieval & Inspection"])
 
 
-from app.workflow.persistence.models import DatabaseConnection
+from app.workflow.persistence.models import DatabaseConnection, BPMNDefinition
 
 # =========================================================================
 # HELPER: Resolve Workflow by numeric ID or Code / Name
@@ -42,6 +42,33 @@ def _find_workflow_and_version(
             (GenericWorkflow.name.ilike(key))),
             (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
         ).first()
+
+    # Fallback to BPMNDefinition if not in GenericWorkflow
+    if not workflow:
+        bpmn_def = None
+        if isinstance(id_or_code, str) and id_or_code.isdigit():
+            bpmn_def = db.query(BPMNDefinition).filter(
+                BPMNDefinition.id == int(id_or_code),
+                (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+            ).first()
+        if not bpmn_def:
+            key = str(id_or_code).strip()
+            bpmn_def = db.query(BPMNDefinition).filter(
+                ((BPMNDefinition.spec_id == key) | (BPMNDefinition.name == key) | (BPMNDefinition.spec_id.ilike(key))),
+                (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+            ).first()
+
+        if bpmn_def:
+            try:
+                from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+                version = StudioExecutionAdapter._sync_bpmn_definition_to_version(db, bpmn_def)
+                workflow = db.query(GenericWorkflow).filter(
+                    (GenericWorkflow.workflow_key == bpmn_def.spec_id) | (GenericWorkflow.name == bpmn_def.name)
+                ).first()
+                if workflow and version:
+                    return workflow, version
+            except Exception as sync_err:
+                logger.warning(f"Auto-sync BPMNDefinition notice: {sync_err}")
 
     if not workflow:
         return None, None
@@ -105,11 +132,13 @@ def get_all_workflows(
         s = f"%{search.strip()}%"
         query = query.filter(or_(GenericWorkflow.name.ilike(s), GenericWorkflow.workflow_key.ilike(s)))
 
-    total_count = query.count()
-    workflows = query.order_by(GenericWorkflow.updated_at.desc()).offset(offset).limit(limit).all()
+    workflows = query.order_by(GenericWorkflow.updated_at.desc()).all()
 
     results = []
+    seen_keys = set()
     for wf in workflows:
+        seen_keys.add(str(wf.workflow_key).lower())
+        seen_keys.add(str(wf.workflow_id))
         latest_ver = db.query(WorkflowVersion).filter(
             WorkflowVersion.workflow_id == wf.workflow_id
         ).order_by(WorkflowVersion.version_number.desc()).first()
@@ -131,10 +160,64 @@ def get_all_workflows(
             "updated_at": wf.updated_at.isoformat() if wf.updated_at else None
         })
 
+    # Also include BPMNDefinitions from the visual studio / modeler
+    bpmn_query = db.query(BPMNDefinition).filter(
+        (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+    )
+    if connection_id is not None:
+        bpmn_query = bpmn_query.filter(BPMNDefinition.connection_id == connection_id)
+    if search:
+        s = f"%{search.strip()}%"
+        bpmn_query = bpmn_query.filter(or_(BPMNDefinition.name.ilike(s), BPMNDefinition.spec_id.ilike(s), BPMNDefinition.description.ilike(s)))
+
+    bpmn_defs = bpmn_query.order_by(BPMNDefinition.id.desc()).all()
+    for b in bpmn_defs:
+        if str(b.spec_id).lower() in seen_keys or str(b.id) in seen_keys:
+            continue
+        seen_keys.add(str(b.spec_id).lower())
+        seen_keys.add(str(b.id))
+
+        node_count = 0
+        edge_count = 0
+        if b.json_content:
+            try:
+                import json as pjson
+                j = pjson.loads(b.json_content) if isinstance(b.json_content, str) else b.json_content
+                if isinstance(j, dict):
+                    node_count = len(j.get("nodes", []))
+                    edge_count = len(j.get("edges", []))
+            except Exception:
+                pass
+
+        stat = "ACTIVE" if b.is_active or b.status == "Active" else (b.status.upper() if b.status else "DRAFT")
+        if status and stat != status.upper():
+            continue
+
+        name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+        results.append({
+            "workflow_id": b.id,
+            "workflow_code": b.spec_id,
+            "name": b.name or name_label,
+            "description": b.description or "",
+            "entity_type": b.spec_id or "generic",
+            "connection_id": b.connection_id,
+            "status": stat,
+            "version_number": b.version or 1,
+            "version_status": "PUBLISHED" if b.is_active else "DRAFT",
+            "is_published": bool(b.is_active),
+            "total_nodes": node_count,
+            "total_edges": edge_count,
+            "created_at": b.created_on.isoformat() if b.created_on else None,
+            "updated_at": getattr(b, "updated_on", b.created_on).isoformat() if getattr(b, "updated_on", b.created_on) else None
+        })
+
+    total_count = len(results)
+    paginated_results = results[offset : offset + limit]
+
     return success_response(data={
         "total": total_count,
-        "count": len(results),
-        "workflows": results
+        "count": len(paginated_results),
+        "workflows": paginated_results
     })
 
 
@@ -187,11 +270,14 @@ def get_workflows_by_client_db(
         return error_response(message=f"Client database connection '{connection_id_or_name}' not found.", status_code=404)
 
     workflows = db.query(GenericWorkflow).filter(
-        GenericWorkflow.connection_id == target_conn_id
+        GenericWorkflow.connection_id == target_conn_id,
+        (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
     ).order_by(GenericWorkflow.updated_at.desc()).all()
 
     results = []
+    seen_keys = set()
     for wf in workflows:
+        seen_keys.add(str(wf.workflow_key).lower())
         latest_ver = db.query(WorkflowVersion).filter(
             WorkflowVersion.workflow_id == wf.workflow_id
         ).order_by(WorkflowVersion.version_number.desc()).first()
@@ -210,6 +296,42 @@ def get_workflows_by_client_db(
             "total_edges": len(latest_ver.connections) if latest_ver else 0,
             "created_at": wf.created_at.isoformat() if wf.created_at else None,
             "updated_at": wf.updated_at.isoformat() if wf.updated_at else None
+        })
+
+    # Also include BPMNDefinitions linked to this connection_id
+    bpmn_defs = db.query(BPMNDefinition).filter(
+        BPMNDefinition.connection_id == target_conn_id,
+        (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+    ).all()
+    for b in bpmn_defs:
+        if str(b.spec_id).lower() in seen_keys:
+            continue
+        node_count = 0
+        edge_count = 0
+        if b.json_content:
+            try:
+                import json as pjson
+                j = pjson.loads(b.json_content) if isinstance(b.json_content, str) else b.json_content
+                if isinstance(j, dict):
+                    node_count = len(j.get("nodes", []))
+                    edge_count = len(j.get("edges", []))
+            except Exception:
+                pass
+        name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+        results.append({
+            "workflow_id": b.id,
+            "workflow_code": b.spec_id,
+            "name": b.name or name_label,
+            "description": b.description or "",
+            "entity_type": b.spec_id or "generic",
+            "status": "ACTIVE" if b.is_active or b.status == "Active" else (b.status.upper() if b.status else "DRAFT"),
+            "version_number": b.version or 1,
+            "version_status": "PUBLISHED" if b.is_active else "DRAFT",
+            "is_published": bool(b.is_active),
+            "total_nodes": node_count,
+            "total_edges": edge_count,
+            "created_at": b.created_on.isoformat() if b.created_on else None,
+            "updated_at": getattr(b, "updated_on", b.created_on).isoformat() if getattr(b, "updated_on", b.created_on) else None
         })
 
     return success_response(data={
@@ -235,11 +357,16 @@ def get_workflows_by_status(
     - `ARCHIVED`: Deprecated or archived workflows
     """
     clean_status = status_val.strip().upper()
-    query = db.query(GenericWorkflow).filter(GenericWorkflow.status == clean_status)
+    query = db.query(GenericWorkflow).filter(
+        GenericWorkflow.status == clean_status,
+        (GenericWorkflow.is_deleted == 0) | (GenericWorkflow.is_deleted == None)
+    )
     workflows = query.order_by(GenericWorkflow.updated_at.desc()).all()
 
     results = []
+    seen_keys = set()
     for wf in workflows:
+        seen_keys.add(str(wf.workflow_key).lower())
         latest_ver = db.query(WorkflowVersion).filter(
             WorkflowVersion.workflow_id == wf.workflow_id
         ).order_by(WorkflowVersion.version_number.desc()).first()
@@ -259,6 +386,45 @@ def get_workflows_by_status(
             "total_edges": len(latest_ver.connections) if latest_ver else 0,
             "created_at": wf.created_at.isoformat() if wf.created_at else None,
             "updated_at": wf.updated_at.isoformat() if wf.updated_at else None
+        })
+
+    # Also include BPMNDefinitions matching status
+    bpmn_defs = db.query(BPMNDefinition).filter(
+        (BPMNDefinition.is_deleted == 0) | (BPMNDefinition.is_deleted == None)
+    ).all()
+    for b in bpmn_defs:
+        if str(b.spec_id).lower() in seen_keys:
+            continue
+        stat = "ACTIVE" if b.is_active or b.status == "Active" else (b.status.upper() if b.status else "DRAFT")
+        if stat != clean_status:
+            continue
+        node_count = 0
+        edge_count = 0
+        if b.json_content:
+            try:
+                import json as pjson
+                j = pjson.loads(b.json_content) if isinstance(b.json_content, str) else b.json_content
+                if isinstance(j, dict):
+                    node_count = len(j.get("nodes", []))
+                    edge_count = len(j.get("edges", []))
+            except Exception:
+                pass
+        name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
+        results.append({
+            "workflow_id": b.id,
+            "workflow_code": b.spec_id,
+            "name": b.name or name_label,
+            "description": b.description or "",
+            "entity_type": b.spec_id or "generic",
+            "connection_id": b.connection_id,
+            "status": stat,
+            "version_number": b.version or 1,
+            "version_status": "PUBLISHED" if b.is_active else "DRAFT",
+            "is_published": bool(b.is_active),
+            "total_nodes": node_count,
+            "total_edges": edge_count,
+            "created_at": b.created_on.isoformat() if b.created_on else None,
+            "updated_at": getattr(b, "updated_on", b.created_on).isoformat() if getattr(b, "updated_on", b.created_on) else None
         })
 
     return success_response(data={

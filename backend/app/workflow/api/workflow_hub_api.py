@@ -542,22 +542,56 @@ def submit_workflow_hub_record(
 
         logger.info(f"UniversalHub: Submitted {table_name} #{new_record_id}, job #{instance_id}, state={wf_status}")
     except Exception as ex:
+        wf_res = {}
         wf_error = str(ex)
         logger.error(f"UniversalHub: Error launching workflow for {table_name} #{new_record_id}: {ex}", exc_info=True)
 
+    # Format record values cleanly
+    record_dict = {primary_key: new_record_id}
+    for k, v in values.items():
+        if isinstance(v, datetime):
+            record_dict[k] = v.isoformat()
+        else:
+            record_dict[k] = v
+
+    # Extract dynamic output variables produced by workflow nodes
+    res_vars = (wf_res.get("variables") or {}) if isinstance(wf_res, dict) else {}
+    dynamic_variables = {}
+    for vk, vv in res_vars.items():
+        if vk in ("db", "session", "connection"):
+            continue
+        if isinstance(vv, datetime):
+            dynamic_variables[vk] = vv.isoformat()
+        elif isinstance(vv, (str, int, float, bool, list, dict)) or vv is None:
+            dynamic_variables[vk] = vv
+        else:
+            dynamic_variables[vk] = str(vv)
+
+    response_payload = {
+        "spec_id": spec_id,
+        "record_id": new_record_id,
+        "primary_key": primary_key,
+        "instance_id": instance_id,
+        "job_id": instance_id,
+        "status": values.get(status_col, default_status),
+        "workflow_status": wf_status,
+        "current_task": current_task,
+        "workflow_error": wf_error,
+        "record": record_dict,
+        "variables": dynamic_variables,
+        "execution_summary": {
+            "entity_type": table_name,
+            "entity_id": new_record_id,
+            "instance_id": instance_id,
+            "workflow_status": wf_status,
+            "completed": (wf_status == "Completed"),
+            "current_node": current_task
+        }
+    }
+
     return success_response(
         message=f"Workflow request #{new_record_id} submitted successfully.",
-        data={
-            "spec_id": spec_id,
-            "record_id": new_record_id,
-            "primary_key": primary_key,
-            "instance_id": instance_id,
-            "job_id": instance_id,
-            "status": values.get(status_col, default_status),
-            "workflow_status": wf_status,
-            "current_task": current_task,
-            "workflow_error": wf_error
-        },
+        data=response_payload,
         status_code=status.HTTP_201_CREATED
     )
 
@@ -635,15 +669,38 @@ def execute_workflow_hub_action(
             db=db
         )
 
+        # Extract dynamic variables from execution
+        res_vars = (res.get("variables") or {}) if isinstance(res, dict) else {}
+        dynamic_variables = {}
+        for vk, vv in res_vars.items():
+            if vk in ("db", "session", "connection"):
+                continue
+            if isinstance(vv, datetime):
+                dynamic_variables[vk] = vv.isoformat()
+            elif isinstance(vv, (str, int, float, bool, list, dict)) or vv is None:
+                dynamic_variables[vk] = vv
+            else:
+                dynamic_variables[vk] = str(vv)
+
         return success_response(
             message=f"Action '{action}' executed successfully on record #{entity_id}.",
             data={
                 "spec_id": spec_id,
                 "record_id": entity_id,
                 "action": action,
+                "instance_id": res.get("instance_id"),
                 "workflow_status": res.get("status"),
                 "current_task": res.get("current_task_code"),
-                "message": res.get("message")
+                "message": res.get("message"),
+                "variables": dynamic_variables,
+                "execution_summary": {
+                    "entity_type": table_name,
+                    "entity_id": entity_id,
+                    "instance_id": res.get("instance_id"),
+                    "action_taken": action,
+                    "workflow_status": res.get("status"),
+                    "completed": (res.get("status") == "Completed")
+                }
             }
         )
     except HTTPException:

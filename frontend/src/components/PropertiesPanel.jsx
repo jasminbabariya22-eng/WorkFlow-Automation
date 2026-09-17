@@ -161,8 +161,11 @@ export default function PropertiesPanel({
 
         <div className="wf-properties-scroll">
           <div className="wf-field-group">
-            <label className="wf-field-label">Action / Outcome Label</label>
+            <label htmlFor="edge-action-label" className="wf-field-label">Action / Outcome Label</label>
             <input
+              id="edge-action-label"
+              name="edge_action_label"
+              aria-label="Action / Outcome Label"
               type="text"
               className="wf-input"
               value={label}
@@ -172,13 +175,13 @@ export default function PropertiesPanel({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Source Node Port</label>
-            <input type="text" className="wf-input font-mono" value={selectedEdge.sourceHandle || 'Default Output'} disabled />
+            <label htmlFor="edge-source-port" className="wf-field-label">Source Node Port</label>
+            <input id="edge-source-port" name="edge_source_port" aria-label="Source Node Port" type="text" className="wf-input font-mono" value={selectedEdge.sourceHandle || 'Default Output'} disabled />
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Target Node Port</label>
-            <input type="text" className="wf-input font-mono" value={selectedEdge.targetHandle || 'input'} disabled />
+            <label htmlFor="edge-target-port" className="wf-field-label">Target Node Port</label>
+            <input id="edge-target-port" name="edge_target_port" aria-label="Target Node Port" type="text" className="wf-input font-mono" value={selectedEdge.targetHandle || 'input'} disabled />
           </div>
 
           <div className="wf-delete-section">
@@ -419,8 +422,11 @@ export default function PropertiesPanel({
           <>
             <div className="wf-section-divider">FINAL OUTCOME</div>
             <div className="wf-field-group">
-              <label className="wf-field-label">Terminal Outcome</label>
+              <label htmlFor="terminal-outcome-select" className="wf-field-label">Terminal Outcome</label>
               <select
+                id="terminal-outcome-select"
+                name="terminal_outcome"
+                aria-label="Terminal Outcome"
                 className="wf-select"
                 value={data.outcome || 'APPROVED'}
                 onChange={(e) => handleFieldChange('outcome', e.target.value)}
@@ -490,12 +496,15 @@ export default function PropertiesPanel({
               {branches.map((b) => (
                 <span key={b} className="wf-tag-item">
                   <span>{b}</span>
-                  <button type="button" onClick={() => handleRemoveBranch(b)}>×</button>
+                  <button type="button" aria-label={`Remove branch ${b}`} onClick={() => handleRemoveBranch(b)}>×</button>
                 </span>
               ))}
             </div>
             <div className="wf-custom-add-row mt-2">
               <input
+                id="parallel-branch-input"
+                name="parallel_branch_name"
+                aria-label="Add branch name"
                 type="text"
                 className="wf-input wf-input-sm"
                 placeholder="Add branch name"
@@ -503,7 +512,7 @@ export default function PropertiesPanel({
                 onChange={(e) => setNewBranchName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddBranch()}
               />
-              <button type="button" className="wf-btn wf-btn-sm wf-btn-primary" onClick={handleAddBranch}>
+              <button type="button" aria-label="Add Branch" className="wf-btn wf-btn-sm wf-btn-primary" onClick={handleAddBranch}>
                 <Plus size={13} />
               </button>
             </div>

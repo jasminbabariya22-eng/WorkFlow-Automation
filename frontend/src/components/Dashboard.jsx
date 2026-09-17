@@ -231,6 +231,9 @@ function Dashboard({ onOpenDesigner, showToast }) {
             <Search size={16} color="var(--color-text-muted)" style={{ position: 'absolute', left: '12px', top: '12px' }} />
             <input 
               type="text" 
+              id="dashboard-search-specs"
+              name="dashboard_search_query"
+              aria-label="Search workflow specifications"
               placeholder="Search specifications..." 
               className="search-input"
               style={{ paddingLeft: '36px' }}
@@ -241,6 +244,9 @@ function Dashboard({ onOpenDesigner, showToast }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Filter size={16} color="var(--color-text-muted)" />
             <select 
+              id="dashboard-status-filter"
+              name="dashboard_status_filter"
+              aria-label="Filter workflow specifications by status"
               className="filter-select"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -473,9 +479,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
             </div>
             <form onSubmit={handleCreateDraft}>
               <div className="form-group">
-                <label className="form-label">Specification ID (unique key)</label>
+                <label className="form-label" htmlFor="create-spec-id">Specification ID (unique key)</label>
                 <input 
                   type="text" 
+                  id="create-spec-id"
+                  name="spec_id"
+                  aria-label="Specification ID (unique key)"
                   className="form-control" 
                   placeholder="e.g. RiskApprovalWorkflow"
                   required
@@ -484,9 +493,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Friendly Process Name</label>
+                <label className="form-label" htmlFor="create-spec-name">Friendly Process Name</label>
                 <input 
                   type="text" 
+                  id="create-spec-name"
+                  name="spec_name"
+                  aria-label="Friendly Process Name"
                   className="form-control" 
                   placeholder="e.g. Risk Audit Approval Flow"
                   required
@@ -495,9 +507,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Description</label>
+                <label className="form-label" htmlFor="create-spec-desc">Description</label>
                 <input 
                   type="text" 
+                  id="create-spec-desc"
+                  name="spec_description"
+                  aria-label="Workflow Description"
                   className="form-control" 
                   placeholder="Short explanation of workflow triggers and tasks"
                   value={newDraft.description}
@@ -505,9 +520,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Tags (comma-separated)</label>
+                <label className="form-label" htmlFor="create-spec-tags">Tags (comma-separated)</label>
                 <input 
                   type="text" 
+                  id="create-spec-tags"
+                  name="spec_tags"
+                  aria-label="Tags (comma-separated)"
                   className="form-control" 
                   placeholder="risk, audit, finance"
                   value={newDraft.tags}
@@ -515,11 +533,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label className="form-label" htmlFor="create-spec-conn-id" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Database size={13} color="#38bdf8" />
                   <span>Target Client Database Connection</span>
                 </label>
                 <select 
+                  id="create-spec-conn-id"
+                  name="connection_id"
+                  aria-label="Target Client Database Connection"
                   className="form-control"
                   value={newDraft.connection_id || ''}
                   onChange={(e) => setNewDraft({ ...newDraft, connection_id: e.target.value ? Number(e.target.value) : null })}
@@ -553,20 +574,26 @@ function Dashboard({ onOpenDesigner, showToast }) {
             </div>
             <form onSubmit={handleImportBPMN}>
               <div className="form-group">
-                <label className="form-label">Specification ID</label>
+                <label className="form-label" htmlFor="import-spec-id">Specification ID</label>
                 <input 
                   type="text" 
+                  id="import-spec-id"
+                  name="import_spec_id"
+                  aria-label="Specification ID"
                   className="form-control" 
-                  placeholder="e.g. RiskApprovalWorkflow"
+                  placeholder="e.g. ImportedRiskWorkflow"
                   required
                   value={importDraft.spec_id}
                   onChange={(e) => setImportDraft({ ...importDraft, spec_id: e.target.value })}
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Friendly Process Name</label>
+                <label className="form-label" htmlFor="import-spec-name">Friendly Process Name</label>
                 <input 
                   type="text" 
+                  id="import-spec-name"
+                  name="import_spec_name"
+                  aria-label="Friendly Process Name"
                   className="form-control" 
                   placeholder="e.g. Risk Audit Approval Flow"
                   required
@@ -575,9 +602,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Description</label>
+                <label className="form-label" htmlFor="import-spec-desc">Description</label>
                 <input 
                   type="text" 
+                  id="import-spec-desc"
+                  name="import_spec_desc"
+                  aria-label="Workflow Description"
                   className="form-control" 
                   placeholder="Import metadata description"
                   value={importDraft.description}
@@ -585,9 +615,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Tags (comma-separated)</label>
+                <label className="form-label" htmlFor="import-spec-tags">Tags (comma-separated)</label>
                 <input 
                   type="text" 
+                  id="import-spec-tags"
+                  name="import_spec_tags"
+                  aria-label="Tags (comma-separated)"
                   className="form-control" 
                   placeholder="imported, workflow"
                   value={importDraft.tags}
@@ -595,11 +628,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label className="form-label" htmlFor="import-spec-conn-id" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Database size={13} color="#38bdf8" />
                   <span>Target Client Database Connection</span>
                 </label>
                 <select 
+                  id="import-spec-conn-id"
+                  name="import_connection_id"
+                  aria-label="Target Client Database Connection"
                   className="form-control"
                   value={importDraft.connection_id || ''}
                   onChange={(e) => setImportDraft({ ...importDraft, connection_id: e.target.value ? Number(e.target.value) : null })}
@@ -613,9 +649,12 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">BPMN 2.0 File (.bpmn, .xml)</label>
+                <label className="form-label" htmlFor="import-spec-file">BPMN 2.0 File (.bpmn, .xml)</label>
                 <input 
                   type="file" 
+                  id="import-spec-file"
+                  name="import_bpmn_file"
+                  aria-label="BPMN 2.0 File (.bpmn, .xml)"
                   className="form-control" 
                   accept=".bpmn,.xml"
                   required

@@ -80,8 +80,12 @@ export default function DesignerHeader({
             className="wf-header-title-input"
             value={workflowName}
             onChange={(e) => setWorkflowName(e.target.value)}
-            placeholder="Workflow Name"
-            title="Click to rename workflow"
+            placeholder="Specification ID (e.g. leave_request_wf)"
+            title="Click to edit Specification ID"
+            id="workflow-spec-name"
+            name="workflow_spec_name"
+            aria-label="Workflow Specification ID"
+            autoComplete="off"
           />
         </div>
 

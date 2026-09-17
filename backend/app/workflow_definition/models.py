@@ -18,6 +18,7 @@ class GenericWorkflow(WorkflowBase):
     workflow_key = Column(String(100), unique=True, nullable=False, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    entity_type = Column(String(100), nullable=True)
     connection_id = Column(Integer, nullable=True)  # Target Database Connection ID
     status = Column(String(20), default="DRAFT", nullable=False)   # "DRAFT", "ACTIVE", "ARCHIVED"
     is_deleted = Column(Integer, default=0, nullable=False)

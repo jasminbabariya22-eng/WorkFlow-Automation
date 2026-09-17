@@ -60,8 +60,11 @@ export default function DbActionSection({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">HTTP Method</label>
+            <label className="wf-field-label" htmlFor="api-http-method">HTTP Method</label>
             <select
+              id="api-http-method"
+              name="api_http_method"
+              aria-label="HTTP Method"
               className="wf-select"
               value={data.method || 'POST'}
               onChange={(e) => handleFieldChange('method', e.target.value)}
@@ -75,8 +78,11 @@ export default function DbActionSection({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Endpoint URL</label>
+            <label className="wf-field-label" htmlFor="api-endpoint-url">Endpoint URL</label>
             <input
+              id="api-endpoint-url"
+              name="api_endpoint_url"
+              aria-label="API Endpoint URL"
               type="text"
               className="wf-input font-mono text-xs"
               value={data.endpoint || data.url || 'https://api.internal/v1/webhook'}
@@ -86,8 +92,11 @@ export default function DbActionSection({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Headers (Optional)</label>
+            <label className="wf-field-label" htmlFor="api-headers">Headers (Optional)</label>
             <input
+              id="api-headers"
+              name="api_headers"
+              aria-label="API Headers"
               type="text"
               className="wf-input font-mono text-xs"
               value={data.headers || ''}
@@ -97,8 +106,11 @@ export default function DbActionSection({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Payload Body (JSON)</label>
+            <label className="wf-field-label" htmlFor="api-payload-body">Payload Body (JSON)</label>
             <textarea
+              id="api-payload-body"
+              name="api_payload_body"
+              aria-label="API Payload Body in JSON format"
               className="wf-textarea font-mono text-xs"
               rows={4}
               value={data.body || ''}
@@ -108,8 +120,11 @@ export default function DbActionSection({
           </div>
 
           <div className="wf-field-group">
-            <label className="wf-field-label">Response Variable</label>
+            <label className="wf-field-label" htmlFor="api-response-variable">Response Variable</label>
             <input
+              id="api-response-variable"
+              name="api_response_variable"
+              aria-label="Response Output Variable Name"
               type="text"
               className="wf-input font-mono text-xs"
               value={data.outputVariable || data.responseVariable || 'api_response'}

@@ -32,8 +32,11 @@ export default function StartNodeSection({
 
       {/* 1. Trigger Type Selector */}
       <div className="wf-field-group">
-        <label className="wf-field-label">Trigger Source</label>
+        <label className="wf-field-label" htmlFor="start-trigger-source">Trigger Source</label>
         <select
+          id="start-trigger-source"
+          name="trigger_source"
+          aria-label="Workflow Trigger Source"
           className="wf-select"
           value={triggerType}
           onChange={(e) => handleFieldChange('triggerType', e.target.value)}
@@ -60,7 +63,7 @@ export default function StartNodeSection({
           {/* A. Target Database Table */}
           <div className="wf-field-group" style={{ marginBottom: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <label className="wf-field-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <label className="wf-field-label" htmlFor="start-db-table" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Table size={12} color="#38bdf8" />
                 <span>Target Database Table</span>
                 <span style={{ color: '#f43f5e' }}>*</span>
@@ -72,6 +75,9 @@ export default function StartNodeSection({
               )}
             </div>
             <select
+              id="start-db-table"
+              name="db_table"
+              aria-label="Target Database Table"
               className="wf-select"
               value={currentTable}
               onChange={(e) => handleTableChange(e.target.value)}
@@ -90,8 +96,8 @@ export default function StartNodeSection({
 
           {/* B. Event Action Type (Insert / Update) */}
           <div className="wf-field-group" style={{ marginBottom: '10px' }}>
-            <label className="wf-field-label">Trigger On Event</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            <label className="wf-field-label" id="start-event-type-label">Trigger On Event</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }} role="group" aria-labelledby="start-event-type-label">
               {[
                 { id: 'UPDATE', label: 'On Update', desc: 'When record is updated' },
                 { id: 'INSERT', label: 'On Insert', desc: 'When new record created' },
@@ -101,6 +107,7 @@ export default function StartNodeSection({
                   key={evt.id}
                   type="button"
                   onClick={() => handleFieldChange('eventType', evt.id)}
+                  aria-label={`Trigger on ${evt.label}`}
                   style={{
                     padding: '8px',
                     borderRadius: '6px',
@@ -126,12 +133,15 @@ export default function StartNodeSection({
           <div className="wf-field-group" style={{ marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px' }}>
               <Filter size={12} color="#a855f7" />
-              <label className="wf-field-label" style={{ margin: 0 }}>Trigger Filter Condition (Optional)</label>
+              <label className="wf-field-label" htmlFor="start-filter-field" style={{ margin: 0 }}>Trigger Filter Condition (Optional)</label>
             </div>
             
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 1.2fr', gap: '6px' }}>
               {/* Field */}
               <select
+                id="start-filter-field"
+                name="filter_field"
+                aria-label="Filter Field Column"
                 className="wf-select"
                 style={{ fontSize: '11px', padding: '6px' }}
                 value={filterField}
@@ -145,6 +155,9 @@ export default function StartNodeSection({
 
               {/* Operator */}
               <select
+                id="start-filter-operator"
+                name="filter_operator"
+                aria-label="Filter Operator"
                 className="wf-select"
                 style={{ fontSize: '11px', padding: '6px' }}
                 value={filterOperator}
@@ -161,6 +174,9 @@ export default function StartNodeSection({
 
               {/* Value */}
               <input
+                id="start-filter-value"
+                name="filter_value"
+                aria-label="Filter Match Value"
                 type="text"
                 className="wf-input"
                 style={{ fontSize: '11px', padding: '6px' }}

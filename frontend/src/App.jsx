@@ -245,9 +245,6 @@ function App() {
             {currentView === 'dashboard' && 'Workflow Specifications'}
             {currentView === 'monitoring' && 'Workflow Monitoring & Traces'}
           </span>
-          <div className="user-tag" style={{ border: 'none', background: 'rgba(0,229,255,0.06)', color: 'var(--color-accent-secondary)' }}>
-            <span>Engine Version: SpiffWorkflow 3.x</span>
-          </div>
         </div>
 
         {renderActiveView()}

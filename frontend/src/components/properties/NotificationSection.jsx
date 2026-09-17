@@ -32,8 +32,11 @@ export default function NotificationSection({
       <div className="wf-section-divider">NOTIFICATION TARGET</div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Recipient Target</label>
+        <label className="wf-field-label" htmlFor="notification-recipient">Recipient Target</label>
         <input
+          id="notification-recipient"
+          name="notification_recipient"
+          aria-label="Recipient Target"
           type="text"
           className="wf-input"
           value={data.recipient || data.to || 'Assigned Role'}
@@ -43,8 +46,11 @@ export default function NotificationSection({
       </div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Notification Type / Priority</label>
+        <label className="wf-field-label" htmlFor="notification-priority">Notification Type / Priority</label>
         <select
+          id="notification-priority"
+          name="notification_priority"
+          aria-label="Notification Type and Priority"
           className="wf-select"
           value={data.priority || 'Info'}
           onChange={(e) => handleFieldChange('priority', e.target.value)}
@@ -59,8 +65,11 @@ export default function NotificationSection({
       <div className="wf-section-divider">ALERT CONTENT</div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Alert Title</label>
+        <label className="wf-field-label" htmlFor="notification-title">Alert Title</label>
         <input
+          id="notification-title"
+          name="notification_title"
+          aria-label="Alert Title"
           type="text"
           className="wf-input"
           value={data.title || data.subject || 'Task Review Pending'}
@@ -73,8 +82,11 @@ export default function NotificationSection({
       </div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Alert Message</label>
+        <label className="wf-field-label" htmlFor="notification-message">Alert Message</label>
         <textarea
+          id="notification-message"
+          name="notification_message"
+          aria-label="Alert Message Content"
           className="wf-textarea"
           rows={4}
           value={data.message || data.body || 'A new workflow item requires your review.'}

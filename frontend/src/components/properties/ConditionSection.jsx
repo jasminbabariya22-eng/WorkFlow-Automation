@@ -19,8 +19,11 @@ export default function ConditionSection({
         <div className="wf-section-divider">EVALUATION LOGIC</div>
 
         <div className="wf-field-group">
-          <label className="wf-field-label">Field / Context Variable</label>
+          <label className="wf-field-label" htmlFor="condition-eval-field">Field / Context Variable</label>
           <input
+            id="condition-eval-field"
+            name="condition_field"
+            aria-label="Field or Context Variable to Evaluate"
             type="text"
             className="wf-input font-mono"
             value={data.field || 'action'}
@@ -30,8 +33,11 @@ export default function ConditionSection({
         </div>
 
         <div className="wf-field-group">
-          <label className="wf-field-label">Operator</label>
+          <label className="wf-field-label" htmlFor="condition-eval-operator">Operator</label>
           <select
+            id="condition-eval-operator"
+            name="condition_operator"
+            aria-label="Condition Operator"
             className="wf-select"
             value={data.operator || 'EQUALS'}
             onChange={(e) => handleFieldChange('operator', e.target.value)}
@@ -46,8 +52,11 @@ export default function ConditionSection({
         </div>
 
         <div className="wf-field-group">
-          <label className="wf-field-label">Expected Match Value</label>
+          <label className="wf-field-label" htmlFor="condition-eval-value">Expected Match Value</label>
           <input
+            id="condition-eval-value"
+            name="condition_value"
+            aria-label="Expected Match Value"
             type="text"
             className="wf-input"
             value={data.value || 'APPROVE'}
@@ -70,8 +79,11 @@ export default function ConditionSection({
         <div className="wf-section-divider">SWITCH EXPRESSION</div>
 
         <div className="wf-field-group">
-          <label className="wf-field-label">Field / Variable to Inspect</label>
+          <label className="wf-field-label" htmlFor="switch-inspect-field">Field / Variable to Inspect</label>
           <input
+            id="switch-inspect-field"
+            name="switch_field"
+            aria-label="Field or Variable to Inspect"
             type="text"
             className="wf-input font-mono"
             value={data.field || 'category'}
@@ -87,13 +99,23 @@ export default function ConditionSection({
           {cases.map((c) => (
             <span key={c} className="wf-tag-item">
               <span>{c}</span>
-              <button type="button" onClick={() => handleRemoveCase(c)}>×</button>
+              <button 
+                type="button" 
+                onClick={() => handleRemoveCase(c)}
+                aria-label={`Remove case ${c}`}
+                title={`Remove case ${c}`}
+              >
+                ×
+              </button>
             </span>
           ))}
         </div>
 
         <div className="wf-custom-add-row mt-2">
           <input
+            id="switch-new-case-input"
+            name="new_case_value"
+            aria-label="New Branch Case Value"
             type="text"
             className="wf-input wf-input-sm uppercase font-mono"
             placeholder="New Case Value (e.g. HIGH)"
@@ -101,7 +123,13 @@ export default function ConditionSection({
             onChange={(e) => setNewCaseLabel(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAddCase()}
           />
-          <button type="button" className="wf-btn wf-btn-sm wf-btn-primary" onClick={handleAddCase}>
+          <button 
+            type="button" 
+            className="wf-btn wf-btn-sm wf-btn-primary" 
+            onClick={handleAddCase}
+            aria-label="Add Case Branch"
+            title="Add Case Branch"
+          >
             <Plus size={13} />
           </button>
         </div>

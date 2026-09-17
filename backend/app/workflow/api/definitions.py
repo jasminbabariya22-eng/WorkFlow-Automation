@@ -297,6 +297,7 @@ def save_workflow_definition(
         else:
             record.xml_content = payload.xml_content
             record.description = payload.description or record.description
+            record.is_deleted = 0
             record.created_on = datetime.now()
 
         db.commit()

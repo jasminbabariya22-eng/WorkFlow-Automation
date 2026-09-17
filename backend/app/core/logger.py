@@ -1,47 +1,212 @@
+"""
+logger.py
+Enterprise Global Logging, Daily Date-Partitioned File Handlers, 30-Day Retention,
+Frontend Ingestion, and Workflow Telemetry Observability.
+"""
+
 import logging
 import os
 import json
 import time
 import uuid
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from collections import deque
 from typing import Dict, Any, List, Optional
-from logging.handlers import TimedRotatingFileHandler
 
-LOG_DIR = "logs"
+# Base Directory for backend and frontend logs
+LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "logs"))
+FRONTEND_LOG_DIR = os.path.join(LOG_DIR, "frontend")
+
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(FRONTEND_LOG_DIR, exist_ok=True)
 
-log_file = os.path.join(LOG_DIR, "workflow_telemetry.log")
 
-# Standard base logger
-logger = logging.getLogger("ers_logger")
-logger.setLevel(logging.INFO)
+class DailyDateFileHandler(logging.Handler):
+    """
+    High-performance, thread-safe daily rotating file handler that writes directly to
+    date-stamped log files: {prefix}_{YYYY-MM-DD}.log inside target directory.
+    Seamlessly switches to a new file when the date rolls over at midnight.
+    """
+    def __init__(self, log_dir: str, prefix: str = "app", level: int = logging.INFO):
+        super().__init__(level)
+        self.log_dir = log_dir
+        self.prefix = prefix
+        self._lock = threading.Lock()
+        self._current_date: Optional[str] = None
+        self._file_handle = None
+        os.makedirs(self.log_dir, exist_ok=True)
+        self._check_and_rotate()
 
+    def _get_target_file(self, date_str: str) -> str:
+        return os.path.join(self.log_dir, f"{self.prefix}_{date_str}.log")
+
+    def _check_and_rotate(self):
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if today_str != self._current_date:
+            if self._file_handle:
+                try:
+                    self._file_handle.flush()
+                    self._file_handle.close()
+                except Exception:
+                    pass
+            self._current_date = today_str
+            file_path = self._get_target_file(today_str)
+            self._file_handle = open(file_path, "a", encoding="utf-8", buffering=1)
+
+    def emit(self, record):
+        with self._lock:
+            try:
+                self._check_and_rotate()
+                msg = self.format(record)
+                if self._file_handle:
+                    self._file_handle.write(msg + "\n")
+            except Exception:
+                self.handleError(record)
+
+    def close(self):
+        with self._lock:
+            if self._file_handle:
+                try:
+                    self._file_handle.flush()
+                    self._file_handle.close()
+                except Exception:
+                    pass
+                self._file_handle = None
+            super().close()
+
+
+def cleanup_old_logs(retention_days: int = 30):
+    """
+    Scans LOG_DIR and its subdirectories and deletes any log files older than retention_days.
+    Preserves exact 30-day historical window.
+    """
+    cutoff_ts = time.time() - (retention_days * 86400)
+    cleaned_count = 0
+    try:
+        for root, _, files in os.walk(LOG_DIR):
+            for f in files:
+                if f.endswith(".log"):
+                    fp = os.path.join(root, f)
+                    try:
+                        if os.path.getmtime(fp) < cutoff_ts:
+                            os.remove(fp)
+                            cleaned_count += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return cleaned_count
+
+
+# --- Standard Log Formatters ---
 formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)s | %(message)s",
+    "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     "%Y-%m-%d %H:%M:%S"
 )
 
-# StreamHandler for stdout logging
+# 1. Console Stream Handler
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
+stream_handler.setLevel(logging.INFO)
 
-# File handler with midnight rotation
-try:
-    file_handler = TimedRotatingFileHandler(
-        log_file,
-        when="midnight",
-        interval=1,
-        backupCount=30,
-        encoding="utf-8",
-        delay=True
+# 2. Daily Application Log Handler (app_YYYY-MM-DD.log) - All INFO, WARN, ERROR
+daily_app_handler = DailyDateFileHandler(LOG_DIR, prefix="app", level=logging.INFO)
+daily_app_handler.setFormatter(formatter)
+
+# 3. Daily Error Log Handler (error_YYYY-MM-DD.log) - Strict ERROR, CRITICAL only
+daily_error_handler = DailyDateFileHandler(LOG_DIR, prefix="error", level=logging.ERROR)
+daily_error_handler.setFormatter(formatter)
+
+# 4. Daily Frontend Log Handler (frontend/frontend_YYYY-MM-DD.log)
+frontend_file_handler = DailyDateFileHandler(FRONTEND_LOG_DIR, prefix="frontend", level=logging.INFO)
+frontend_formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)-7s | [FRONTEND] %(message)s",
+    "%Y-%m-%d %H:%M:%S"
+)
+frontend_file_handler.setFormatter(frontend_formatter)
+
+# --- Global Logger Setup ---
+logger = logging.getLogger("ers_logger")
+logger.setLevel(logging.INFO)
+logger.handlers.clear()
+logger.addHandler(stream_handler)
+logger.addHandler(daily_app_handler)
+logger.addHandler(daily_error_handler)
+logger.propagate = False
+
+# Attach handlers to root logger and Uvicorn loggers for full application coverage
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+for h in [stream_handler, daily_app_handler, daily_error_handler]:
+    if h not in root_logger.handlers:
+        root_logger.addHandler(h)
+
+for uvicorn_log_name in ["uvicorn", "uvicorn.access", "uvicorn.error", "fastapi"]:
+    u_log = logging.getLogger(uvicorn_log_name)
+    u_log.handlers = [stream_handler, daily_app_handler, daily_error_handler]
+    u_log.propagate = False
+
+# Run initial 30-day retention cleanup on module load
+cleanup_old_logs(retention_days=30)
+
+
+def log_frontend_event(
+    level: str,
+    message: str,
+    timestamp: Optional[str] = None,
+    url: Optional[str] = None,
+    stack: Optional[str] = None,
+    component: Optional[str] = None,
+    user_id: Optional[Any] = None,
+    details: Optional[Dict[str, Any]] = None
+):
+    """
+    Logs an event originating from the Frontend client into backend/logs/frontend/frontend_YYYY-MM-DD.log
+    and feeds it into WorkflowTelemetryLogger for live dashboard observability.
+    """
+    lvl = level.upper().strip() if level else "INFO"
+    meta_parts = []
+    if component:
+        meta_parts.append(f"Component: <{component}>")
+    if url:
+        meta_parts.append(f"URL: {url}")
+    if user_id:
+        meta_parts.append(f"User: #{user_id}")
+
+    meta_str = f" [{ ' | '.join(meta_parts) }]" if meta_parts else ""
+    full_msg = f"{message}{meta_str}"
+    if stack:
+        full_msg += f"\n  Stack Trace:\n{stack}"
+
+    # Log record for frontend file handler
+    rec = logging.LogRecord(
+        name="frontend_client",
+        level=getattr(logging, lvl, logging.INFO),
+        pathname="frontend",
+        lineno=1,
+        msg=full_msg,
+        args=(),
+        exc_info=None
     )
-    file_handler.suffix = "%Y-%m-%d.log"
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-except Exception:
-    pass
+    frontend_file_handler.emit(rec)
+
+    # Also record into Daily App / Error log if it's an error
+    if lvl in ("ERROR", "CRITICAL"):
+        logger.error(f"[FRONTEND] {full_msg}")
+    else:
+        logger.info(f"[FRONTEND] {full_msg}")
+
+    # Telemetry registration
+    try:
+        WorkflowTelemetryLogger._record_event(
+            level=lvl,
+            event_type="FRONTEND_LOG",
+            message=f"[FRONTEND] {message}",
+            details={"url": url, "component": component, "user_id": user_id, "stack": stack, **(details or {})}
+        )
+    except Exception:
+        pass
 
 
 class WorkflowTelemetryLogger:
@@ -122,7 +287,7 @@ class WorkflowTelemetryLogger:
         
         if level.upper() == "ERROR":
             logger.error(log_msg)
-        elif level.upper() == "WARN" or level.upper() == "WARNING":
+        elif level.upper() in ("WARN", "WARNING"):
             logger.warning(log_msg)
         else:
             logger.info(log_msg)

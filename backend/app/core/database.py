@@ -296,7 +296,7 @@ class ClientDatabaseAdapter:
         """Fetches a record dynamically from any client table."""
         target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         full_table = f"{target_schema}.{table_name}" if target_schema else table_name
-        query = text(f"SELECT * FROM {full_table} WHERE {primary_key_col} = :entity_id LIMIT 1")
+        query = text(f"SELECT * FROM {full_table} WHERE {primary_key_col} = :entity_id")
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
             with eng.connect() as conn:
@@ -392,21 +392,22 @@ class ClientDatabaseAdapter:
             inspector = inspect(eng)
             target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
 
-            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
-            all_tables = set(inspector.get_table_names())
+            schema_tables = inspector.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = inspector.get_table_names()
 
-            role_candidates = ["mst_user_role", "user_role", "roles", "user_roles", "tbl_roles", "mst_roles", "role"]
+            # Map lowercase table name to actual table name
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
+
+            role_candidates = ["aspnetroles", "roles", "mst_user_role", "user_role", "user_roles", "tbl_roles", "mst_roles", "role", "sec_roles"]
             found_table = None
             active_schema = None
 
             for candidate in role_candidates:
-                if candidate in schema_tables:
-                    found_table = candidate
-                    active_schema = target_schema
-                    break
-                elif candidate in all_tables:
-                    found_table = candidate
-                    active_schema = None
+                if candidate in table_map:
+                    found_table, active_schema = table_map[candidate]
                     break
 
             if not found_table:
@@ -416,8 +417,8 @@ class ClientDatabaseAdapter:
             col_meta_dict = {c["name"].lower(): c for c in cols_meta}
             col_names = list(col_meta_dict.keys())
 
-            id_col = next((c for c in ["role_id", "user_role_id", "id", "role_code", "code"] if c in col_names), col_names[0])
-            name_col = next((c for c in ["role_name", "user_role_name", "name", "role_code", "title", "description"] if c in col_names), id_col)
+            id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["id", "role_id", "user_role_id", "role_code", "code", "roleid"]), cols_meta[0]["name"])
+            name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["name", "role_name", "normalizedname", "user_role_name", "role_code", "title", "description"]), id_col)
 
             filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
             table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
@@ -432,28 +433,28 @@ class ClientDatabaseAdapter:
 
     @staticmethod
     def get_users(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Retrieves users from the Client Database dynamically. Auto-adapts to column naming conventions."""
+        """Retrieves users from the Client Database dynamically. Auto-adapts to column naming conventions including AspNetUsers."""
         from sqlalchemy import inspect
         try:
             eng = DynamicEnginePool.get_engine(connection_id)
             inspector = inspect(eng)
             target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
 
-            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
-            all_tables = set(inspector.get_table_names())
+            schema_tables = inspector.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = inspector.get_table_names()
 
-            user_candidates = ["mst_users", "users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees"]
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
+
+            user_candidates = ["aspnetusers", "users", "mst_users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees", "sec_users"]
             found_table = None
             active_schema = None
 
             for candidate in user_candidates:
-                if candidate in schema_tables:
-                    found_table = candidate
-                    active_schema = target_schema
-                    break
-                elif candidate in all_tables:
-                    found_table = candidate
-                    active_schema = None
+                if candidate in table_map:
+                    found_table, active_schema = table_map[candidate]
                     break
 
             if not found_table:
@@ -461,16 +462,16 @@ class ClientDatabaseAdapter:
 
             cols_meta = inspector.get_columns(found_table, schema=active_schema)
             col_meta_dict = {c["name"].lower(): c for c in cols_meta}
-            col_names = list(col_meta_dict.keys())
+            col_names_lower = list(col_meta_dict.keys())
 
-            id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in col_names), col_names[0])
-            email_col = next((c for c in ["email", "email_id", "mail"] if c in col_names), None)
+            id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["id", "user_id", "employee_id", "emp_id", "code", "userid"]), cols_meta[0]["name"])
+            email_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["email", "normalizedemail", "email_id", "mail", "user_email"]), None)
 
-            has_first_last = "first_name" in col_names and "last_name" in col_names
-            name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in col_names), None)
+            has_first_last = "first_name" in col_names_lower and "last_name" in col_names_lower
+            name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["fullname", "full_name", "username", "user_name", "name", "employee_name", "normalizedusername"]), None)
 
-            role_id_col = next((c for c in ["role_id", "user_role_id", "role"] if c in col_names), None)
-            dept_id_col = next((c for c in ["dept_id", "department_id", "department"] if c in col_names), None)
+            role_id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["role_id", "user_role_id", "role", "roleid"]), None)
+            dept_id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["departmentid", "department_id", "dept_id", "department", "dept"]), None)
 
             filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
             table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
@@ -491,10 +492,10 @@ class ClientDatabaseAdapter:
             if dept_id_col:
                 select_fields.append(f"{dept_id_col} AS dept_id")
 
-            query = f"SELECT {', '.join(select_fields)} FROM {table_ref} {filter_clause} ORDER BY {id_col} LIMIT 100"
+            query = f"SELECT {', '.join(select_fields)} FROM {table_ref} {filter_clause} ORDER BY {id_col}"
 
             with eng.connect() as conn:
-                rows = conn.execute(text(query)).mappings().all()
+                rows = conn.execute(text(query)).mappings().fetchmany(100)
                 result = []
                 for u in rows:
                     if has_first_last:
@@ -508,26 +509,40 @@ class ClientDatabaseAdapter:
                         "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
                         "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None
                     })
-                # Enrich with user roles if a mapping table or roles table exists
+                # Enrich with user roles if a mapping table or roles table exists (including AspNetUserRoles)
                 user_roles_map = {}
                 user_role_names_map = {}
                 roles_dict = {}
                 try:
-                    role_table = next((t for t in ["roles", "mst_user_role", "tbl_roles", "mst_roles", "role"] if t in schema_tables or t in all_tables), None)
+                    role_table = None
+                    role_table_schema = None
+                    for candidate in ["aspnetroles", "roles", "mst_user_role", "tbl_roles", "mst_roles", "role"]:
+                        if candidate in table_map:
+                            role_table, role_table_schema = table_map[candidate]
+                            break
+
                     if role_table:
-                        r_cols = [c["name"].lower() for c in inspector.get_columns(role_table, schema=active_schema)]
-                        r_id = next((c for c in ["role_id", "id", "role_code"] if c in r_cols), r_cols[0])
-                        r_name = next((c for c in ["role_name", "name", "title", "role_code"] if c in r_cols), r_id)
-                        r_rows = conn.execute(text(f"SELECT {r_id} AS id, {r_name} AS name FROM {role_table}")).mappings().all()
+                        r_cols = inspector.get_columns(role_table, schema=role_table_schema)
+                        r_id = next((c["name"] for c in r_cols if c["name"].lower() in ["id", "role_id", "role_code"]), r_cols[0]["name"])
+                        r_name = next((c["name"] for c in r_cols if c["name"].lower() in ["name", "role_name", "title", "role_code", "normalizedname"]), r_id)
+                        r_ref = f"{role_table_schema}.{role_table}" if role_table_schema else role_table
+                        r_rows = conn.execute(text(f"SELECT {r_id} AS id, {r_name} AS name FROM {r_ref}")).mappings().all()
                         roles_dict = {str(r["id"]): str(r["name"]) for r in r_rows}
 
-                    mapping_candidates = ["user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
-                    map_table = next((t for t in mapping_candidates if t in schema_tables or t in all_tables), None)
+                    mapping_candidates = ["aspnetuserroles", "user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
+                    map_table = None
+                    map_schema = None
+                    for candidate in mapping_candidates:
+                        if candidate in table_map:
+                            map_table, map_schema = table_map[candidate]
+                            break
+
                     if map_table:
-                        m_cols = [c["name"].lower() for c in inspector.get_columns(map_table, schema=active_schema)]
-                        m_user_id = next((c for c in ["user_id", "id", "employee_id", "emp_id"] if c in m_cols), m_cols[0])
-                        m_role_id = next((c for c in ["role_id", "role", "role_code"] if c in m_cols), m_cols[1] if len(m_cols) > 1 else m_cols[0])
-                        m_rows = conn.execute(text(f"SELECT {m_user_id} AS user_id, {m_role_id} AS role_id FROM {map_table}")).mappings().all()
+                        m_cols = inspector.get_columns(map_table, schema=map_schema)
+                        m_user_id = next((c["name"] for c in m_cols if c["name"].lower() in ["userid", "user_id", "id", "employee_id", "emp_id"]), m_cols[0]["name"])
+                        m_role_id = next((c["name"] for c in m_cols if c["name"].lower() in ["roleid", "role_id", "role", "role_code"]), m_cols[1]["name"] if len(m_cols) > 1 else m_cols[0]["name"])
+                        m_ref = f"{map_schema}.{map_table}" if map_schema else map_table
+                        m_rows = conn.execute(text(f"SELECT {m_user_id} AS user_id, {m_role_id} AS role_id FROM {m_ref}")).mappings().all()
                         for mr in m_rows:
                             uid = str(mr["user_id"])
                             rid = str(mr["role_id"])
@@ -563,7 +578,7 @@ class ClientDatabaseAdapter:
     def get_users_by_role(role_name_or_id: str, schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Retrieves all users assigned to a specific role (by role name or role ID) in the Client Database.
-        Dynamically adapts to direct columns (users.role_id) or mapping tables (user_roles).
+        Dynamically adapts to direct columns (users.role_id) or mapping tables (user_roles / AspNetUserRoles).
         """
         from sqlalchemy import inspect
         if not role_name_or_id:
@@ -575,21 +590,21 @@ class ClientDatabaseAdapter:
             inspector = inspect(eng)
             target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
 
-            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
-            all_tables = set(inspector.get_table_names())
+            schema_tables = inspector.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = inspector.get_table_names()
+
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
 
             # 1. Identify roles table to find matching role IDs and names
-            role_candidates = ["roles", "mst_user_role", "tbl_roles", "mst_roles", "user_role", "role"]
+            role_candidates = ["aspnetroles", "roles", "mst_user_role", "tbl_roles", "mst_roles", "user_role", "role"]
             found_role_table = None
             active_schema = None
             for candidate in role_candidates:
-                if candidate in schema_tables:
-                    found_role_table = candidate
-                    active_schema = target_schema
-                    break
-                elif candidate in all_tables:
-                    found_role_table = candidate
-                    active_schema = None
+                if candidate in table_map:
+                    found_role_table, active_schema = table_map[candidate]
                     break
 
             matched_role_ids = set()
@@ -599,8 +614,8 @@ class ClientDatabaseAdapter:
                 if found_role_table:
                     cols_meta = inspector.get_columns(found_role_table, schema=active_schema)
                     col_names = [c["name"].lower() for c in cols_meta]
-                    id_col = next((c for c in ["role_id", "user_role_id", "id", "role_code", "code"] if c in col_names), col_names[0])
-                    name_col = next((c for c in ["role_name", "user_role_name", "name", "role_code", "title"] if c in col_names), id_col)
+                    id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["id", "role_id", "user_role_id", "role_code", "code"]), cols_meta[0]["name"])
+                    name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["name", "role_name", "normalizedname", "user_role_name", "title"]), id_col)
                     r_ref = f"{active_schema}.{found_role_table}" if active_schema else found_role_table
                     r_rows = conn.execute(text(f"SELECT {id_col} AS id, {name_col} AS name FROM {r_ref}")).mappings().all()
                     for r in r_rows:
@@ -616,26 +631,36 @@ class ClientDatabaseAdapter:
                 if not matched_role_names:
                     matched_role_names.add(target)
 
-                # 2. Check if a mapping table (e.g. user_roles) exists
-                mapping_candidates = ["user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
-                found_map_table = next((t for t in mapping_candidates if t in schema_tables or t in all_tables), None)
+                # 2. Check if a mapping table (e.g. user_roles or AspNetUserRoles) exists
+                mapping_candidates = ["aspnetuserroles", "user_roles", "tbl_user_roles", "user_role", "user_role_mapping", "user_role_map"]
+                found_map_table = None
+                map_schema = None
+                for candidate in mapping_candidates:
+                    if candidate in table_map:
+                        found_map_table, map_schema = table_map[candidate]
+                        break
 
                 # 3. Find users table
-                user_candidates = ["mst_users", "users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees"]
-                found_user_table = next((t for t in user_candidates if t in schema_tables or t in all_tables), None)
+                user_candidates = ["aspnetusers", "users", "mst_users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees"]
+                found_user_table = None
+                user_schema = None
+                for candidate in user_candidates:
+                    if candidate in table_map:
+                        found_user_table, user_schema = table_map[candidate]
+                        break
 
                 if found_user_table and found_map_table:
-                    u_cols = [c["name"].lower() for c in inspector.get_columns(found_user_table, schema=active_schema)]
-                    u_id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in u_cols), u_cols[0])
-                    u_name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in u_cols), u_id_col)
-                    u_email_col = next((c for c in ["email", "email_id", "mail"] if c in u_cols), None)
+                    u_cols = inspector.get_columns(found_user_table, schema=user_schema)
+                    u_id_col = next((c["name"] for c in u_cols if c["name"].lower() in ["id", "user_id", "employee_id", "emp_id", "code", "userid"]), u_cols[0]["name"])
+                    u_name_col = next((c["name"] for c in u_cols if c["name"].lower() in ["fullname", "full_name", "username", "user_name", "name", "employee_name", "normalizedusername"]), u_id_col)
+                    u_email_col = next((c["name"] for c in u_cols if c["name"].lower() in ["email", "normalizedemail", "email_id", "mail"]), None)
 
-                    m_cols = [c["name"].lower() for c in inspector.get_columns(found_map_table, schema=active_schema)]
-                    m_user_id = next((c for c in ["user_id", "id", "employee_id", "emp_id"] if c in m_cols), m_cols[0])
-                    m_role_id = next((c for c in ["role_id", "role", "role_code"] if c in m_cols), m_cols[1] if len(m_cols) > 1 else m_cols[0])
+                    m_cols = inspector.get_columns(found_map_table, schema=map_schema)
+                    m_user_id = next((c["name"] for c in m_cols if c["name"].lower() in ["userid", "user_id", "id", "employee_id", "emp_id"]), m_cols[0]["name"])
+                    m_role_id = next((c["name"] for c in m_cols if c["name"].lower() in ["roleid", "role_id", "role", "role_code"]), m_cols[1]["name"] if len(m_cols) > 1 else m_cols[0]["name"])
 
-                    u_ref = f"{active_schema}.{found_user_table}" if active_schema else found_user_table
-                    m_ref = f"{active_schema}.{found_map_table}" if active_schema else found_map_table
+                    u_ref = f"{user_schema}.{found_user_table}" if user_schema else found_user_table
+                    m_ref = f"{map_schema}.{found_map_table}" if map_schema else found_map_table
 
                     select_fields = [f"u.{u_id_col} AS id", f"u.{u_name_col} AS name"]
                     if u_email_col:
@@ -644,8 +669,8 @@ class ClientDatabaseAdapter:
                     query = f"""
                         SELECT {', '.join(select_fields)}
                         FROM {u_ref} u
-                        JOIN {m_ref} m ON CAST(u.{u_id_col} AS VARCHAR) = CAST(m.{m_user_id} AS VARCHAR)
-                        WHERE CAST(m.{m_role_id} AS VARCHAR) IN :role_ids
+                        JOIN {m_ref} m ON CAST(u.{u_id_col} AS VARCHAR(255)) = CAST(m.{m_user_id} AS VARCHAR(255))
+                        WHERE CAST(m.{m_role_id} AS VARCHAR(255)) IN :role_ids
                     """
                     users_matched = conn.execute(text(query), {"role_ids": tuple(matched_role_ids)}).mappings().all()
                     if users_matched:
@@ -661,20 +686,20 @@ class ClientDatabaseAdapter:
 
                 # If no mapping table or mapping query returned empty, check if users table has role column
                 if found_user_table:
-                    u_cols = [c["name"].lower() for c in inspector.get_columns(found_user_table, schema=active_schema)]
-                    u_id_col = next((c for c in ["user_id", "id", "employee_id", "emp_id", "code"] if c in u_cols), u_cols[0])
-                    u_name_col = next((c for c in ["full_name", "user_name", "username", "name", "employee_name"] if c in u_cols), u_id_col)
-                    u_email_col = next((c for c in ["email", "email_id", "mail"] if c in u_cols), None)
-                    u_role_col = next((c for c in ["role_id", "role", "role_name", "user_role_id"] if c in u_cols), None)
+                    u_cols = inspector.get_columns(found_user_table, schema=user_schema)
+                    u_id_col = next((c["name"] for c in u_cols if c["name"].lower() in ["id", "user_id", "employee_id", "emp_id", "code", "userid"]), u_cols[0]["name"])
+                    u_name_col = next((c["name"] for c in u_cols if c["name"].lower() in ["fullname", "full_name", "username", "user_name", "name", "employee_name", "normalizedusername"]), u_id_col)
+                    u_email_col = next((c["name"] for c in u_cols if c["name"].lower() in ["email", "normalizedemail", "email_id", "mail"]), None)
+                    u_role_col = next((c["name"] for c in u_cols if c["name"].lower() in ["role_id", "role", "role_name", "user_role_id", "roleid"]), None)
 
                     if u_role_col:
-                        u_ref = f"{active_schema}.{found_user_table}" if active_schema else found_user_table
+                        u_ref = f"{user_schema}.{found_user_table}" if user_schema else found_user_table
                         select_fields = [f"{u_id_col} AS id", f"{u_name_col} AS name"]
                         if u_email_col:
                             select_fields.append(f"{u_email_col} AS email")
 
                         match_targets = tuple(matched_role_ids | matched_role_names)
-                        query = f"SELECT {', '.join(select_fields)} FROM {u_ref} WHERE CAST({u_role_col} AS VARCHAR) IN :targets"
+                        query = f"SELECT {', '.join(select_fields)} FROM {u_ref} WHERE CAST({u_role_col} AS VARCHAR(255)) IN :targets"
                         users_matched = conn.execute(text(query), {"targets": match_targets}).mappings().all()
                         if users_matched:
                             return [
@@ -710,21 +735,21 @@ class ClientDatabaseAdapter:
             inspector = inspect(eng)
             target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
 
-            schema_tables = set(inspector.get_table_names(schema=target_schema)) if target_schema else set()
-            all_tables = set(inspector.get_table_names())
+            schema_tables = inspector.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = inspector.get_table_names()
 
-            dept_candidates = ["mst_department", "department", "departments", "tbl_department", "dept"]
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
+
+            dept_candidates = ["departments", "mst_department", "department", "tbl_department", "dept"]
             found_table = None
             active_schema = None
 
             for candidate in dept_candidates:
-                if candidate in schema_tables:
-                    found_table = candidate
-                    active_schema = target_schema
-                    break
-                elif candidate in all_tables:
-                    found_table = candidate
-                    active_schema = None
+                if candidate in table_map:
+                    found_table, active_schema = table_map[candidate]
                     break
 
             if not found_table:
@@ -732,11 +757,10 @@ class ClientDatabaseAdapter:
 
             cols_meta = inspector.get_columns(found_table, schema=active_schema)
             col_meta_dict = {c["name"].lower(): c for c in cols_meta}
-            col_names = list(col_meta_dict.keys())
 
-            id_col = next((c for c in ["dept_id", "department_id", "id", "code"] if c in col_names), col_names[0])
-            name_col = next((c for c in ["dept_name", "department_name", "name", "title"] if c in col_names), id_col)
-            short_name_col = next((c for c in ["dept_short_name", "short_name", "code"] if c in col_names), None)
+            id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["id", "dept_id", "department_id", "code"]), cols_meta[0]["name"])
+            name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["name", "dept_name", "department_name", "title"]), id_col)
+            short_name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["dept_short_name", "short_name", "code", "description"]), None)
 
             filter_clause = ClientDatabaseAdapter._build_active_filter(col_meta_dict)
             table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
@@ -1373,70 +1397,49 @@ class ClientDatabaseAdapter:
         eng = DynamicEnginePool.get_engine(connection_id)
         try:
             insp = inspect(eng)
-            existing_tables = set(insp.get_table_names(schema=target_schema) if target_schema else insp.get_table_names())
-            
-            for u_tbl in ["users", "mst_users", "tbl_users", "employees", "mst_employee"]:
-                if u_tbl not in existing_tables:
-                    continue
-                
-                full_u = f"{target_schema}.{u_tbl}" if target_schema else u_tbl
-                cols = {c["name"] for c in insp.get_columns(u_tbl, schema=target_schema)}
-                pk_col = "user_id" if "user_id" in cols else ("id" if "id" in cols else "employee_id")
-                if pk_col not in cols:
-                    continue
-                
-                # Check if user_roles and roles tables exist
-                has_roles = ("user_roles" in existing_tables or "mst_user_role" in existing_tables) and ("roles" in existing_tables or "mst_role" in existing_tables)
-                ur_tbl = "user_roles" if "user_roles" in existing_tables else "mst_user_role"
-                r_tbl = "roles" if "roles" in existing_tables else "mst_role"
-                
-                with eng.connect() as conn:
-                    if has_roles:
-                        try:
-                            ur_full = f"{target_schema}.{ur_tbl}" if target_schema else ur_tbl
-                            r_full = f"{target_schema}.{r_tbl}" if target_schema else r_tbl
-                            sql_join = f"""
-                                SELECT u.*, r.role_id as joined_role_id, r.role_name as joined_role_name 
-                                FROM {full_u} u 
-                                LEFT JOIN {ur_full} ur ON u.{pk_col} = ur.{pk_col} 
-                                LEFT JOIN {r_full} r ON ur.role_id = r.role_id 
-                                WHERE u.{pk_col} = :uid
-                                LIMIT 1
-                            """
-                            row = conn.execute(text(sql_join), {"uid": user_id}).mappings().first()
-                            if row:
-                                r_dict = dict(row)
-                                role_n = r_dict.get("joined_role_name") or r_dict.get("role_name") or r_dict.get("role") or "USER"
-                                return {
-                                    "id": str(r_dict.get(pk_col)),
-                                    "name": r_dict.get("full_name") or r_dict.get("name") or str(user_id),
-                                    "email": r_dict.get("email"),
-                                    "role_id": str(r_dict.get("joined_role_id") or r_dict.get("role_id") or ""),
-                                    "role_name": str(role_n).upper(),
-                                    "dept_id": str(r_dict.get("dept_id") or ""),
-                                    "department_name": r_dict.get("department_name") or r_dict.get("department")
-                                }
-                        except Exception:
-                            pass
-                    
-                    # Simple single table fallback
-                    try:
-                        sql_simple = f"SELECT * FROM {full_u} WHERE {pk_col} = :uid LIMIT 1"
-                        row = conn.execute(text(sql_simple), {"uid": user_id}).mappings().first()
-                        if row:
-                            r_dict = dict(row)
-                            role_n = r_dict.get("role_name") or r_dict.get("role") or "USER"
-                            return {
-                                "id": str(r_dict.get(pk_col)),
-                                "name": r_dict.get("full_name") or r_dict.get("name") or str(user_id),
-                                "email": r_dict.get("email"),
-                                "role_id": str(r_dict.get("role_id") or ""),
-                                "role_name": str(role_n).upper(),
-                                "dept_id": str(r_dict.get("dept_id") or ""),
-                                "department_name": r_dict.get("department_name") or r_dict.get("department")
-                            }
-                    except Exception:
-                        pass
+            schema_tables = insp.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = insp.get_table_names()
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
+
+            found_u = None
+            u_schema = None
+            for u_candidate in ["aspnetusers", "users", "mst_users", "tbl_users", "employees", "mst_employee", "sec_users"]:
+                if u_candidate in table_map:
+                    found_u, u_schema = table_map[u_candidate]
+                    break
+
+            if not found_u:
+                return None
+
+            full_u = f"{u_schema}.{found_u}" if u_schema else found_u
+            cols = {c["name"].lower(): c["name"] for c in insp.get_columns(found_u, schema=u_schema)}
+            pk_col = next((cols[c] for c in ["id", "user_id", "employee_id", "emp_id", "userid"] if c in cols), list(cols.values())[0])
+
+            with eng.connect() as conn:
+                # Direct single table lookup
+                try:
+                    sql_simple = f"SELECT * FROM {full_u} WHERE CAST({pk_col} AS VARCHAR(255)) = :uid"
+                    row = conn.execute(text(sql_simple), {"uid": str(user_id)}).mappings().first()
+                    if row:
+                        r_dict = dict(row)
+                        name_val = r_dict.get("FullName") or r_dict.get("full_name") or r_dict.get("UserName") or r_dict.get("username") or r_dict.get("name") or str(user_id)
+                        email_val = r_dict.get("Email") or r_dict.get("email") or r_dict.get("NormalizedEmail")
+                        dept_val = r_dict.get("DepartmentId") or r_dict.get("department_id") or r_dict.get("dept_id") or ""
+                        role_n = r_dict.get("role_name") or r_dict.get("role") or "USER"
+                        return {
+                            "id": str(r_dict.get(pk_col)),
+                            "name": str(name_val),
+                            "email": email_val,
+                            "role_id": str(r_dict.get("role_id") or ""),
+                            "role_name": str(role_n).upper(),
+                            "dept_id": str(dept_val),
+                            "department_name": r_dict.get("department_name") or r_dict.get("department")
+                        }
+                except Exception as ex:
+                    logger.debug(f"ClientDatabaseAdapter: get_user_profile lookup error: {ex}")
         except Exception as e:
             logger.warning(f"ClientDatabaseAdapter: Error fetching user profile for user_id={user_id}: {e}")
         return None

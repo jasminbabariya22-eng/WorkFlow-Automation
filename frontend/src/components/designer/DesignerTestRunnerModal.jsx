@@ -174,7 +174,7 @@ export default function DesignerTestRunnerModal({
                   <div style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid #6366f1', borderRadius: '8px', padding: '14px', marginBottom: '14px', boxShadow: '0 0 20px rgba(99, 102, 241, 0.2)' }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span style={{ background: '#6366f1', color: '#fff', fontSize: '10px', fontWeight: '800', padding: '2px 7px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                        <span style={{ background: '#4f46e5', color: '#fff', fontSize: '10px', fontWeight: '800', padding: '2px 7px', borderRadius: '4px', textTransform: 'uppercase' }}>
                           ACTIVE NODE: {nodeType}
                         </span>
                         <span style={{ fontSize: '14px', fontWeight: '700', color: '#f8fafc' }}>

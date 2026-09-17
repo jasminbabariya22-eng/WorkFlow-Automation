@@ -1066,16 +1066,19 @@ class StudioExecutionAdapter:
         try:
             ActionRegistry.execute("SEND_EMAIL", config, ctx)
             variables.update(ctx)
-            # Instantly dispatch the newly queued email in the background
-            import threading
-            from app.workflow.services.email_dispatcher import EmailDispatcher
-            threading.Thread(
-                target=EmailDispatcher.process_pending_email_jobs,
-                kwargs={"conn_id": conn_id, "limit": 10},
-                daemon=True
-            ).start()
+            logger.info(f"[STUDIO_ENGINE] EMAIL node executed successfully for Instance #{instance.instance_id} (Entity #{instance.entity_id})")
         except Exception as e:
-            logger.warning(f"StudioEngine: Email node dispatch warning: {e}")
+            logger.error(f"[STUDIO_ENGINE] EMAIL node execution failed for Instance #{instance.instance_id}: {e}", exc_info=True)
+            try:
+                from app.core.logger import WorkflowTelemetryLogger
+                WorkflowTelemetryLogger.log_error(
+                    message=f"EMAIL node execution failed for Instance #{instance.instance_id}",
+                    error=str(e),
+                    instance_id=instance.instance_id,
+                    details={"config": {k: v for k, v in config.items() if "pass" not in k.lower()}}
+                )
+            except Exception:
+                pass
 
     @classmethod
     def _sync_visibility(cls, instance: SpiffWorkflowInstance):

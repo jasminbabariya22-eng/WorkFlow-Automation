@@ -737,7 +737,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         if (isCancelled) return
 
         if (data) {
-          setWorkflowName(data.name || data.spec_id || 'Untitled Workflow')
+          setWorkflowName(data.spec_id || data.name || 'Untitled Workflow')
           setVersionNumber(data.version || 1)
           setWorkflowStatus(data.status || 'Draft')
           setWorkflowConnectionId(data.connection_id || null)
@@ -1528,6 +1528,10 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
       {/* Hidden File Input for JSON Import */}
       <input
         type="file"
+        id="workflow-file-import-input"
+        name="workflow_file_import"
+        title="Import Workflow Definition JSON File"
+        aria-label="Import Workflow Definition JSON File"
         ref={fileInputRef}
         style={{ display: 'none' }}
         accept=".json"
@@ -1563,7 +1567,6 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         {/* LEFT: NODE LIBRARY (Execution, Control-Flow, Boundary) */}
         <NodeLibrary
           onAddNode={handleAddNodeFromClick}
-          onAddTemplateFlow={handleLoadDemoTemplate}
         />
 
         {/* CENTER: WORKFLOW CANVAS */}

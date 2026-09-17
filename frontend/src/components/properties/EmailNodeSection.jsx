@@ -137,9 +137,11 @@ export default function EmailNodeSection({
           <Mail size={15} className="text-indigo-400" />
           <span>Send Email Configuration</span>
         </div>
-        <div className="wf-email-tabs">
+        <div className="wf-email-tabs" role="tablist">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'compose'}
             className={`wf-email-tab-btn ${activeTab === 'compose' ? 'active' : ''}`}
             onClick={() => setActiveTab('compose')}
           >
@@ -148,6 +150,8 @@ export default function EmailNodeSection({
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'preview'}
             className={`wf-email-tab-btn ${activeTab === 'preview' ? 'active' : ''}`}
             onClick={() => setActiveTab('preview')}
           >
@@ -162,12 +166,15 @@ export default function EmailNodeSection({
           {/* TO Field */}
           <div className="wf-field-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
-              <label className="wf-field-label" style={{ margin: 0 }}>
+              <label className="wf-field-label" htmlFor="email-to-input" style={{ margin: 0 }}>
                 To (Recipient) <span style={{ color: '#f43f5e' }}>*</span>
               </label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 {/* User Email Dropdown from connectDB */}
                 <select
+                  id="email-to-user-dropdown"
+                  name="email_to_user_select"
+                  aria-label="Add user email to recipient"
                   className="wf-token-dropdown"
                   defaultValue=""
                   onChange={(e) => {
@@ -193,6 +200,9 @@ export default function EmailNodeSection({
 
                 {/* Role Selector Dropdown from connectDB */}
                 <select
+                  id="email-to-role-dropdown"
+                  name="email_to_role_select"
+                  aria-label="Add role to recipient"
                   className="wf-token-dropdown"
                   defaultValue=""
                   onChange={(e) => {
@@ -237,6 +247,9 @@ export default function EmailNodeSection({
               </div>
             </div>
             <input
+              id="email-to-input"
+              name="email_to"
+              aria-label="Email Recipients (To)"
               type="text"
               className="wf-input text-xs"
               value={data.to || ''}
@@ -288,10 +301,13 @@ export default function EmailNodeSection({
           {showCc && (
             <div className="wf-field-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
-                <label className="wf-field-label" style={{ margin: 0 }}>CC (Carbon Copy)</label>
+                <label className="wf-field-label" htmlFor="email-cc-input" style={{ margin: 0 }}>CC (Carbon Copy)</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                   {/* User Email Dropdown from connectDB */}
                   <select
+                    id="email-cc-user-dropdown"
+                    name="email_cc_user_select"
+                    aria-label="Add user email to CC"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
@@ -317,6 +333,9 @@ export default function EmailNodeSection({
 
                   {/* Role Selector Dropdown from connectDB */}
                   <select
+                    id="email-cc-role-dropdown"
+                    name="email_cc_role_select"
+                    aria-label="Add role to CC"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
@@ -347,12 +366,16 @@ export default function EmailNodeSection({
                     }}
                     style={{ fontSize: '11px', color: '#94a3b8' }}
                     title="Remove CC"
+                    aria-label="Remove CC field"
                   >
                     <X size={12} />
                   </button>
                 </div>
               </div>
               <input
+                id="email-cc-input"
+                name="email_cc"
+                aria-label="CC Carbon Copy Recipients"
                 type="text"
                 className="wf-input text-xs"
                 value={data.cc || ''}
@@ -366,10 +389,13 @@ export default function EmailNodeSection({
           {showBcc && (
             <div className="wf-field-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
-                <label className="wf-field-label" style={{ margin: 0 }}>BCC (Blind Carbon Copy)</label>
+                <label className="wf-field-label" htmlFor="email-bcc-input" style={{ margin: 0 }}>BCC (Blind Carbon Copy)</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                   {/* User Email Dropdown from connectDB */}
                   <select
+                    id="email-bcc-user-dropdown"
+                    name="email_bcc_user_select"
+                    aria-label="Add user email to BCC"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
@@ -395,6 +421,9 @@ export default function EmailNodeSection({
 
                   {/* Role Selector Dropdown from connectDB */}
                   <select
+                    id="email-bcc-role-dropdown"
+                    name="email_bcc_role_select"
+                    aria-label="Add role to BCC"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
@@ -425,12 +454,16 @@ export default function EmailNodeSection({
                     }}
                     style={{ fontSize: '11px', color: '#94a3b8' }}
                     title="Remove BCC"
+                    aria-label="Remove BCC field"
                   >
                     <X size={12} />
                   </button>
                 </div>
               </div>
               <input
+                id="email-bcc-input"
+                name="email_bcc"
+                aria-label="BCC Blind Carbon Copy Recipients"
                 type="text"
                 className="wf-input text-xs"
                 value={data.bcc || ''}
@@ -443,7 +476,7 @@ export default function EmailNodeSection({
           {/* Subject Field */}
           <div className="wf-field-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
-              <label className="wf-field-label" style={{ margin: 0 }}>Subject <span style={{ color: '#f43f5e' }}>*</span></label>
+              <label className="wf-field-label" htmlFor="email-subject-input" style={{ margin: 0 }}>Subject <span style={{ color: '#f43f5e' }}>*</span></label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '10px', color: '#94a3b8' }}>Insert:</span>
                 {activeVars.slice(0, 3).map(v => (
@@ -461,6 +494,9 @@ export default function EmailNodeSection({
               </div>
             </div>
             <input
+              id="email-subject-input"
+              name="email_subject"
+              aria-label="Email Subject"
               type="text"
               className="wf-input text-xs"
               value={data.subject || ''}
@@ -472,10 +508,13 @@ export default function EmailNodeSection({
           {/* Body Field */}
           <div className="wf-field-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <label className="wf-field-label" style={{ margin: 0 }}>Message Body</label>
+              <label className="wf-field-label" htmlFor="email-body-input" style={{ margin: 0 }}>Message Body</label>
               <span style={{ fontSize: '10px', color: '#64748b' }}>Supports plain text & variables</span>
             </div>
             <textarea
+              id="email-body-input"
+              name="email_body"
+              aria-label="Email Message Body"
               className="wf-textarea font-sans text-xs"
               rows={6}
               value={data.body || ''}

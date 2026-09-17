@@ -323,16 +323,8 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
 
   return (
     <aside className="wf-node-library-panel">
-      {/* Library Title */}
-      <div className="wf-library-header">
-        <div className="wf-library-title">
-          <LayersIcon size={14} color="#818cf8" />
-          <span>NODE LIBRARY</span>
-        </div>
-      </div>
-
       {/* Search Input */}
-      <div className="wf-search-wrapper">
+      <div className="wf-search-wrapper" style={{ paddingTop: '14px' }}>
         <Search size={13} className="wf-search-icon" />
         <input 
           type="text" 
@@ -341,6 +333,9 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
           onChange={(e) => setSearch(e.target.value)}
           className="wf-search-input"
           id="node-library-search"
+          name="node_search"
+          aria-label="Search workflow nodes"
+          autoComplete="off"
         />
         {search && (
           <button 
@@ -352,20 +347,6 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
           </button>
         )}
       </div>
-
-      {/* Quick Template Helper Button */}
-      {onAddTemplateFlow && (
-        <div className="wf-quick-template-box">
-          <button 
-            className="wf-quick-template-btn"
-            onClick={onAddTemplateFlow}
-            title="Load the standard 3-tier enterprise approval template"
-          >
-            <Sparkles size={13} color="#818cf8" />
-            <span>Load Approval Template</span>
-          </button>
-        </div>
-      )}
 
       {/* Categories & Node Items */}
       <div className="wf-library-scroll">

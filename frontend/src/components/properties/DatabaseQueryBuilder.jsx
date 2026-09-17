@@ -533,8 +533,11 @@ export default function DatabaseQueryBuilder({
 
           {/* 3. TARGET TABLE SELECTOR */}
           <div className="wf-field-group">
-            <label className="wf-field-label">Database Table</label>
+            <label className="wf-field-label" htmlFor="qb-database-table">Database Table</label>
             <select
+              id="qb-database-table"
+              name="database_table"
+              aria-label="Database Table"
               className="wf-select"
               value={currentTable}
               onChange={(e) => {
@@ -656,6 +659,9 @@ export default function DatabaseQueryBuilder({
               <div className="wf-qb-add-filter-grid">
                 {availableFields.length > 0 ? (
                   <select
+                    id="qb-filter-col-select"
+                    name="filter_col_select"
+                    aria-label="Filter Column Name"
                     className="wf-select text-xs font-mono"
                     value={newFilterCol}
                     onChange={(e) => setNewFilterCol(e.target.value)}
@@ -667,6 +673,9 @@ export default function DatabaseQueryBuilder({
                   </select>
                 ) : (
                   <input
+                    id="qb-filter-col-input"
+                    name="filter_col_input"
+                    aria-label="Filter Column Name"
                     type="text"
                     className="wf-input text-xs"
                     placeholder="Column"
@@ -676,6 +685,9 @@ export default function DatabaseQueryBuilder({
                 )}
 
                 <select
+                  id="qb-filter-op-select"
+                  name="filter_op_select"
+                  aria-label="Filter Operator"
                   className="wf-select text-xs font-mono"
                   value={newFilterOp}
                   onChange={(e) => setNewFilterOp(e.target.value)}
@@ -691,6 +703,9 @@ export default function DatabaseQueryBuilder({
                 </select>
 
                 <input
+                  id="qb-filter-val-input"
+                  name="filter_val_input"
+                  aria-label="Filter Match Value"
                   type="text"
                   className="wf-input text-xs"
                   placeholder="Value e.g. {{entity_id}}"
@@ -809,6 +824,9 @@ export default function DatabaseQueryBuilder({
                           <div className="wf-schema-input-cell">
                             <div className="wf-schema-input-wrapper">
                               <input
+                                id={`qb-col-val-${f.name}`}
+                                name={`col_val_${f.name}`}
+                                aria-label={`Value for column ${f.name}`}
                                 type="text"
                                 className={`wf-schema-input ${currentVal ? 'has-value' : isRequired ? 'is-required-empty' : ''}`}
                                 placeholder={
@@ -931,6 +949,9 @@ export default function DatabaseQueryBuilder({
 
                   <div className="wf-add-mapping-box">
                     <input
+                      id="qb-custom-map-key"
+                      name="custom_map_key"
+                      aria-label="Custom Column Name"
                       type="text"
                       className="wf-input text-xs"
                       placeholder="Column name (e.g. status)"
@@ -941,6 +962,9 @@ export default function DatabaseQueryBuilder({
                       }}
                     />
                     <input
+                      id="qb-custom-map-val"
+                      name="custom_map_val"
+                      aria-label="Custom Column Value"
                       type="text"
                       className="wf-input text-xs"
                       placeholder="Value e.g. 1, 'ACTIVE', {{user_id}}"
@@ -967,13 +991,16 @@ export default function DatabaseQueryBuilder({
               {isCreate && (
                 <div style={{ marginTop: '10px', padding: '8px 10px', background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <label style={{ margin: 0, fontSize: '11px', fontWeight: '600', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <label htmlFor="qb-conflict-resolution" style={{ margin: 0, fontSize: '11px', fontWeight: '600', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '5px' }}>
                       <ShieldAlert size={13} style={{ color: '#fbbf24' }} />
                       <span>Duplicate Conflict Rule</span>
                     </label>
                     <span style={{ fontSize: '9px', color: '#64748b', fontFamily: 'monospace' }}>ON CONFLICT</span>
                   </div>
                   <select
+                    id="qb-conflict-resolution"
+                    name="conflict_resolution"
+                    aria-label="Duplicate Conflict Rule (ON CONFLICT)"
                     className="wf-select"
                     style={{ width: '100%', fontSize: '11px', fontFamily: 'monospace', marginTop: '4px' }}
                     value={data.conflictResolution || 'FAIL'}
@@ -1032,6 +1059,9 @@ export default function DatabaseQueryBuilder({
               <div className="wf-qb-add-filter-grid">
                 {availableFields.length > 0 ? (
                   <select
+                    id="qb-crit-filter-col-select"
+                    name="crit_filter_col_select"
+                    aria-label="Criteria Filter Column"
                     className="wf-select text-xs font-mono"
                     value={newFilterCol}
                     onChange={(e) => setNewFilterCol(e.target.value)}
@@ -1043,6 +1073,9 @@ export default function DatabaseQueryBuilder({
                   </select>
                 ) : (
                   <input
+                    id="qb-crit-filter-col-input"
+                    name="crit_filter_col_input"
+                    aria-label="Criteria Filter Column"
                     type="text"
                     className="wf-input text-xs"
                     placeholder="Column"
@@ -1052,6 +1085,9 @@ export default function DatabaseQueryBuilder({
                 )}
 
                 <select
+                  id="qb-crit-filter-op-select"
+                  name="crit_filter_op_select"
+                  aria-label="Criteria Filter Operator"
                   className="wf-select text-xs font-mono"
                   value={newFilterOp}
                   onChange={(e) => setNewFilterOp(e.target.value)}
@@ -1067,6 +1103,9 @@ export default function DatabaseQueryBuilder({
                 </select>
 
                 <input
+                  id="qb-crit-filter-val-input"
+                  name="crit_filter_val_input"
+                  aria-label="Criteria Filter Value"
                   type="text"
                   className="wf-input text-xs"
                   placeholder="Value e.g. {{entity_id}}"
@@ -1092,8 +1131,11 @@ export default function DatabaseQueryBuilder({
           {operation === 'SELECT' && (
             <div className="grid grid-cols-2 gap-2 mt-1">
               <div className="wf-field-group mb-0">
-                <label className="wf-field-label">Order By</label>
+                <label className="wf-field-label" htmlFor="qb-order-by-select">Order By</label>
                 <select
+                  id="qb-order-by-select"
+                  name="order_by"
+                  aria-label="Order by Column"
                   className="wf-select text-xs"
                   value={data.orderBy || ''}
                   onChange={(e) => onFieldChange('orderBy', e.target.value)}
@@ -1106,8 +1148,11 @@ export default function DatabaseQueryBuilder({
               </div>
 
               <div className="wf-field-group mb-0">
-                <label className="wf-field-label">Limit Rows</label>
+                <label className="wf-field-label" htmlFor="qb-limit-rows-input">Limit Rows</label>
                 <input
+                  id="qb-limit-rows-input"
+                  name="limit_rows"
+                  aria-label="Limit Query Result Rows"
                   type="number"
                   className="wf-input text-xs"
                   placeholder="e.g. 50"
@@ -1123,7 +1168,7 @@ export default function DatabaseQueryBuilder({
           {/* ============================================================ */}
           <div className="wf-field-group mt-3">
             <div className="flex items-center justify-between">
-              <label className="wf-field-label mb-0">
+              <label className="wf-field-label mb-0" htmlFor="qb-output-var-input">
                 {isCreate
                   ? 'New Record ID Variable'
                   : isRead
@@ -1135,6 +1180,9 @@ export default function DatabaseQueryBuilder({
               </span>
             </div>
             <input
+              id="qb-output-var-input"
+              name="output_var"
+              aria-label="Output Variable Name"
               type="text"
               className="wf-input font-mono text-xs mt-1"
               placeholder={isCreate ? 'created_id' : isRead ? 'record_data' : 'result'}
@@ -1151,12 +1199,15 @@ export default function DatabaseQueryBuilder({
         /* RAW SQL MODE (FOR DATABASE ACTION & SPECIFIC NODES) */
         <div className="wf-field-group mt-2">
           <div className="flex items-center justify-between mb-1">
-            <label className="wf-field-label mb-0">Raw SQL Statement</label>
+            <label className="wf-field-label mb-0" htmlFor="qb-raw-sql-input">Raw SQL Statement</label>
             <span className="text-[10px] font-mono text-cyan-400">
               {isCreate ? 'INSERT' : isRead ? 'SELECT' : isUpdate ? 'UPDATE' : isDelete ? 'DELETE' : 'SQL'}
             </span>
           </div>
           <textarea
+            id="qb-raw-sql-input"
+            name="raw_sql_statement"
+            aria-label="Raw SQL Statement"
             className="wf-textarea font-mono text-xs"
             rows={6}
             value={data.sql || ''}
@@ -1180,7 +1231,7 @@ export default function DatabaseQueryBuilder({
           {/* Output Variable Configuration in Raw SQL Mode */}
           <div className="wf-field-group mt-3">
             <div className="flex items-center justify-between">
-              <label className="wf-field-label mb-0">
+              <label className="wf-field-label mb-0" htmlFor="qb-raw-output-var">
                 {isCreate
                   ? 'New Record ID Variable'
                   : isRead
@@ -1192,6 +1243,9 @@ export default function DatabaseQueryBuilder({
               </span>
             </div>
             <input
+              id="qb-raw-output-var"
+              name="raw_output_variable"
+              aria-label="Output Variable Name"
               type="text"
               className="wf-input font-mono text-xs mt-1"
               placeholder={isCreate ? 'created_id' : isRead ? 'record_data' : 'query_result'}
@@ -1247,8 +1301,11 @@ export default function DatabaseQueryBuilder({
         {/* Optional Test Parameter Config (Shown only for SELECT/UPDATE/DELETE where record ID is required) */}
         {operation !== 'INSERT' && (
           <div style={{ padding: '4px 8px', background: 'rgba(15, 23, 42, 0.6)', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px' }}>
-            <span style={{ color: '#94a3b8' }}>Test parameter <code>:entity_id</code> (Target Record ID):</span>
+            <label htmlFor="qb-test-param-id" style={{ color: '#94a3b8', margin: 0 }}>Test parameter <code>:entity_id</code> (Target Record ID):</label>
             <input
+              id="qb-test-param-id"
+              name="test_param_entity_id"
+              aria-label="Test Entity ID Parameter"
               type="number"
               className="wf-input font-mono"
               style={{ width: '60px', padding: '1px 4px', fontSize: '10px', height: '20px' }}

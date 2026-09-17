@@ -274,6 +274,9 @@ function Monitoring({ showToast }) {
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <select 
+                    id="monitoring-status-filter"
+                    name="monitoring_status_filter"
+                    aria-label="Filter execution instances by status"
                     className="filter-select"
                     style={{ padding: '6px 8px', fontSize: '12px', flex: 1 }}
                     value={statusFilter}
@@ -285,6 +288,9 @@ function Monitoring({ showToast }) {
                     <option value="Failed">Failed</option>
                   </select>
                   <select 
+                    id="monitoring-entity-filter"
+                    name="monitoring_entity_filter"
+                    aria-label="Filter execution instances by entity"
                     className="filter-select"
                     style={{ padding: '6px 8px', fontSize: '12px', flex: 1 }}
                     value={entityFilter}
@@ -639,6 +645,9 @@ function Monitoring({ showToast }) {
             <div style={{ position: 'relative', flexGrow: 1, maxWidth: '360px' }}>
               <Search size={13} style={{ position: 'absolute', left: '10px', top: '9px', color: '#64748b' }} />
               <input
+                id="monitoring-telemetry-search"
+                name="telemetry_search"
+                aria-label="Search trace, message, and node events"
                 type="text"
                 placeholder="Search trace, message, node..."
                 value={telemetrySearch}
@@ -658,8 +667,11 @@ function Monitoring({ showToast }) {
 
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
+              <label htmlFor="monitoring-auto-refresh-toggle" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
                 <input
+                  id="monitoring-auto-refresh-toggle"
+                  name="auto_refresh"
+                  aria-label="Toggle auto-refresh every 3 seconds"
                   type="checkbox"
                   checked={autoRefresh}
                   onChange={(e) => setAutoRefresh(e.target.checked)}

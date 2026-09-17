@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 
 class WorkflowGraphCompiler:
     """
-    Translates visual n8n-style node graph JSON into valid, executable BPMN 2.0 XML.
+    Translates visual node graph JSON into valid, executable BPMN 2.0 XML.
     Visual graph schema format:
     {
       "nodes": [
@@ -42,7 +42,7 @@ class WorkflowGraphCompiler:
             {
                 "id": "Definitions_1",
                 "targetNamespace": "http://bpmn.io/schema/bpmn",
-                "exporter": "Workflow Studio n8n Compiler",
+                "exporter": "Workflow Studio Engine",
                 "exporterVersion": "2.0"
             }
         )

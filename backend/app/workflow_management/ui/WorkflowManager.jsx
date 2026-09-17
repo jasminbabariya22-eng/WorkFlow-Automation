@@ -554,7 +554,7 @@ export default function WorkflowManager({ apiBaseUrl = '/workflow/definitions' }
                 />
               </div>
               <div style={{ marginTop: '16px' }}>
-                <label style={styles.label}>Camunda Properties</label>
+                <label style={styles.label}>Workflow Properties</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
                   {nodeProperties.map((p, index) => (
                     <div key={index} style={{ display: 'flex', gap: '6px' }}>

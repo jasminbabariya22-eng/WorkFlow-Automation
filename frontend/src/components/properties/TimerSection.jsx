@@ -19,13 +19,14 @@ export default function TimerSection({
 
       {/* Timer Type Selector */}
       <div className="wf-field-group">
-        <label className="wf-field-label">Timer Mode</label>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginTop: '4px' }}>
+        <label className="wf-field-label" id="timer-mode-label">Timer Mode</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginTop: '4px' }} role="group" aria-labelledby="timer-mode-label">
           <button
             type="button"
             className={`wf-btn wf-btn-sm ${timerType === 'duration' ? 'wf-btn-primary' : 'wf-btn-outline'}`}
             style={{ fontSize: '11px', padding: '6px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
             onClick={() => handleFieldChange('timerType', 'duration')}
+            aria-label="Set timer mode to Duration"
           >
             <Clock size={12} />
             <span>Duration</span>
@@ -35,6 +36,7 @@ export default function TimerSection({
             className={`wf-btn wf-btn-sm ${timerType === 'dateTime' ? 'wf-btn-primary' : 'wf-btn-outline'}`}
             style={{ fontSize: '11px', padding: '6px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
             onClick={() => handleFieldChange('timerType', 'dateTime')}
+            aria-label="Set timer mode to Fixed Date"
           >
             <Calendar size={12} />
             <span>Fixed Date</span>
@@ -44,6 +46,7 @@ export default function TimerSection({
             className={`wf-btn wf-btn-sm ${timerType === 'expression' ? 'wf-btn-primary' : 'wf-btn-outline'}`}
             style={{ fontSize: '11px', padding: '6px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
             onClick={() => handleFieldChange('timerType', 'expression')}
+            aria-label="Set timer mode to Dynamic Expression"
           >
             <Zap size={12} />
             <span>Dynamic</span>
@@ -54,9 +57,12 @@ export default function TimerSection({
       {/* 1. DURATION MODE */}
       {timerType === 'duration' && (
         <div className="wf-field-group">
-          <label className="wf-field-label">Delay Duration</label>
+          <label className="wf-field-label" htmlFor="timer-duration-val">Delay Duration</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '8px' }}>
             <input
+              id="timer-duration-val"
+              name="timer_duration_val"
+              aria-label="Timer Duration Value"
               type="number"
               min="1"
               max="9999"
@@ -74,6 +80,9 @@ export default function TimerSection({
               placeholder="10"
             />
             <select
+              id="timer-duration-unit"
+              name="timer_duration_unit"
+              aria-label="Timer Duration Unit"
               className="wf-select font-medium"
               value={durationUnit}
               onChange={(e) => {
@@ -99,8 +108,11 @@ export default function TimerSection({
       {/* 2. FIXED DATE / TIME MODE */}
       {timerType === 'dateTime' && (
         <div className="wf-field-group">
-          <label className="wf-field-label">Target Date & Time</label>
+          <label className="wf-field-label" htmlFor="timer-target-datetime">Target Date & Time</label>
           <input
+            id="timer-target-datetime"
+            name="timer_target_datetime"
+            aria-label="Target Date and Time"
             type="datetime-local"
             className="wf-input font-mono"
             value={targetDate}
@@ -115,8 +127,11 @@ export default function TimerSection({
       {/* 3. DYNAMIC EXPRESSION MODE */}
       {timerType === 'expression' && (
         <div className="wf-field-group">
-          <label className="wf-field-label">Dynamic Duration / Date Variable</label>
+          <label className="wf-field-label" htmlFor="timer-dynamic-expression">Dynamic Duration / Date Variable</label>
           <input
+            id="timer-dynamic-expression"
+            name="timer_dynamic_expression"
+            aria-label="Dynamic Duration or Date Variable"
             type="text"
             className="wf-input font-mono"
             value={timerExpression}
@@ -133,8 +148,11 @@ export default function TimerSection({
       <div className="wf-section-divider">ADVANCED SETTINGS</div>
 
       <div className="wf-field-group">
-        <label className="wf-checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+        <label className="wf-checkbox-label" htmlFor="timer-interruptible" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
           <input
+            id="timer-interruptible"
+            name="timer_interruptible"
+            aria-label="Allow External Cancellation or Override"
             type="checkbox"
             checked={Boolean(interruptible)}
             onChange={(e) => handleFieldChange('interruptible', e.target.checked)}

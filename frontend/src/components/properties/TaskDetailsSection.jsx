@@ -22,8 +22,11 @@ export default function TaskDetailsSection({
   return (
     <>
       <div className="wf-field-group">
-        <label className="wf-field-label">Node Title</label>
+        <label htmlFor="node-title-field" className="wf-field-label">Node Title</label>
         <input
+          id="node-title-field"
+          name="node_title"
+          aria-label="Node Title"
           type="text"
           className="wf-input"
           value={name}
@@ -33,8 +36,11 @@ export default function TaskDetailsSection({
       </div>
 
       <div className="wf-field-group">
-        <label className="wf-field-label">Description</label>
+        <label htmlFor="node-desc-field" className="wf-field-label">Description</label>
         <textarea
+          id="node-desc-field"
+          name="node_description"
+          aria-label="Node Description"
           className="wf-textarea"
           rows={2}
           value={description}

@@ -507,12 +507,16 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                 deduped.append(e)
         return ", ".join(deduped)
 
-    to_email = _resolve_recipient_list(config.get("to") or config.get("recipient"))
+    raw_to = context_vars.get("to") or context_vars.get("to_email") or context_vars.get("email_to") or config.get("to") or config.get("recipient")
+    to_email = _resolve_recipient_list(raw_to)
     if not to_email:
         to_email = context_vars.get("employee_email") or context_vars.get("email") or context_vars.get("user_email") or "applicant@company.com"
 
-    cc_email = _resolve_recipient_list(config.get("cc") or config.get("email_cc"))
-    bcc_email = _resolve_recipient_list(config.get("bcc") or config.get("email_bcc"))
+    raw_cc = context_vars.get("cc") or context_vars.get("cc_email") or context_vars.get("email_cc") or config.get("cc") or config.get("email_cc")
+    cc_email = _resolve_recipient_list(raw_cc)
+
+    raw_bcc = context_vars.get("bcc") or context_vars.get("bcc_email") or context_vars.get("email_bcc") or config.get("bcc") or config.get("email_bcc")
+    bcc_email = _resolve_recipient_list(raw_bcc)
 
     # 2. Resolve Subject & Body with Variable Interpolation
     display_id = f"#{entity_id}" if entity_id else ""
@@ -528,93 +532,113 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     email_type_val = "HTML" if is_html else "TEXT"
 
     # 3. Attempt insert into client email queue if table exists
+    # 3. Attempt insert into client email queue if table exists
     email_job_id = None
     try:
+        from sqlalchemy import inspect
         eng = DynamicEnginePool.get_engine(conn_id)
+        inspector = inspect(eng)
         target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
-        candidate_tables = []
-        for t in ["mst_email_job", "email_jobs", "email_queue"]:
-            if target_schema:
-                candidate_tables.append(f"{target_schema}.{t}")
-            candidate_tables.append(t)
-        with eng.begin() as conn:
-            for mail_tbl in candidate_tables:
-                try:
-                    res = conn.execute(
-                        text(f"""
-                            INSERT INTO {mail_tbl} (
-                                email_server_id, email_module, email_to, email_cc, email_bcc, email_subject, email_type,
-                                email_body, send_status, total_attempts, send_attempts, attempt_delay,
-                                next_attempt_at, created_on, created_by, is_deleted
-                            ) VALUES (
-                                1, 'WORKFLOW', :email_to, :email_cc, :email_bcc, :email_subject, :email_type,
-                                :email_body, 'New', 3, 0, 5000,
-                                :now_dt, :now_dt, :user_id, 0
-                            ) RETURNING email_job_id
-                        """),
-                        {
-                            "email_to": to_email,
-                            "email_cc": cc_email,
-                            "email_bcc": bcc_email,
-                            "email_subject": subject,
-                            "email_type": email_type_val,
-                            "email_body": final_email_body,
-                            "now_dt": now_dt,
-                            "user_id": user_id
-                        }
-                    ).first()
-                    if res:
-                        email_job_id = res[0]
-                        break
-                except Exception:
-                    try:
-                        # Fallback for tables without CC/BCC or with 'id' PK
-                        res = conn.execute(
-                            text(f"""
-                                INSERT INTO {mail_tbl} (
-                                    email_server_id, email_module, email_to, email_subject, email_type,
-                                    email_body, send_status, total_attempts, send_attempts, attempt_delay,
-                                    next_attempt_at, created_on, created_by, is_deleted
-                                ) VALUES (
-                                    1, 'WORKFLOW', :email_to, :email_subject, :email_type,
-                                    :email_body, 'New', 3, 0, 5000,
-                                    :now_dt, :now_dt, :user_id, 0
-                                ) RETURNING email_job_id
-                            """),
-                            {
-                                "email_to": to_email,
-                                "email_subject": subject,
-                                "email_type": email_type_val,
-                                "email_body": final_email_body,
-                                "now_dt": now_dt,
-                                "user_id": user_id
-                            }
-                        ).first()
-                        if res:
-                            email_job_id = res[0]
-                            break
-                    except Exception:
-                        continue
+
+        all_tbls = inspector.get_table_names(schema=target_schema) if target_schema else inspector.get_table_names()
+        tbl_map = {t.lower(): t for t in all_tbls}
+
+        found_mail_tbl = None
+        for cand in ["mst_email_job", "email_jobs", "email_queue", "mst_email_jobs", "outgoing_emails"]:
+            if cand in tbl_map:
+                found_mail_tbl = tbl_map[cand]
+                break
+
+        if found_mail_tbl:
+            cols = {c["name"].lower(): c["name"] for c in inspector.get_columns(found_mail_tbl, schema=target_schema)}
+            full_mail_tbl = f"{target_schema}.{found_mail_tbl}" if target_schema else found_mail_tbl
+
+            insert_data = {}
+            if "email_server_id" in cols:
+                insert_data[cols["email_server_id"]] = 1
+            if "to_email" in cols:
+                insert_data[cols["to_email"]] = to_email
+            elif "email_to" in cols:
+                insert_data[cols["email_to"]] = to_email
+
+            if cc_email:
+                if "cc_email" in cols:
+                    insert_data[cols["cc_email"]] = cc_email
+                elif "email_cc" in cols:
+                    insert_data[cols["email_cc"]] = cc_email
+
+            if "subject" in cols:
+                insert_data[cols["subject"]] = subject
+            elif "email_subject" in cols:
+                insert_data[cols["email_subject"]] = subject
+
+            if "body" in cols:
+                insert_data[cols["body"]] = final_email_body
+            elif "email_body" in cols:
+                insert_data[cols["email_body"]] = final_email_body
+
+            if "email_type" in cols:
+                insert_data[cols["email_type"]] = email_type_val
+            if "send_status" in cols:
+                insert_data[cols["send_status"]] = "New"
+            if "total_attempts" in cols:
+                insert_data[cols["total_attempts"]] = 3
+            if "send_attempts" in cols:
+                insert_data[cols["send_attempts"]] = 0
+            if "attempt_delay" in cols:
+                insert_data[cols["attempt_delay"]] = 5000
+            if "is_deleted" in cols:
+                insert_data[cols["is_deleted"]] = 0
+            if "created_on" in cols:
+                insert_data[cols["created_on"]] = now_dt
+            if "created_by" in cols and user_id:
+                insert_data[cols["created_by"]] = user_id
+
+            col_names = list(insert_data.keys())
+            param_names = [f":p_{i}" for i in range(len(col_names))]
+            params = {f"p_{i}": v for i, v in enumerate(insert_data.values())}
+
+            insert_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)})"
+            with eng.begin() as conn:
+                conn.execute(text(insert_sql), params)
+                email_job_id = 1  # Successfully queued
+
+            # Trigger email dispatcher in background thread immediately (Non-blocking)
+            try:
+                import threading
+                from app.workflow.services.email_dispatcher import EmailDispatcher
+                threading.Thread(
+                    target=EmailDispatcher.process_pending_email_jobs,
+                    kwargs={"conn_id": conn_id, "limit": 10},
+                    daemon=True
+                ).start()
+            except Exception as dispatch_ex:
+                logger.debug(f"ActionRegistry: Immediate dispatch notice: {dispatch_ex}")
     except Exception as queue_err:
         logger.debug(f"ActionRegistry: Email queue insert skipped: {queue_err}")
 
-    # 4. If not queued in client DB (no email job table), send directly via SMTP
-    send_status = "New" if email_job_id else "Pending"
+    # 4. If not queued in client DB (no email job table), send directly via SMTP in background thread
+    send_status = "Queued" if email_job_id else "Pending"
     if not email_job_id:
         try:
+            import threading
             from app.workflow.services.email_dispatcher import EmailDispatcher
             smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id)
             if smtp_cfg:
-                EmailDispatcher.send_smtp_email(
-                    smtp_cfg=smtp_cfg,
-                    to_email=to_email,
-                    subject=subject,
-                    body=final_email_body,
-                    email_type=email_type_val,
-                    cc=cc_email
-                )
+                threading.Thread(
+                    target=EmailDispatcher.send_smtp_email,
+                    kwargs={
+                        "smtp_cfg": smtp_cfg,
+                        "to_email": to_email,
+                        "subject": subject,
+                        "body": final_email_body,
+                        "email_type": email_type_val,
+                        "cc": cc_email
+                    },
+                    daemon=True
+                ).start()
                 send_status = "Sent"
-                logger.info(f"ActionRegistry: Direct SMTP email sent to {to_email} with subject '{subject}'")
+                logger.info(f"ActionRegistry: Background direct SMTP dispatch started for {to_email}")
         except Exception as direct_err:
             logger.warning(f"ActionRegistry: Direct SMTP email sending warning: {direct_err}")
 
