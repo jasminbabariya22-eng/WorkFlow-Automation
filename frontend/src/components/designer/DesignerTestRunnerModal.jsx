@@ -111,7 +111,7 @@ export default function DesignerTestRunnerModal({
           </button>
         </div>
 
-        <div className="wf-modal-content" style={{ maxHeight: '540px' }}>
+        <div className="wf-modal-content" tabIndex={0} role="region" aria-label="Test execution simulation panel" style={{ maxHeight: '540px' }}>
           {/* Record Selector Bar */}
           <div className="wf-test-record-bar">
             <div className="wf-test-record-input-group">

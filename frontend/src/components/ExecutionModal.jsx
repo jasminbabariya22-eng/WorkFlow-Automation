@@ -176,7 +176,7 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
         </div>
 
         {/* Modal Body */}
-        <div className="modal-body execution-body">
+        <div className="modal-body execution-body" tabIndex={0} role="region" aria-label="Workflow execution runner details">
           {/* Input Section */}
           <div className="runner-config-card" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '16px' }}>
             

@@ -28,7 +28,7 @@ export default function DesignerValidationModal({
           </button>
         </div>
 
-        <div className="wf-modal-body">
+        <div className="wf-modal-body" tabIndex={0} role="region" aria-label="Validation results list">
           {validationErrors.length === 0 ? (
             <div className="wf-validation-success">
               <p className="text-sm font-medium" style={{ color: '#4ade80' }}>

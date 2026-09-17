@@ -349,7 +349,7 @@ export default function NodeLibrary({ onAddNode, onAddTemplateFlow }) {
       </div>
 
       {/* Categories & Node Items */}
-      <div className="wf-library-scroll">
+      <div className="wf-library-scroll" tabIndex={0} role="region" aria-label="Workflow node library palette">
         {filteredCategories.length === 0 ? (
           <div className="wf-no-results">
             No nodes matching "{search}"
