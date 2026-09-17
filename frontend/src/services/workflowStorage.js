@@ -158,6 +158,11 @@ const DEFAULT_INSTANCES = [
 ]
 
 export const workflowStorage = {
+  // Alias for getWorkflows
+  getDefinitions: async () => {
+    return workflowStorage.getWorkflows()
+  },
+
   // 1. Get all workflow definitions (Exclusively from workflow.bpmn_definition table)
   getWorkflows: async () => {
     try {

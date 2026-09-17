@@ -34,10 +34,15 @@ export default function WorkflowSuggestionModal({
     let isMounted = true
     setLoading(true)
 
-    Promise.all([
-      workflowStorage.getDefinitions(),
-      workflowStorage.getDbConnections?.() || []
-    ])
+    const fetchWorkflows = typeof workflowStorage.getWorkflows === 'function'
+      ? workflowStorage.getWorkflows()
+      : (typeof workflowStorage.getDefinitions === 'function' ? workflowStorage.getDefinitions() : Promise.resolve([]))
+
+    const fetchConns = typeof workflowStorage.getDatabaseConnections === 'function'
+      ? workflowStorage.getDatabaseConnections()
+      : (typeof workflowStorage.getDbConnections === 'function' ? workflowStorage.getDbConnections() : Promise.resolve([]))
+
+    Promise.all([fetchWorkflows, fetchConns])
       .then(([wfList, conns]) => {
         if (isMounted) {
           setWorkflows(Array.isArray(wfList) ? wfList : [])
@@ -45,7 +50,8 @@ export default function WorkflowSuggestionModal({
           setLoading(false)
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Error fetching workflows in suggestion modal:', err)
         if (isMounted) setLoading(false)
       })
 
