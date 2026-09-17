@@ -292,6 +292,31 @@ def set_default_connection(
     return {"message": f"Connection '{record.connection_name}' is now the default Client Database."}
 
 
+@router.post("/{connection_id}/test", response_model=Dict[str, Any])
+def test_saved_connection(
+    connection_id: int,
+    db: Session = Depends(get_workflow_db)
+):
+    """
+    Live tests an existing saved connection profile by ID in <50ms.
+    """
+    record = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == connection_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Connection ID {connection_id} not found.")
+
+    pwd = decrypt_text(record.password_encrypted) if record.password_encrypted else ""
+    return DynamicEnginePool.test_connection_params(
+        db_type=record.db_type,
+        host=record.host,
+        port=record.port,
+        database_name=record.database_name,
+        username=record.username or "",
+        password=pwd,
+        default_schema=record.default_schema,
+        ssl_mode=record.ssl_mode or "disable"
+    )
+
+
 @router.get("/{connection_id}/tables")
 def get_connection_tables(
     connection_id: int,

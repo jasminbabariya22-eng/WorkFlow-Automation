@@ -869,81 +869,108 @@ export const workflowStorage = {
                                                 return cached || []
                                               },
 
-                                                getConnections: async () => {
-                                                  return await workflowStorage.getDatabaseConnections()
-                                                },
+                                              getConnections: async () => {
+                                                return await workflowStorage.getDatabaseConnections()
+                                              },
 
-                                                  createDatabaseConnection: async (payload) => {
-                                                    const res = await fetch('/workflow-studio/connections', {
-                                                      method: 'POST',
-                                                      headers: { 'Content-Type': 'application/json' },
-                                                      body: JSON.stringify(payload)
-                                                    })
-                                                    if (!res.ok) {
-                                                      const err = await res.json().catch(() => ({}))
-                                                      throw new Error(err.detail || err.Error_message || 'Failed to create database connection')
-                                                    }
-                                                    return await res.json()
-                                                  },
+                                              createDatabaseConnection: async (payload) => {
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                const res = await fetch('/workflow-studio/connections', {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(payload),
+                                                  signal: AbortSignal.timeout(3500)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Failed to create database connection')
+                                                }
+                                                const created = await res.json()
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                return created
+                                              },
 
-                                                    updateDatabaseConnection: async (connectionId, payload) => {
-                                                      const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
-                                                        method: 'PUT',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify(payload)
-                                                      })
-                                                      if (!res.ok) {
-                                                        const err = await res.json().catch(() => ({}))
-                                                        throw new Error(err.detail || err.Error_message || 'Failed to update database connection')
-                                                      }
-                                                      return await res.json()
-                                                    },
+                                              updateDatabaseConnection: async (connectionId, payload) => {
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
+                                                  method: 'PUT',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(payload),
+                                                  signal: AbortSignal.timeout(3500)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Failed to update database connection')
+                                                }
+                                                const updated = await res.json()
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                return updated
+                                              },
 
-                                                      deleteDatabaseConnection: async (connectionId) => {
-                                                        const res = await fetch(`/workflow-studio/connections/${connectionId}`, { method: 'DELETE' })
-                                                        if (!res.ok) {
-                                                          const err = await res.json().catch(() => ({}))
-                                                          throw new Error(err.detail || err.Error_message || 'Failed to delete database connection')
-                                                        }
-                                                        return await res.json()
-                                                      },
+                                              deleteDatabaseConnection: async (connectionId) => {
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                const res = await fetch(`/workflow-studio/connections/${connectionId}`, {
+                                                  method: 'DELETE',
+                                                  signal: AbortSignal.timeout(3500)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Failed to delete database connection')
+                                                }
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                return await res.json()
+                                              },
 
-                                                        testDatabaseConnection: async (payload) => {
-                                                          const res = await fetch('/workflow-studio/connections/test', {
-                                                            method: 'POST',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify(payload)
-                                                          })
-                                                          if (!res.ok) {
-                                                            const err = await res.json().catch(() => ({}))
-                                                            throw new Error(err.detail || err.Error_message || 'Connection test failed')
-                                                          }
-                                                          return await res.json()
-                                                        },
+                                              testDatabaseConnection: async (payload) => {
+                                                const res = await fetch('/workflow-studio/connections/test', {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify(payload),
+                                                  signal: AbortSignal.timeout(3000)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                }
+                                                return await res.json()
+                                              },
 
-                                                          setDefaultDatabaseConnection: async (connectionId) => {
-                                                            const res = await fetch(`/workflow-studio/connections/${connectionId}/set-default`, { method: 'POST' })
-                                                            if (!res.ok) {
-                                                              const err = await res.json().catch(() => ({}))
-                                                              throw new Error(err.detail || err.Error_message || 'Failed to set default connection')
-                                                            }
-                                                            return await res.json()
-                                                          },
+                                              testSavedConnection: async (connectionId) => {
+                                                const res = await fetch(`/workflow-studio/connections/${connectionId}/test`, {
+                                                  method: 'POST',
+                                                  signal: AbortSignal.timeout(3000)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Connection test failed')
+                                                }
+                                                return await res.json()
+                                              },
 
-                                                            getConnectionTables: async (connectionId, schema = 'ers') => {
-                                                              const res = await fetch(`/workflow-studio/connections/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { signal: AbortSignal.timeout(6000) })
-                                                              if (!res.ok) throw new Error(`Failed to load tables (${res.status})`)
-                                                              return await res.json()
-                                                            },
+                                              setDefaultDatabaseConnection: async (connectionId) => {
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                const res = await fetch(`/workflow-studio/connections/${connectionId}/set-default`, {
+                                                  method: 'POST',
+                                                  signal: AbortSignal.timeout(3500)
+                                                })
+                                                if (!res.ok) {
+                                                  const err = await res.json().catch(() => ({}))
+                                                  throw new Error(err.detail || err.Error_message || 'Failed to set default connection')
+                                                }
+                                                _metadataCacheMap.delete('db_connections_list')
+                                                return await res.json()
+                                              },
 
-                                                              // 17. Database Connections Profile Catalog
-                                                              getDbConnections: async () => {
-                                                                try {
-                                                                  const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(5000) })
-                                                                  if (res.ok) return await res.json()
-                                                                } catch (_e) { }
-                                                                return []
-                                                              },
+                                              getConnectionTables: async (connectionId, schema = 'ers') => {
+                                                const res = await fetch(`/workflow-studio/connections/${connectionId}/tables?schema=${encodeURIComponent(schema)}`, { signal: AbortSignal.timeout(4000) })
+                                                if (!res.ok) throw new Error(`Failed to load tables (${res.status})`)
+                                                return await res.json()
+                                              },
+
+                                              // 17. Database Connections Profile Catalog
+                                              getDbConnections: async () => {
+                                                return await workflowStorage.getDatabaseConnections()
+                                              },
 
                                                                 // 18. Declarative ClientApp Bindings
                                                                 getWorkflowBindings: async () => {

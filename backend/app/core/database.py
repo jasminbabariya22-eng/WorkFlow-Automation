@@ -144,47 +144,87 @@ class DynamicEnginePool:
     def test_connection_params(
         cls,
         db_type: str,
-        host: str,
-        port: int,
+        host: Optional[str],
+        port: Optional[int],
         database_name: str,
         username: str,
         password: str,
         default_schema: Optional[str] = None,
         ssl_mode: str = "disable"
     ) -> Dict[str, Any]:
+        import socket
+        from sqlalchemy.pool import NullPool
+
         clean_type = cls.normalize_db_type(db_type)
-        url = cls.build_connection_url(db_type, host, port, database_name, username, password, ssl_mode)
         start_time = time.time()
-        
+
+        # 1. Fast Socket Reachability Pre-check for Network Databases
+        if clean_type != "sqlite" and host:
+            target_port = int(port) if port else (5432 if clean_type == "postgresql" else 3306 if clean_type == "mysql" else 1433 if clean_type == "mssql" else 1521)
+            try:
+                # Fast 1.5s TCP ping to catch closed ports or dead hosts in milliseconds
+                with socket.create_connection((host, target_port), timeout=1.5):
+                    pass
+            except (socket.timeout, TimeoutError):
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                return {
+                    "success": False,
+                    "latency_ms": elapsed_ms,
+                    "error": f"Connection timed out: Host '{host}:{target_port}' did not respond within 1.5s. Please verify host address and network firewall.",
+                    "message": f"Connection timed out: Host '{host}:{target_port}' is unreachable."
+                }
+            except ConnectionRefusedError:
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                return {
+                    "success": False,
+                    "latency_ms": elapsed_ms,
+                    "error": f"Connection refused: No active database service listening on '{host}:{target_port}'. Ensure database service is started.",
+                    "message": f"Connection refused on '{host}:{target_port}'."
+                }
+            except socket.gaierror:
+                elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                return {
+                    "success": False,
+                    "latency_ms": elapsed_ms,
+                    "error": f"DNS resolution failed: Host '{host}' could not be resolved.",
+                    "message": f"Unknown host '{host}'"
+                }
+            except Exception:
+                # Non-fatal socket check error, fall through to DBAPI driver
+                pass
+
+        # 2. Build URL and configure fail-fast driver arguments
+        url = cls.build_connection_url(db_type, host or "localhost", port or 5432, database_name, username, password, ssl_mode)
         connect_args = {}
         if clean_type == "mssql":
-            connect_args = {"login_timeout": 5, "timeout": 5}
-        elif clean_type in ("postgresql", "mysql"):
-            connect_args = {"connect_timeout": 5}
+            connect_args = {"login_timeout": 2, "timeout": 2}
+        elif clean_type == "mysql":
+            connect_args = {"connect_timeout": 2, "read_timeout": 2, "write_timeout": 2}
+        elif clean_type == "postgresql":
+            connect_args = {"connect_timeout": 2}
+        elif clean_type == "oracle":
+            connect_args = {"tcp_connect_timeout": 2}
 
-        temp_engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+        # NullPool avoids connection pool overhead, making single-shot test instantaneous
+        temp_engine = create_engine(
+            url,
+            poolclass=NullPool,
+            connect_args=connect_args,
+            execution_options={"timeout": 2}
+        )
         try:
             with temp_engine.connect() as conn:
-                version_query = "SELECT @@VERSION" if clean_type == "mssql" else "SELECT version()"
-                try:
-                    res = conn.execute(text(version_query)).scalar()
-                except Exception:
-                    try:
-                        res = conn.execute(text("SELECT 1")).scalar()
-                        res = f"Connected ({db_type.upper()})"
-                    except Exception:
-                        res = "Connected"
-
+                conn.execute(text("SELECT 1"))
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
                 return {
                     "success": True,
                     "latency_ms": elapsed_ms,
-                    "version": str(res)[:120],
-                    "message": f"Successfully connected to {db_type.upper()} in {elapsed_ms}ms"
+                    "version": f"{db_type.upper()} Connected",
+                    "message": f"Successfully connected to {db_type.upper()} ({elapsed_ms}ms)"
                 }
         except Exception as e:
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
-            friendly_msg = cls.parse_connection_error(e, db_type, host, port, database_name, username, ssl_mode)
+            friendly_msg = cls.parse_connection_error(e, db_type, host or "", port or 0, database_name, username, ssl_mode)
             return {
                 "success": False,
                 "latency_ms": elapsed_ms,
@@ -192,7 +232,10 @@ class DynamicEnginePool:
                 "message": friendly_msg
             }
         finally:
-            temp_engine.dispose()
+            try:
+                temp_engine.dispose()
+            except Exception:
+                pass
 
     @classmethod
     def get_engine(cls, connection_id: Optional[int] = None) -> Engine:

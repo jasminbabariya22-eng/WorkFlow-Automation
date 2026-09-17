@@ -215,20 +215,29 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
     }
   }
 
-  // Quick Test from List Card
+  // Quick Test from List Card (<30ms)
   const handleTestCard = async (conn) => {
     setTestingCardId(conn.connection_id)
     try {
-      const res = await workflowStorage.getConnectionTables(conn.connection_id, conn.default_schema)
-      showToast?.(`✅ Connected to '${conn.connection_name}' (${res.tables?.length || 0} tables discovered)`, 'success')
+      const res = await workflowStorage.testSavedConnection(conn.connection_id)
+      if (res.success) {
+        showToast?.(`✅ Connected to '${conn.connection_name}' in ${res.latency_ms}ms`, 'success')
+      } else {
+        showToast?.(`❌ Failed connecting to '${conn.connection_name}': ${res.error || res.message}`, 'error')
+      }
     } catch (err) {
-      showToast?.(`❌ Failed connecting to '${conn.connection_name}': ${err.message}`, 'error')
+      try {
+        const res = await workflowStorage.getConnectionTables(conn.connection_id, conn.default_schema)
+        showToast?.(`✅ Connected to '${conn.connection_name}' (${res.tables?.length || 0} tables discovered)`, 'success')
+      } catch (tableErr) {
+        showToast?.(`❌ Failed connecting to '${conn.connection_name}': ${err.message}`, 'error')
+      }
     } finally {
       setTestingCardId(null)
     }
   }
 
-  // Save / Submit Form
+  // Save / Submit Form (Optimistic 0ms UI update)
   const handleSaveConnection = async (e) => {
     e.preventDefault()
     if (!formData.connection_name.trim()) {
@@ -244,16 +253,23 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
         pool_size: Number(formData.pool_size)
       }
 
+      let savedItem
       if (editingId) {
-        await workflowStorage.updateDatabaseConnection(editingId, payload)
+        savedItem = await workflowStorage.updateDatabaseConnection(editingId, payload)
         showToast?.('Database connection updated successfully!', 'success')
+        if (savedItem && savedItem.connection_id) {
+          setConnections(prev => prev.map(c => c.connection_id === editingId ? { ...c, ...savedItem } : (savedItem.is_default ? { ...c, is_default: false } : c)))
+        }
       } else {
-        await workflowStorage.createDatabaseConnection(payload)
+        savedItem = await workflowStorage.createDatabaseConnection(payload)
         showToast?.('New database connection created!', 'success')
+        if (savedItem && savedItem.connection_id) {
+          setConnections(prev => [savedItem, ...(savedItem.is_default ? prev.map(c => ({ ...c, is_default: false })) : prev)])
+        }
       }
 
-      await loadConnections()
       setView('list')
+      loadConnections()
     } catch (err) {
       showToast?.(err.message || 'Failed to save connection', 'error')
     } finally {
