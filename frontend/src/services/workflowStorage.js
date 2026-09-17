@@ -956,7 +956,18 @@ export const workflowStorage = {
                                                       message: `Connection timed out: Server at '${payload.host || 'localhost'}:${payload.port || 5432}' took too long to respond.`
                                                     }
                                                   }
-                                                  throw err
+                                                  if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+                                                    return {
+                                                      success: false,
+                                                      error: 'Network error: Cannot reach the backend API server. Please make sure the backend server (FastAPI on port 8000) is running.',
+                                                      message: 'Network error: Cannot reach the backend API server.'
+                                                    }
+                                                  }
+                                                  return {
+                                                    success: false,
+                                                    error: err.message || 'Connection test failed',
+                                                    message: err.message || 'Connection test failed'
+                                                  }
                                                 }
                                               },
 
@@ -979,7 +990,18 @@ export const workflowStorage = {
                                                       message: 'Connection timed out: The database server took too long to respond.'
                                                     }
                                                   }
-                                                  throw err
+                                                  if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+                                                    return {
+                                                      success: false,
+                                                      error: 'Network error: Cannot reach the backend API server.',
+                                                      message: 'Network error: Cannot reach the backend API server.'
+                                                    }
+                                                  }
+                                                  return {
+                                                    success: false,
+                                                    error: err.message || 'Connection test failed',
+                                                    message: err.message || 'Connection test failed'
+                                                  }
                                                 }
                                               },
 
