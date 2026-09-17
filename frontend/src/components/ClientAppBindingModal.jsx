@@ -208,6 +208,8 @@ function GenericSearchableSelect({
             {query && (
               <button
                 type="button"
+                aria-label="Clear filter query"
+                title="Clear filter query"
                 onClick={() => setQuery('')}
                 style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
               >
@@ -629,6 +631,8 @@ export default function ClientAppBindingModal({
             className="btn-icon" 
             onClick={onClose} 
             disabled={submitting}
+            aria-label="Close dialog"
+            title="Close dialog"
             style={{ color: '#94a3b8', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', padding: '6px' }}
           >
             <X size={18} />

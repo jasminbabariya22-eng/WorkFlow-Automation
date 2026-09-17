@@ -267,6 +267,8 @@ function Monitoring({ showToast }) {
                   </span>
                   <button 
                     onClick={fetchInstances} 
+                    aria-label="Refresh active instances"
+                    title="Refresh active instances"
                     style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   >
                     <RefreshCw size={12} />

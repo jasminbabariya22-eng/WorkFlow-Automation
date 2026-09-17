@@ -33,6 +33,7 @@ function NodeActionBar({ nodeId, onDuplicate, onDelete }) {
             onDuplicate(nodeId)
           }} 
           title="Duplicate Node"
+          aria-label="Duplicate Node"
         >
           <Copy size={11} />
         </button>
@@ -45,6 +46,7 @@ function NodeActionBar({ nodeId, onDuplicate, onDelete }) {
             onDelete(nodeId)
           }} 
           title="Delete Node"
+          aria-label="Delete Node"
         >
           <Trash2 size={11} />
         </button>

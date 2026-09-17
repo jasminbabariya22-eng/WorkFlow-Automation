@@ -225,7 +225,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
               </span>
             </div>
           </div>
-          <button className="btn-close" onClick={onClose}>
+          <button className="btn-close" onClick={onClose} aria-label="Close dialog" title="Close dialog">
             <X size={18} />
           </button>
         </div>
@@ -378,6 +378,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                           className="btn btn-secondary btn-sm"
                           onClick={() => handleOpenEdit(conn)}
                           title="Edit Profile"
+                          aria-label={`Edit ${conn.connection_name} profile`}
                         >
                           <Edit3 size={12} />
                         </button>
@@ -387,6 +388,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                             className="btn btn-danger btn-sm"
                             onClick={() => handleDelete(conn.connection_id, conn.is_default)}
                             title="Delete Profile"
+                            aria-label={`Delete ${conn.connection_name} profile`}
                           >
                             <Trash2 size={12} />
                           </button>

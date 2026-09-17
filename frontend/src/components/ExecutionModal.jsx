@@ -170,7 +170,7 @@ export default function ExecutionModal({ workflowId, workflowSpec, onClose, show
               </span>
             </div>
           </div>
-          <button className="btn-close" onClick={onClose}>
+          <button className="btn-close" onClick={onClose} aria-label="Close dialog" title="Close dialog">
             <X size={18} />
           </button>
         </div>

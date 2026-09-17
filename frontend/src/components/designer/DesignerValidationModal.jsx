@@ -23,7 +23,7 @@ export default function DesignerValidationModal({
               {validationErrors.length === 0 ? 'Workflow Validation Passed' : 'Validation Issues Found'}
             </span>
           </div>
-          <button className="wf-icon-btn-sm" onClick={onClose}>
+          <button className="wf-icon-btn-sm" onClick={onClose} aria-label="Close dialog" title="Close dialog">
             <X size={14} />
           </button>
         </div>

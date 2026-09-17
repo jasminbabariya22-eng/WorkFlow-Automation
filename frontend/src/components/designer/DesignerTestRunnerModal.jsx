@@ -88,7 +88,7 @@ export default function DesignerTestRunnerModal({
               </div>
             </div>
           </div>
-          <button className="wf-modal-close" onClick={onClose}>
+          <button className="wf-modal-close" onClick={onClose} aria-label="Close dialog" title="Close dialog">
             <X size={16} />
           </button>
         </div>
