@@ -41,12 +41,38 @@ function Monitoring({ showToast }) {
   // Main view mode: 'instances' | 'telemetry'
   const [viewMode, setViewMode] = useState('instances')
 
-  // Instances State
-  const [instances, setInstances] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selectedInstance, setSelectedInstance] = useState(null)
+  // Instances State (Instant optimistic cache hydration)
+  const [instances, setInstances] = useState(() => {
+    try {
+      const stored = localStorage.getItem('workflow_studio_instances')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch {}
+    return []
+  })
+  const [loading, setLoading] = useState(() => {
+    try {
+      const stored = localStorage.getItem('workflow_studio_instances')
+      return !stored
+    } catch {
+      return true
+    }
+  })
+  const [selectedInstance, setSelectedInstance] = useState(() => {
+    try {
+      const stored = localStorage.getItem('workflow_studio_instances')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed[0]
+      }
+    } catch {}
+    return null
+  })
   const [statusFilter, setStatusFilter] = useState('')
   const [entityFilter, setEntityFilter] = useState('')
+  const [visibleCount, setVisibleCount] = useState(60)
   
   // Instance Detail States
   const [variables, setVariables] = useState({})
@@ -72,9 +98,9 @@ function Monitoring({ showToast }) {
   })
   const [expandedLogId, setExpandedLogId] = useState(null)
 
-  // 1. Fetch Instances List
-  const fetchInstances = async () => {
-    setLoading(true)
+  // 1. Fetch Instances List (Fast non-blocking)
+  const fetchInstances = async (showLoadingSpinner = false) => {
+    if (showLoadingSpinner) setLoading(true)
     try {
       let data = await workflowStorage.getInstances()
       if (statusFilter) {
@@ -83,22 +109,27 @@ function Monitoring({ showToast }) {
       if (entityFilter) {
         data = (data || []).filter(i => String(i.entity_type || '').toLowerCase() === entityFilter.toLowerCase())
       }
-      setInstances(data || [])
-      if (data && data.length > 0 && !selectedInstance) {
-        await loadInstanceDetails(data[0].instance_id, data)
+      const list = data || []
+      setInstances(list)
+      setLoading(false)
+
+      if (list.length > 0) {
+        const toSelect = selectedInstance && list.some(i => i.instance_id === selectedInstance.instance_id)
+          ? selectedInstance
+          : list[0]
+        setSelectedInstance(toSelect)
+        loadInstanceDetails(toSelect.instance_id, list)
       }
     } catch (e) {
-      showToast?.('Error while fetching monitoring instances', 'error')
-    } finally {
       setLoading(false)
     }
   }
 
-  // 2. Load Selected Instance Details
+  // 2. Load Selected Instance Details (Decoupled Background Fetch)
   const loadInstanceDetails = async (instanceId, instancesList = instances) => {
     setDetailsLoading(true)
     const instObj = instancesList.find(i => i.instance_id === instanceId)
-    setSelectedInstance(instObj || { instance_id: instanceId, status: 'Running' })
+    if (instObj) setSelectedInstance(instObj)
     try {
       const details = await workflowStorage.getInstanceDetails(instanceId)
       let vars = details.variables || {}
@@ -113,7 +144,7 @@ function Monitoring({ showToast }) {
       setLogs(details.logs || [])
       setHistory(details.history || [])
     } catch (e) {
-      showToast?.('Failed to load instance variables or trace logs', 'error')
+      // Graceful fallback
     } finally {
       setDetailsLoading(false)
     }
@@ -322,16 +353,16 @@ function Monitoring({ showToast }) {
                 tabIndex={0} 
                 role="region" 
                 aria-label="Workflow active instances list" 
-                style={{ overflowY: 'auto', flexGrow: 1 }}
+                style={{ overflowY: 'auto', flexGrow: 1, paddingRight: '2px' }}
               >
-                {instances.map(inst => (
+                {instances.slice(0, visibleCount).map(inst => (
                   <div 
                     key={inst.instance_id}
                     className={`instance-card ${selectedInstance?.instance_id === inst.instance_id ? 'active' : ''}`}
                     onClick={() => loadInstanceDetails(inst.instance_id)}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: '600', fontSize: '13px', color: '#38bdf8' }}>
+                      <span style={{ fontWeight: '700', fontSize: '13px', color: '#0284c7' }}>
                         Instance #{inst.instance_id}
                       </span>
                       <span className={`status-badge ${(inst.status || 'Running').toLowerCase()}`} style={{ padding: '2px 6px', fontSize: '10px' }}>
@@ -340,24 +371,34 @@ function Monitoring({ showToast }) {
                     </div>
 
                     {/* Workflow Name Badge */}
-                    <div style={{ marginTop: '6px', fontSize: '12px', fontWeight: '600', color: '#e0e7ff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ color: '#818cf8', fontSize: '13px' }}>⚡</span>
+                    <div style={{ marginTop: '6px', fontSize: '12.5px', fontWeight: '700', color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: '#6366f1', fontSize: '13px' }}>⚡</span>
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {inst.workflow_name || `Workflow #${inst.bpmn_definition_id}`}
                       </span>
                     </div>
 
-                    <div style={{ marginTop: '5px', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                      Target: <span style={{ color: 'var(--color-text-primary)', fontWeight: '500' }}>{inst.entity_type}</span> (ID #{inst.entity_id})
+                    <div style={{ marginTop: '5px', fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      Target: <span style={{ color: 'var(--color-text-primary)', fontWeight: '600' }}>{inst.entity_type || 'Entity'}</span> (ID #{inst.entity_id || '—'})
                     </div>
                     <div className="instance-card-meta" style={{ marginTop: '4px' }}>
-                      <span>Current Task: <b>{inst.current_task_code || '—'}</b></span>
+                      <span>Current Task: <b>{inst.current_task_code || inst.current_task || '—'}</b></span>
                     </div>
                     <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                      Started: {format12Hr(inst.started_on)}
+                      Started: {format12Hr(inst.started_on || inst.started_at)}
                     </div>
                   </div>
                 ))}
+
+                {instances.length > visibleCount && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ width: '100%', marginTop: '8px', fontSize: '11px', padding: '6px' }}
+                    onClick={() => setVisibleCount(prev => prev + 60)}
+                  >
+                    Load More Instances ({instances.length - visibleCount} remaining)
+                  </button>
+                )}
               </div>
             )}
           </div>

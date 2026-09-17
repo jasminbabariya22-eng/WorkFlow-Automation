@@ -564,105 +564,98 @@ export const workflowStorage = {
                 }
               },
 
-                // 13. Get Instances for Monitoring (Live Database)
-                getInstances: async () => {
-                  let instances = []
-                  try {
-                    const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(5000) })
-                    if (res.ok) {
-                      const json = await res.json()
-                      if (Array.isArray(json.data)) {
-                        instances = json.data
-                      }
-                    }
-                  } catch (_e) { }
+  // 13. Get Instances for Monitoring (Live Database with Cached Fallback)
+  getInstances: async () => {
+    let instances = []
+    try {
+      const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(3000) })
+      if (res.ok) {
+        const json = await res.json()
+        if (Array.isArray(json.data)) {
+          instances = json.data
+        }
+      }
+    } catch (_e) { }
 
-                  if (instances.length > 0) {
-                    try {
-                      const [wfs, bindings] = await Promise.allSettled([
-                        workflowStorage.getWorkflows(),
-                        workflowStorage.getWorkflowBindings()
-                      ])
+    if (instances.length > 0) {
+      try {
+        // Fast synchronous enrichment from local storage cache
+        let wfMap = {}
+        const storedWfs = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
+        if (storedWfs) {
+          const parsed = JSON.parse(storedWfs)
+          if (Array.isArray(parsed)) {
+            for (const w of parsed) {
+              if (w.id) wfMap[w.id] = w.name || w.spec_id
+              if (w.spec_id) wfMap[w.spec_id] = w.name || w.spec_id
+            }
+          }
+        }
 
-                      const wfList = wfs.status === 'fulfilled' && Array.isArray(wfs.value) ? wfs.value : []
-                      const bindingMap = {}
-                      if (bindings.status === 'fulfilled' && bindings.value) {
-                        for (const [key, b] of Object.entries(bindings.value)) {
-                          bindingMap[b.workflow_id] = b.title || key
-                        }
-                      }
+        const enriched = instances.map(inst => {
+          const resolvedName = (inst.workflow_name && !inst.workflow_name.startsWith('Workflow #'))
+            ? inst.workflow_name
+            : (wfMap[inst.bpmn_definition_id] || `Workflow #${inst.bpmn_definition_id}`)
+          return {
+            ...inst,
+            workflow_name: resolvedName,
+            workflow_key: inst.workflow_key || ''
+          }
+        })
 
-                      const wfMap = {}
-                      for (const w of wfList) {
-                        if (w.id) wfMap[w.id] = w.name || w.spec_id
-                        if (w.spec_id) wfMap[w.spec_id] = w.name || w.spec_id
-                      }
+        try {
+          localStorage.setItem(STORAGE_KEYS.INSTANCES, JSON.stringify(enriched))
+        } catch (_sErr) { }
 
-                      const versionMap = {
-                        1200: { name: 'Leave Balance Tracking & Deduction Workflow', key: 'leave_balance_deduction_flow' },
-                        1198: { name: 'Work From Home Request Workflow', key: 'wfh_request_wf' },
-                        1196: { name: 'Leave Cancellation Workflow', key: 'leave_cancellation_wf' }
-                      }
+        return enriched
+      } catch (_enrichErr) { }
+      return instances
+    }
 
-                      return instances.map(inst => {
-                        const vInfo = versionMap[inst.bpmn_definition_id]
-                        const resolvedName = (inst.workflow_name && !inst.workflow_name.startsWith('Workflow #'))
-                          ? inst.workflow_name
-                          : (vInfo?.name || bindingMap[inst.bpmn_definition_id] || wfMap[inst.bpmn_definition_id] || `Workflow #${inst.bpmn_definition_id}`)
-                        const resolvedKey = inst.workflow_key || vInfo?.key || ''
-                        return {
-                          ...inst,
-                          workflow_name: resolvedName,
-                          workflow_key: resolvedKey
-                        }
-                      })
-                    } catch (_enrichErr) { }
-                    return instances
-                  }
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.INSTANCES)
+      if (stored) return JSON.parse(stored)
+    } catch (e) {
+      console.error(e)
+    }
+    return []
+  },
 
-                  try {
-                    const stored = localStorage.getItem(STORAGE_KEYS.INSTANCES)
-                    if (stored) return JSON.parse(stored)
-                  } catch (e) {
-                    console.error(e)
-                  }
-                  return []
-                },
+  // 14. Get instance trace details (Fast parallel Settled)
+  getInstanceDetails: async (instanceId) => {
+    try {
+      const [varSettled, logSettled, histSettled] = await Promise.allSettled([
+        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { signal: AbortSignal.timeout(3000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { signal: AbortSignal.timeout(3000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { signal: AbortSignal.timeout(3000) })
+      ])
 
-                  // 14. Get instance trace details
-                  getInstanceDetails: async (instanceId) => {
-                    try {
-                      const [varRes, logRes, histRes] = await Promise.all([
-                        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { signal: AbortSignal.timeout(5000) }),
-                        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { signal: AbortSignal.timeout(5000) }),
-                        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { signal: AbortSignal.timeout(5000) })
-                      ])
-                      if (varRes.ok && logRes.ok && histRes.ok) {
-                        const [varData, logData, histData] = await Promise.all([varRes.json(), logRes.json(), histRes.json()])
-                        return {
-                          variables: varData.data || {},
-                          logs: logData.data || [],
-                          history: histData.data || []
-                        }
-                      }
-                    } catch (_e) { }
+      let variables = {}
+      let logs = []
+      let history = []
 
-                    const instances = await workflowStorage.getInstances()
-                    const inst = instances.find(i => i.instance_id === instanceId) || instances[0]
+      if (varSettled.status === 'fulfilled' && varSettled.value.ok) {
+        const varJson = await varSettled.value.json().catch(() => ({}))
+        variables = varJson.data || {}
+      }
+      if (logSettled.status === 'fulfilled' && logSettled.value.ok) {
+        const logJson = await logSettled.value.json().catch(() => ({}))
+        logs = logJson.data || []
+      }
+      if (histSettled.status === 'fulfilled' && histSettled.value.ok) {
+        const histJson = await histSettled.value.json().catch(() => ({}))
+        history = histJson.data || []
+      }
 
-                    return {
-                      variables: inst?.variables || { sample_key: 'sample_value', priority: 'HIGH' },
-                      logs: [
-                        { id: 1, activity_name: 'Start Trigger', activity_type: 'START', status: 'SUCCESS', created_on: inst?.started_at || '2026-08-19 11:20:00', duration: '12ms' },
-                        { id: 2, activity_name: 'Validation & Rule Check', activity_type: 'SERVICE', status: 'SUCCESS', created_on: inst?.started_at || '2026-08-19 11:20:01', duration: '45ms' },
-                        { id: 3, activity_name: inst?.current_task || 'User Task Review', activity_type: 'USER_TASK', status: inst?.status === 'Completed' ? 'COMPLETED' : 'WAITING', created_on: inst?.updated_at || '2026-08-19 11:22:00', duration: 'Pending' }
-                      ],
-                      history: [
-                        { id: 1, from_state: 'START', to_state: 'PENDING_FH', action: 'INITIATE', actor: 'System Auto-Trigger', created_on: inst?.started_at || '2026-08-19 11:20:00' },
-                        { id: 2, from_state: 'PENDING_FH', to_state: inst?.status === 'Completed' ? 'APPROVED' : 'IN_REVIEW', action: 'APPROVE', actor: 'Admin User', created_on: inst?.updated_at || '2026-08-19 11:22:15' }
-                      ]
-                    }
-                  },
+      return { variables, logs, history }
+    } catch (_e) { }
+
+    return {
+      variables: {},
+      logs: [],
+      history: []
+    }
+  },
 
                     // 15. Dynamic Client Metadata Discovery (With High-Performance In-Memory Cache & 5-min TTL)
                     getMetadataRoles: async (connectionId = null) => {
