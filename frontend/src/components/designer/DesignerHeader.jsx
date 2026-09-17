@@ -149,18 +149,7 @@ export default function DesignerHeader({
           <span>Test Flow</span>
         </button>
 
-        {/* Bind to ClientApp Button (Disabled) */}
-        {handleOpenBindingModal && (
-          <button
-            className="wf-btn wf-btn-outline"
-            disabled
-            style={{ borderColor: '#cbd5e1', color: '#94a3b8', background: '#f1f5f9', opacity: 0.6, cursor: 'not-allowed' }}
-            title="Bind to ClientApp (Disabled)"
-          >
-            <Link2 size={14} />
-            <span>Bind to ClientApp</span>
-          </button>
-        )}
+
 
         {/* Save Button */}
         <button
