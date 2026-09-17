@@ -156,25 +156,14 @@ function App() {
   }
 
 
-  // Ensure valid state on mount and sync
-  useEffect(() => {
-    if (currentView === 'designer' && !selectedWorkflowId) {
-      const list = JSON.parse(localStorage.getItem('workflow_studio_definitions') || '[]')
-      const defaultId = list[0]?.id || 1
-      setSelectedWorkflowId(defaultId)
-      localStorage.setItem('studio_active_wf_id', defaultId)
-      window.history.replaceState({}, '', `?view=designer&id=${defaultId}`)
-    }
-  }, [currentView, selectedWorkflowId])
-
   if (currentView === 'designer') {
-    const activeWfId = selectedWorkflowId || 1
     return (
       <div className="app-container-fullscreen">
         <Suspense fallback={<ViewLoader />}>
           <ErrorBoundary>
             <Designer
-              workflowId={activeWfId}
+              workflowId={selectedWorkflowId}
+              onSelectWorkflow={(id) => navigateTo('designer', id)}
               onClose={() => navigateTo('dashboard', null)}
               showToast={showToast}
             />
@@ -222,11 +211,7 @@ function App() {
             <li
               className={`nav-item ${currentView === 'designer' ? 'active' : ''}`}
               onClick={() => {
-                if (selectedWorkflowId) {
-                  navigateTo('designer', selectedWorkflowId)
-                } else {
-                  showToast('Select a workflow from the Dashboard first', 'info')
-                }
+                navigateTo('designer', selectedWorkflowId || null)
               }}
             >
               <GitBranch size={18} />

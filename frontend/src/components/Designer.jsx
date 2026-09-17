@@ -51,6 +51,7 @@ import PropertiesPanel from './PropertiesPanel'
 import DesignerHeader from './designer/DesignerHeader'
 import DesignerValidationModal from './designer/DesignerValidationModal'
 import DesignerTestRunnerModal from './designer/DesignerTestRunnerModal'
+import WorkflowSuggestionModal from './designer/WorkflowSuggestionModal'
 import ClientAppBindingModal from './ClientAppBindingModal'
 import { workflowStorage } from '../services/workflowStorage'
 import {
@@ -290,7 +291,7 @@ const GENERIC_APPROVAL_TEMPLATE_EDGES = [
   }
 ]
 
-function DesignerCanvas({ workflowId, onClose, showToast }) {
+function DesignerCanvas({ workflowId, onSelectWorkflow, onClose, showToast }) {
   const reactFlowWrapper = useRef(null)
   const fileInputRef = useRef(null)
   const { screenToFlowPosition, fitView, zoomIn, zoomOut, getViewport } = useReactFlow()
@@ -324,8 +325,62 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
   // Modals & Panels
   const [showTestModal, setShowTestModal] = useState(false)
   const [showBindingModal, setShowBindingModal] = useState(false)
+  const [showSuggestionModal, setShowSuggestionModal] = useState(!workflowId)
   const [validationErrors, setValidationErrors] = useState([])
   const [isValidationOpen, setIsValidationOpen] = useState(false)
+
+  useEffect(() => {
+    if (!workflowId) {
+      setShowSuggestionModal(true)
+    }
+  }, [workflowId])
+
+  const handleSelectExistingWorkflow = (id) => {
+    setShowSuggestionModal(false)
+    if (onSelectWorkflow) {
+      onSelectWorkflow(id)
+    }
+  }
+
+  const handleCreateBlankWorkflow = () => {
+    setShowSuggestionModal(false)
+    const initialNodes = [
+      {
+        id: `start-${Date.now()}`,
+        type: 'start',
+        position: { x: 250, y: 120 },
+        data: {
+          label: 'Start',
+          name: 'Start',
+          subType: 'start',
+          type: 'start',
+          description: 'Workflow activation entry point',
+          trigger: 'Workflow Activated'
+        }
+      }
+    ]
+    setNodes(initialNodes)
+    setEdges([])
+    setWorkflowName('new_workflow')
+    setVersionNumber(1)
+    setWorkflowStatus('Draft')
+    setWorkflowConnectionId(null)
+    pushHistoryState(initialNodes, [])
+    setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100)
+    showToast('Created new blank workflow', 'success')
+  }
+
+  const handleLoadApprovalTemplate = () => {
+    setShowSuggestionModal(false)
+    handleLoadDemoTemplate()
+  }
+
+  const handleTriggerImportFile = () => {
+    setShowSuggestionModal(false)
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
+    }
+  }
 
   // ==========================================
   // Generic Live Test Runner & DB Inspector State
@@ -1612,6 +1667,7 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
         handleValidateGraph={handleValidateWorkflow}
         handleOpenTestModal={() => setShowTestModal(true)}
         handleOpenBindingModal={() => setShowBindingModal(true)}
+        handleOpenWorkflowSelector={() => setShowSuggestionModal(true)}
         handleExportJSON={handleExportJSON}
         fileInputRef={fileInputRef}
         handleImportFile={handleImportJSON}
@@ -1780,6 +1836,17 @@ function DesignerCanvas({ workflowId, onClose, showToast }) {
           showToast={showToast}
         />
       )}
+
+      {/* Workflow Suggestion & Quick Start Modal */}
+      <WorkflowSuggestionModal
+        isOpen={showSuggestionModal}
+        onClose={() => setShowSuggestionModal(false)}
+        onSelectWorkflow={handleSelectExistingWorkflow}
+        onCreateBlank={handleCreateBlankWorkflow}
+        onLoadTemplate={handleLoadApprovalTemplate}
+        onTriggerImport={handleTriggerImportFile}
+        activeWorkflowId={workflowId}
+      />
     </div>
   )
 }

@@ -11,7 +11,8 @@ import {
   RotateCcw,
   GitBranch,
   Database,
-  Link2
+  Link2,
+  FolderOpen
 } from 'lucide-react'
 import { workflowStorage } from '../../services/workflowStorage'
 
@@ -28,6 +29,7 @@ export default function DesignerHeader({
   handleValidateGraph,
   handleOpenTestModal,
   handleOpenBindingModal,
+  handleOpenWorkflowSelector,
   handleExportJSON,
   fileInputRef,
   handleImportFile,
@@ -119,6 +121,19 @@ export default function DesignerHeader({
 
       {/* 2. RIGHT SECTION: ACTION TOOLBAR */}
       <div className="wf-header-actions">
+        {/* Open / Switch Workflow */}
+        {handleOpenWorkflowSelector && (
+          <button
+            className="wf-btn wf-btn-outline"
+            onClick={handleOpenWorkflowSelector}
+            title="Open or switch workflow"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <FolderOpen size={14} color="#0284c7" />
+            <span>Open Workflow</span>
+          </button>
+        )}
+
         {/* Auto Layout */}
         <button
           className="wf-btn wf-btn-outline"

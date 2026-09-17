@@ -320,7 +320,6 @@ function Dashboard({ onOpenDesigner, showToast }) {
                 <th>Database</th>
                 <th>Version</th>
                 <th>Status</th>
-                <th>ClientApp</th>
                 <th>Tags</th>
                 <th>Last Updated</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -355,50 +354,6 @@ function Dashboard({ onOpenDesigner, showToast }) {
                     <span className={`status-badge ${wf.status.toLowerCase()}`}>
                       {wf.status}
                     </span>
-                  </td>
-                  <td>
-                    {(() => {
-                      const wfId = Number(wf.id || wf.workflow_id)
-                      const wfSpec = String(wf.spec_id || '').toLowerCase()
-                      let boundKey = null
-                      for (const [key, b] of Object.entries(activeBindings || {})) {
-                        if (
-                          Number(b.workflow_id) === wfId ||
-                          String(b.workflow_id) === wfSpec ||
-                          key.toLowerCase() === wfSpec
-                        ) {
-                          boundKey = key
-                          break
-                        }
-                      }
-                      if (boundKey) {
-                        return (
-                          <span 
-                            style={{ 
-                              fontSize: '11px', 
-                              color: '#4ade80', 
-                              background: 'rgba(34, 197, 94, 0.1)', 
-                              padding: '2px 8px', 
-                              borderRadius: '999px', 
-                              border: '1px solid rgba(34, 197, 94, 0.25)', 
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
-                              gap: '4px',
-                              fontWeight: '600'
-                            }}
-                            title={`Bound to ClientApp module: ${boundKey}`}
-                          >
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }} />
-                            <span>{boundKey}</span>
-                          </span>
-                        )
-                      }
-                      return (
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>
-                          —
-                        </span>
-                      )
-                    })()}
                   </td>
                   <td>{(() => {
                     const tagsList = Array.isArray(wf.tags) ? wf.tags : (typeof wf.tags === 'string' ? wf.tags.split(',').map(t => t.trim()).filter(Boolean) : [])
