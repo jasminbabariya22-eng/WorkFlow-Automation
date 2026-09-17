@@ -159,7 +159,7 @@ export default function PropertiesPanel({
         </div>
         <div className="wf-prop-subtitle">Transition Connection</div>
 
-        <div className="wf-properties-scroll">
+        <div className="wf-properties-scroll" tabIndex={0} role="region" aria-label="Transition edge properties">
           <div className="wf-field-group">
             <label htmlFor="edge-action-label" className="wf-field-label">Action / Outcome Label</label>
             <input
@@ -393,7 +393,7 @@ export default function PropertiesPanel({
         {selectedNode.type?.toUpperCase()} NODE • {selectedNode.id}
       </div>
 
-      <div className="wf-properties-scroll">
+      <div className="wf-properties-scroll" tabIndex={0} role="region" aria-label="Node properties configuration">
         {/* COMMON TASK DETAILS */}
         <TaskDetailsSection
           selectedNode={selectedNode}

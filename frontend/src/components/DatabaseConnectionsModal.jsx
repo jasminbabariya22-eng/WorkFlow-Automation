@@ -261,7 +261,13 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
         </div>
 
         {/* Modal Body */}
-        <div className="modal-body" style={{ maxHeight: '68vh', overflowY: 'auto', padding: '20px' }}>
+        <div 
+          className="modal-body" 
+          tabIndex={0} 
+          role="region" 
+          aria-label="Database connection profiles content" 
+          style={{ maxHeight: '68vh', overflowY: 'auto', padding: '20px' }}
+        >
           {/* ======================================================== */}
           {/* 1. LIST VIEW */}
           {/* ======================================================== */}

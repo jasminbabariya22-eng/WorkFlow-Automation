@@ -316,7 +316,12 @@ function Monitoring({ showToast }) {
                 No instances found in database.
               </div>
             ) : (
-              <div style={{ overflowY: 'auto', flexGrow: 1 }}>
+              <div 
+                tabIndex={0} 
+                role="region" 
+                aria-label="Workflow active instances list" 
+                style={{ overflowY: 'auto', flexGrow: 1 }}
+              >
                 {instances.map(inst => (
                   <div 
                     key={inst.instance_id}
@@ -413,7 +418,13 @@ function Monitoring({ showToast }) {
                 </div>
 
                 {/* Details Content */}
-                <div className="detail-body" style={{ overflowY: 'auto' }}>
+                <div 
+                  className="detail-body" 
+                  tabIndex={0} 
+                  role="region" 
+                  aria-label="Instance execution details" 
+                  style={{ overflowY: 'auto' }}
+                >
                   {detailsLoading ? (
                     <div style={{ display: 'flex', justifyContent: 'center', padding: '60px' }}>
                       <Loader className="spinner" size={24} color="var(--color-accent-secondary)" />
@@ -724,16 +735,21 @@ function Monitoring({ showToast }) {
           </div>
 
           {/* Telemetry Stream Console */}
-          <div style={{
-            flexGrow: 1,
-            background: '#090d16',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '10px',
-            overflowY: 'auto',
-            padding: '12px',
-            fontFamily: 'monospace',
-            fontSize: '12px'
-          }}>
+          <div 
+            tabIndex={0} 
+            role="region" 
+            aria-label="Telemetry event stream console" 
+            style={{
+              flexGrow: 1,
+              background: '#090d16',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '10px',
+              overflowY: 'auto',
+              padding: '12px',
+              fontFamily: 'monospace',
+              fontSize: '12px'
+            }}
+          >
             {telemetryLogs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
                 <Terminal size={32} style={{ marginBottom: '12px' }} />

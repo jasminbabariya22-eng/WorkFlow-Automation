@@ -219,7 +219,12 @@ function GenericSearchableSelect({
           </div>
 
           {/* Options List */}
-          <div style={{ maxHeight: '210px', overflowY: 'auto', padding: '6px' }}>
+          <div 
+            tabIndex={0} 
+            role="region" 
+            aria-label="Searchable options list" 
+            style={{ maxHeight: '210px', overflowY: 'auto', padding: '6px' }}
+          >
             {filtered.length === 0 ? (
               <div style={{ padding: '20px 10px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
                 {emptyMessage}
@@ -645,7 +650,13 @@ export default function ClientAppBindingModal({
             <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '500' }}>Inspecting database catalog & active bindings...</span>
           </div>
         ) : (
-          <form onSubmit={handleSave} style={{ marginTop: '16px', maxHeight: '78vh', overflowY: 'auto', paddingRight: '4px' }}>
+          <form 
+            onSubmit={handleSave} 
+            tabIndex={0} 
+            role="region" 
+            aria-label="Workflow client application binding configuration" 
+            style={{ marginTop: '16px', maxHeight: '78vh', overflowY: 'auto', paddingRight: '4px' }}
+          >
             
             {/* 1. VISUAL INTERACTIVE FLOW ARCHITECTURE */}
             <div style={{
