@@ -409,11 +409,11 @@ function Dashboard({ onOpenDesigner, showToast }) {
                     <div style={{ display: 'flex', justifyItems: 'flex-end', justifyContent: 'flex-end', gap: '8px' }}>
                       <button
                         className="btn btn-secondary btn-sm"
-                        style={{ borderColor: 'rgba(99, 102, 241, 0.4)', color: '#818cf8', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                        title="Connect / Bind to ClientApp"
+                        disabled
+                        style={{ borderColor: '#e2e8f0', color: '#94a3b8', background: '#f1f5f9', opacity: 0.6, cursor: 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        title="Bind to ClientApp (Disabled)"
                         onClick={(e) => {
                           e.stopPropagation()
-                          setBindingModalWorkflow(wf)
                         }}
                       >
                         <Link2 size={12} />
