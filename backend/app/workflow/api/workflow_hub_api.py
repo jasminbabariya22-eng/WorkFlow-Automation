@@ -55,6 +55,8 @@ class UniversalWorkflowGatewayRequest(BaseModel):
     record_id: Optional[int] = Field(None, description="Target record primary key ID (required for ACTION and HISTORY)")
     action: Optional[str] = Field("APPROVE", description="Action code to execute: APPROVE, REJECT, etc.")
     data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Payload data for SUBMIT")
+    parameter: Optional[Dict[str, Any]] = Field(None, description="Custom parameters dictionary (e.g. {'Name': 'Ram', 'Address': 'Delhi', 'pocket_no': '22'})")
+    parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     user_email: Optional[str] = None
@@ -68,6 +70,9 @@ class UniversalWorkflowGatewayRequest(BaseModel):
 
 class HubSubmitRequest(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict, description="Entity fields and initial workflow variables")
+    parameter: Optional[Dict[str, Any]] = Field(None, description="Custom parameters dictionary (e.g. {'Name': 'Ram', 'Address': 'Delhi'})")
+    parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
+    variables: Optional[Dict[str, Any]] = None
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     user_email: Optional[str] = None
@@ -80,6 +85,8 @@ class HubActionRequest(BaseModel):
     user_id: Optional[int] = None
     role: Optional[str] = None
     remarks: Optional[str] = ""
+    parameter: Optional[Dict[str, Any]] = None
+    parameters: Optional[Dict[str, Any]] = None
     variables: Optional[Dict[str, Any]] = None
 
 
@@ -336,8 +343,12 @@ def universal_single_workflow_gateway(
         )
 
     # 7. SUBMIT (DEFAULT)
+    params = payload.parameter or payload.parameters or payload.variables or {}
     submit_req = HubSubmitRequest(
-        data=payload.data or {},
+        data={**params, **(payload.data or {})},
+        parameter=payload.parameter or params,
+        parameters=payload.parameters or params,
+        variables={**params, **(payload.variables or {})},
         user_id=payload.user_id,
         user_name=payload.user_name,
         user_email=payload.user_email
@@ -466,7 +477,8 @@ def submit_workflow_hub_record(
     workflow_id = meta["workflow_id"]
     valid_cols = set(meta["columns"])
 
-    values = dict(payload.data or {})
+    raw_params = payload.parameter or payload.parameters or payload.variables or {}
+    values = {**raw_params, **dict(payload.data or {})}
 
     auth_user_id = current_user.get("id") or current_user.get("user_id") if isinstance(current_user, dict) else None
     user_id = payload.user_id or values.get("employee_id") or values.get("user_id") or auth_user_id or 1
@@ -518,7 +530,11 @@ def submit_workflow_hub_record(
     try:
         parsed_user_id = int(user_id) if str(user_id).isdigit() else user_id
         wf_variables = {
+            **raw_params,
             **values,
+            "parameter": raw_params,
+            "parameters": raw_params,
+            "variables": {**raw_params, **values},
             "entity_id": int(new_record_id),
             "record_id": int(new_record_id),
             "user_id": parsed_user_id,

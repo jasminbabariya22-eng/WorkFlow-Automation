@@ -1252,88 +1252,116 @@ class ClientDatabaseAdapter:
 
     @staticmethod
     def _resolve_template_value(val: Any, context_vars: Dict[str, Any]) -> Any:
-        """Resolves template expressions like {{id}}, {{status}}, {{entity.id}} or {{variables.score}} from runtime context."""
+        """Resolves template expressions like {Name}, {{id}}, {Incident_Id}, {{status}} from runtime context, parameters, and variables."""
         if not isinstance(val, str):
             return val
         if not context_vars:
             return val
         
+        def _search_dict(d: Any, key: str) -> Any:
+            if not isinstance(d, dict):
+                return None
+            if key in d and d[key] is not None:
+                return d[key]
+            matched_k = next((ck for ck in d.keys() if str(ck).lower() == key.lower()), None)
+            if matched_k is not None and d[matched_k] is not None:
+                return d[matched_k]
+            return None
+
         def _get_val_from_path(kpath: List[str]) -> Any:
             # Fast alias normalization for common workflow variables
             if len(kpath) == 1:
                 k = kpath[0].lower()
                 if k in ("id", "record_id", "entity_id", "pk"):
                     for candidate in ("id", "entity_id", "record_id", "primary_key_val", "pk_val"):
-                        if candidate in context_vars and context_vars[candidate] is not None:
-                            return context_vars[candidate]
+                        cand_val = _search_dict(context_vars, candidate)
+                        if cand_val is not None:
+                            return cand_val
                 if k in ("status", "status_value", "status_code", "status_id"):
                     for candidate in ("status", "status_value", "status_code", "status_id"):
-                        if candidate in context_vars and context_vars[candidate] is not None:
-                            return context_vars[candidate]
+                        cand_val = _search_dict(context_vars, candidate)
+                        if cand_val is not None:
+                            return cand_val
 
-            # 1. Try exact path in context_vars (with case-insensitive fallback)
+            # 1. Try exact/case-insensitive path directly in context_vars
             cur = context_vars
             found = True
             for k in kpath:
-                if isinstance(cur, dict) and k in cur:
-                    cur = cur[k]
-                elif isinstance(cur, dict):
-                    matched_k = next((ck for ck in cur.keys() if str(ck).lower() == k.lower()), None)
-                    if matched_k is not None:
-                        cur = cur[matched_k]
-                    else:
-                        found = False
-                        break
+                res = _search_dict(cur, k)
+                if res is not None:
+                    cur = res
                 else:
                     found = False
                     break
             if found and cur is not None:
                 return cur
 
-            # 2. If path starts with "variables", "workflow", "entity", or "record", try stripped sub-path
-            if len(kpath) > 1 and kpath[0].lower() in ("variables", "workflow", "entity", "record"):
-                sub_path = kpath[1:]
-                cur = context_vars
-                found = True
-                for k in sub_path:
-                    if isinstance(cur, dict) and k in cur:
-                        cur = cur[k]
-                    elif isinstance(cur, dict):
-                        matched_k = next((ck for ck in cur.keys() if str(ck).lower() == k.lower()), None)
-                        if matched_k is not None:
-                            cur = cur[matched_k]
+            # 2. Try nested search inside parameter, parameters, variables, data, record, or entity dictionaries
+            for sub_container in ("parameter", "parameters", "variables", "data", "record", "entity", "payload", "input"):
+                sub_dict = _search_dict(context_vars, sub_container)
+                if isinstance(sub_dict, dict):
+                    cur = sub_dict
+                    found = True
+                    for k in kpath:
+                        res = _search_dict(cur, k)
+                        if res is not None:
+                            cur = res
                         else:
                             found = False
                             break
-                    else:
-                        found = False
-                        break
-                if found and cur is not None:
-                    return cur
+                    if found and cur is not None:
+                        return cur
 
-            # 3. If kpath is single key and exists in context_vars["variables"]
-            if len(kpath) == 1 and isinstance(context_vars.get("variables"), dict):
-                v_dict = context_vars["variables"]
-                if kpath[0] in v_dict and v_dict[kpath[0]] is not None:
-                    return v_dict[kpath[0]]
-                matched_k = next((ck for ck in v_dict.keys() if str(ck).lower() == kpath[0].lower()), None)
-                if matched_k is not None and v_dict[matched_k] is not None:
-                    return v_dict[matched_k]
+            # 3. If path starts with container name e.g. variables.Name or parameter.Name
+            if len(kpath) > 1 and kpath[0].lower() in ("variables", "parameter", "parameters", "workflow", "entity", "record", "data"):
+                sub_path = kpath[1:]
+                sub_dict = _search_dict(context_vars, kpath[0])
+                if isinstance(sub_dict, dict):
+                    cur = sub_dict
+                    found = True
+                    for k in sub_path:
+                        res = _search_dict(cur, k)
+                        if res is not None:
+                            cur = res
+                        else:
+                            found = False
+                            break
+                    if found and cur is not None:
+                        return cur
 
             return None
 
         import re
-        match = re.match(r"^\s*\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}\s*$", val)
-        if match:
-            kpath = match.group(1).split(".")
-            return _get_val_from_path(kpath)
 
-        def _repl(m):
+        # Check full-match single brace {token} or double brace {{token}}
+        full_double = re.match(r"^\s*\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}\s*$", val)
+        if full_double:
+            kpath = full_double.group(1).split(".")
+            res = _get_val_from_path(kpath)
+            return res if res is not None else val
+
+        full_single = re.match(r"^\s*\{\s*([a-zA-Z0-9_.]+)\s*\}\s*$", val)
+        if full_single:
+            kpath = full_single.group(1).split(".")
+            res = _get_val_from_path(kpath)
+            return res if res is not None else val
+
+        def _repl_double(m):
             kpath = m.group(1).split(".")
             res = _get_val_from_path(kpath)
-            return str(res) if res is not None else ""
+            return str(res) if res is not None else m.group(0)
 
-        return re.sub(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}", _repl, val)
+        def _repl_single(m):
+            kpath = m.group(1).split(".")
+            res = _get_val_from_path(kpath)
+            return str(res) if res is not None else m.group(0)
+
+        # 1. Substitute double braces {{key}}
+        res_str = re.sub(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}", _repl_double, val)
+        # 2. Substitute single braces {key} (e.g. {Name}, {Address}, {Incident_Id}, {pocket_no})
+        res_str = re.sub(r"\{([a-zA-Z0-9_.]+)\}", _repl_single, res_str)
+
+        return res_str
 
     @staticmethod
     def get_entities(schema: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -13,21 +13,32 @@ export default function EmailNodeSection({
   const [showCc, setShowCc] = useState(() => Boolean(data.cc || data.email_cc))
   const [showBcc, setShowBcc] = useState(() => Boolean(data.bcc || data.email_bcc))
 
-  // Dynamically extract columns from the introspected database table
+  const [customVarInput, setCustomVarInput] = useState('')
+
+  // Dynamically extract columns from the introspected database table with single-brace {field} syntax
   const tableVars = (availableFields || [])
     .filter(f => !['is_deleted'].includes(f.name))
-    .map(f => ({ label: f.name, token: `{{${f.name}}}` }))
+    .map(f => ({ label: f.name, token: `{${f.name}}` }))
 
-  // Standard generic context variables if table fields are empty
+  // Standard API request parameters and context variables (matching Image 1 spec)
   const defaultVars = [
-    { label: 'id', token: '{{id}}' },
-    { label: 'status', token: '{{status}}' },
-    { label: 'email', token: '{{email}}' },
-    { label: 'name', token: '{{name}}' },
-    { label: 'created_at', token: '{{created_at}}' }
+    { label: 'Name', token: '{Name}' },
+    { label: 'Address', token: '{Address}' },
+    { label: 'Incident_Id', token: '{Incident_Id}' },
+    { label: 'pocket_no', token: '{pocket_no}' },
+    { label: 'id', token: '{id}' },
+    { label: 'status', token: '{status}' },
+    { label: 'email', token: '{email}' }
   ]
 
-  const activeVars = tableVars.length > 0 ? tableVars : defaultVars
+  // Combine table fields with API parameter tokens, avoiding duplicates
+  const existingKeys = new Set(tableVars.map(v => v.label.toLowerCase()))
+  const mergedVars = [
+    ...defaultVars.filter(v => !existingKeys.has(v.label.toLowerCase())),
+    ...tableVars
+  ]
+
+  const activeVars = mergedVars
 
   // Strictly filter roles and users from the connected database (connectDB)
   const dbRoles = Array.from(new Set((backendRoles || []).map(r => r.name || r.id).filter(Boolean)))
@@ -57,7 +68,7 @@ export default function EmailNodeSection({
     }
   }
 
-  // Simulated render for live preview
+  // Simulated render for live preview (supports both {var} and {{var}})
   const generatePreview = () => {
     const rawTo = data.to || 'recipient@example.com'
     const rawCc = data.cc || ''
@@ -66,34 +77,47 @@ export default function EmailNodeSection({
     const rawBody = data.body || 'Your workflow request has been processed.'
 
     const mockData = {
-      '{{id}}': '1',
-      '{{entity_id}}': '1',
-      '{{status}}': '2',
-      '{{email}}': dbUsers.length > 0 ? dbUsers[0].email : 'jasminbabariya22@gmail.com',
-      '{{name}}': dbUsers.length > 0 ? dbUsers[0].name : 'Jasmin Babariya',
-      '{{created_at}}': new Date().toLocaleDateString()
+      'name': dbUsers.length > 0 ? dbUsers[0].name : 'Ram',
+      'address': 'Delhi',
+      'add': 'Delhi',
+      'pocket_no': '22',
+      'pocketno': '22',
+      'incident_id': 'INC-1001',
+      'incidentid': 'INC-1001',
+      'incident': 'INC-1001',
+      'id': '1',
+      'entity_id': '1',
+      'record_id': '1',
+      'status': 'APPROVED',
+      'email': dbUsers.length > 0 ? dbUsers[0].email : 'jasminbabariya22@gmail.com',
+      'created_at': new Date().toLocaleDateString()
     }
 
     // Add table vars with sample values
     activeVars.forEach(v => {
-      if (!mockData[v.token]) {
-        mockData[v.token] = v.label.includes('id') ? '1' : v.label.includes('status') ? '2' : `[${v.label}]`
+      const rawK = v.label.toLowerCase()
+      if (!mockData[rawK]) {
+        mockData[rawK] = rawK.includes('id') ? '1' : rawK.includes('status') ? 'APPROVED' : `[${v.label}]`
       }
     })
 
-    let resolvedTo = rawTo
-    let resolvedCc = rawCc
-    let resolvedBcc = rawBcc
-    let resolvedSubject = rawSubject
-    let resolvedBody = rawBody
+    const replaceAllVars = (text) => {
+      if (!text) return ''
+      let output = text
+      Object.entries(mockData).forEach(([k, val]) => {
+        // Replace {{k}} and {k} case-insensitively
+        const reDouble = new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, 'gi')
+        const reSingle = new RegExp(`\\{\\s*${k}\\s*\\}`, 'gi')
+        output = output.replace(reDouble, String(val)).replace(reSingle, String(val))
+      })
+      return output
+    }
 
-    Object.entries(mockData).forEach(([token, val]) => {
-      resolvedTo = resolvedTo.split(token).join(val)
-      resolvedCc = resolvedCc.split(token).join(val)
-      resolvedBcc = resolvedBcc.split(token).join(val)
-      resolvedSubject = resolvedSubject.split(token).join(val)
-      resolvedBody = resolvedBody.split(token).join(val)
-    })
+    let resolvedTo = replaceAllVars(rawTo)
+    let resolvedCc = replaceAllVars(rawCc)
+    let resolvedBcc = replaceAllVars(rawBcc)
+    let resolvedSubject = replaceAllVars(rawSubject)
+    let resolvedBody = replaceAllVars(rawBody)
 
     // Resolve roles into assigned user emails for preview
     const resolveRolePreview = (recipients) => {
@@ -479,7 +503,7 @@ export default function EmailNodeSection({
               <label className="wf-field-label" htmlFor="email-subject-input" style={{ margin: 0 }}>Subject <span style={{ color: '#f43f5e' }}>*</span></label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '10px', color: '#94a3b8' }}>Insert:</span>
-                {activeVars.slice(0, 3).map(v => (
+                {activeVars.slice(0, 4).map(v => (
                   <button
                     key={`subj-var-${v.token}`}
                     type="button"
@@ -501,7 +525,7 @@ export default function EmailNodeSection({
               className="wf-input text-xs"
               value={data.subject || ''}
               onChange={(e) => handleFieldChange('subject', e.target.value)}
-              placeholder="e.g. Record #{{id}} status updated to {{status}}"
+              placeholder="e.g. New Incident created for {Name} - {Incident_Id}"
             />
           </div>
 
@@ -509,7 +533,7 @@ export default function EmailNodeSection({
           <div className="wf-field-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label className="wf-field-label" htmlFor="email-body-input" style={{ margin: 0 }}>Message Body</label>
-              <span style={{ fontSize: '10px', color: '#64748b' }}>Supports plain text & variables</span>
+              <span style={{ fontSize: '10px', color: '#64748b' }}>Supports plain text & variables ({`{Name}`}, {`{Incident_Id}`})</span>
             </div>
             <textarea
               id="email-body-input"
@@ -519,16 +543,44 @@ export default function EmailNodeSection({
               rows={6}
               value={data.body || ''}
               onChange={(e) => handleFieldChange('body', e.target.value)}
-              placeholder="Type your email message here... Use {{id}}, {{status}} to insert dynamic values."
+              placeholder="e.g. Hello {Name}, your incident has been created with ID = {Incident_Id} at {Address}. Status: {status}"
               style={{ lineHeight: '1.5' }}
             />
           </div>
 
-          {/* Generic Available Variables Bar */}
+          {/* Generic Available Variables & Parameters Bar */}
           <div className="wf-var-palette">
-            <div className="wf-var-palette-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Insert Variable into Message Body:</span>
-              <span style={{ fontSize: '10px', color: '#64748b' }}>Click to insert at end of body</span>
+            <div className="wf-var-palette-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+              <span>Insert Variable / Parameter into Body:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <input
+                  type="text"
+                  placeholder="Custom param (e.g. Name)"
+                  value={customVarInput}
+                  onChange={(e) => setCustomVarInput(e.target.value)}
+                  style={{ fontSize: '10px', padding: '2px 6px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '130px', background: 'var(--wf-surface-card, #fff)', color: 'inherit' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customVarInput.trim()) {
+                      e.preventDefault()
+                      insertToken('body', `{${customVarInput.trim()}}`)
+                      setCustomVarInput('')
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="wf-token-chip"
+                  onClick={() => {
+                    if (customVarInput.trim()) {
+                      insertToken('body', `{${customVarInput.trim()}}`)
+                      setCustomVarInput('')
+                    }
+                  }}
+                  style={{ fontSize: '10px', padding: '2px 6px', height: '22px' }}
+                >
+                  +Insert
+                </button>
+              </div>
             </div>
             <div className="wf-var-chips-wrap">
               {activeVars.map(v => (
