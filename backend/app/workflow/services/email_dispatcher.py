@@ -22,9 +22,15 @@ class EmailDispatcher:
     using SMTP credentials configured in client database tables.
     """
 
+    _smtp_config_cache: Dict[str, Any] = {}
+
     @classmethod
     def get_smtp_config(cls, conn_id: Optional[int] = None, email_server_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Retrieves active SMTP server credentials from client database tables dynamically."""
+        """Retrieves active SMTP server credentials from client database tables dynamically with in-memory caching."""
+        cache_key = f"{conn_id}:{email_server_id}"
+        if cache_key in cls._smtp_config_cache:
+            return cls._smtp_config_cache[cache_key]
+
         search_conns = [conn_id] if conn_id is not None else []
         try:
             from app.workflow.database import WorkflowSessionLocal
@@ -85,7 +91,9 @@ class EmailDispatcher:
                                 with eng.connect() as conn:
                                     row = conn.execute(text(sql), binds).first()
                                     if row:
-                                        return dict(row._mapping)
+                                        res_dict = dict(row._mapping)
+                                        cls._smtp_config_cache[cache_key] = res_dict
+                                        return res_dict
                             except Exception:
                                 pass
             except Exception:

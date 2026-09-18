@@ -29,7 +29,7 @@ class StudioExecutionAdapter:
     """
 
     @classmethod
-    def _sync_bpmn_definition_to_version(cls, db: Session, bpmn_def) -> Optional[WorkflowVersion]:
+    def _sync_bpmn_definition_to_version(cls, db: Session, bpmn_def, force_sync: bool = False) -> Optional[WorkflowVersion]:
         """
         Synchronizes a BPMNDefinition record (Studio JSON canvas) into GenericWorkflow + WorkflowVersion graph
         so runtime execution uses the actual configured node graph.
@@ -37,16 +37,34 @@ class StudioExecutionAdapter:
         if not bpmn_def or not bpmn_def.json_content:
             return None
         try:
+            wf_key = bpmn_def.spec_id or f"wf_{bpmn_def.id}"
+            gw = db.query(GenericWorkflow).filter(
+                (GenericWorkflow.workflow_key == wf_key) | (GenericWorkflow.name == bpmn_def.name)
+            ).order_by(GenericWorkflow.workflow_id.desc()).first()
+
+            import hashlib
+            content_hash = hashlib.md5(str(bpmn_def.json_content).encode("utf-8")).hexdigest()
+
+            if gw:
+                ver = db.query(WorkflowVersion).filter(
+                    WorkflowVersion.workflow_id == gw.workflow_id
+                ).order_by(WorkflowVersion.version_number.desc()).first()
+                if ver and not force_sync:
+                    meta_dict = {}
+                    try:
+                        meta_dict = json.loads(ver.definition_metadata) if ver.definition_metadata else {}
+                    except Exception:
+                        pass
+                    if meta_dict.get("content_hash") == content_hash:
+                        node_cnt = db.query(WorkflowNode).filter(WorkflowNode.workflow_version_id == ver.workflow_version_id).count()
+                        if node_cnt > 0:
+                            return ver
+
             raw_data = json.loads(bpmn_def.json_content) if isinstance(bpmn_def.json_content, str) else bpmn_def.json_content
             nodes_data = raw_data.get("nodes", [])
             edges_data = raw_data.get("edges", [])
             if not nodes_data:
                 return None
-
-            wf_key = bpmn_def.spec_id or f"wf_{bpmn_def.id}"
-            gw = db.query(GenericWorkflow).filter(
-                (GenericWorkflow.workflow_key == wf_key) | (GenericWorkflow.name == bpmn_def.name)
-            ).order_by(GenericWorkflow.workflow_id.desc()).first()
 
             if not gw:
                 gw = GenericWorkflow(
@@ -72,12 +90,14 @@ class StudioExecutionAdapter:
                 WorkflowVersion.workflow_id == gw.workflow_id
             ).order_by(WorkflowVersion.version_number.desc()).first()
 
+            meta_data = {"source_bpmn_id": bpmn_def.id, "content_hash": content_hash}
+
             if not ver:
                 ver = WorkflowVersion(
                     workflow_id=gw.workflow_id,
                     version_number=bpmn_def.version or 1,
                     status="PUBLISHED",
-                    definition_metadata=json.dumps({"source_bpmn_id": bpmn_def.id}),
+                    definition_metadata=json.dumps(meta_data),
                     created_by=bpmn_def.created_by or 1,
                     created_at=datetime.now(),
                     published_at=datetime.now()
@@ -86,16 +106,17 @@ class StudioExecutionAdapter:
                 db.flush()
             else:
                 ver.status = "PUBLISHED"
+                ver.definition_metadata = json.dumps(meta_data)
                 ver.published_at = datetime.now()
 
-            # Clean existing nodes and connections for this version
-            db.query(WorkflowConnection).filter(WorkflowConnection.workflow_version_id == ver.workflow_version_id).delete()
-            db.query(WorkflowNode).filter(WorkflowNode.workflow_version_id == ver.workflow_version_id).delete()
-            db.flush()
-
+            # Upsert nodes and connections instead of delete to avoid foreign key locks
+            existing_nodes = {n.node_key: n for n in db.query(WorkflowNode).filter(WorkflowNode.workflow_version_id == ver.workflow_version_id).all()}
+            active_node_keys = set()
             key_to_id = {}
+
             for n in nodes_data:
                 nid = str(n.get("id"))
+                active_node_keys.add(nid)
                 raw_type = str(n.get("type") or "ACTION").strip().upper().replace("-", "_")
                 if raw_type in ("USERTASK", "USER_TASK", "HUMANTASK", "HUMAN_TASK", "APPROVAL", "FORM", "USERACTIVITY", "TASK"):
                     ntype = "APPROVAL"
@@ -115,21 +136,40 @@ class StudioExecutionAdapter:
                 ndata = n.get("data", {})
                 nname = ndata.get("label") or ndata.get("name") or nid
                 pos = n.get("position", {})
-                db_n = WorkflowNode(
-                    workflow_version_id=ver.workflow_version_id,
-                    node_key=nid,
-                    node_type=ntype,
-                    name=nname,
-                    position_x=float(pos.get("x", 0.0)),
-                    position_y=float(pos.get("y", 0.0)),
-                    configuration=json.dumps(ndata),
-                    is_active=True,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                )
-                db.add(db_n)
+
+                if nid in existing_nodes:
+                    db_n = existing_nodes[nid]
+                    db_n.node_type = ntype
+                    db_n.name = nname
+                    db_n.position_x = float(pos.get("x", 0.0))
+                    db_n.position_y = float(pos.get("y", 0.0))
+                    db_n.configuration = json.dumps(ndata)
+                    db_n.is_active = True
+                    db_n.updated_at = datetime.now()
+                else:
+                    db_n = WorkflowNode(
+                        workflow_version_id=ver.workflow_version_id,
+                        node_key=nid,
+                        node_type=ntype,
+                        name=nname,
+                        position_x=float(pos.get("x", 0.0)),
+                        position_y=float(pos.get("y", 0.0)),
+                        configuration=json.dumps(ndata),
+                        is_active=True,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    db.add(db_n)
                 db.flush()
                 key_to_id[nid] = db_n.node_id
+
+            # Deactivate nodes not in active canvas
+            for old_key, old_node in existing_nodes.items():
+                if old_key not in active_node_keys:
+                    old_node.is_active = False
+
+            # Update connections
+            db.query(WorkflowConnection).filter(WorkflowConnection.workflow_version_id == ver.workflow_version_id).delete(synchronize_session=False)
 
             for e in edges_data:
                 src_key = str(e.get("source"))
@@ -153,7 +193,6 @@ class StudioExecutionAdapter:
 
             db.flush()
             db.commit()
-            db.refresh(ver)
             return ver
         except Exception as e:
             logger.error(f"StudioEngine: Failed to sync BPMNDefinition {bpmn_def.id} to WorkflowVersion: {e}")

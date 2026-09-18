@@ -809,15 +809,25 @@ class ClientDatabaseAdapter:
             logger.warning(f"ClientDatabaseAdapter: Error introspecting tables in schema '{target_schema}': {e}")
             raise
 
+    _columns_cache: Dict[str, Any] = {}
+    _tables_cache: Dict[str, Any] = {}
+
     @staticmethod
     def get_table_columns(table_name: str, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Dict[str, Any]:
-        """Introspects columns, data types, primary keys, and foreign keys for a Client DB table."""
+        """Introspects columns, data types, primary keys, and foreign keys for a Client DB table with caching."""
         target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
         clean_table = table_name
         if "." in table_name:
             parts = table_name.split(".", 1)
             target_schema = parts[0]
             clean_table = parts[1]
+
+        cache_key = f"{connection_id}:{target_schema}:{clean_table.lower()}"
+        if cache_key in ClientDatabaseAdapter._columns_cache:
+            cached_val = ClientDatabaseAdapter._columns_cache[cache_key]
+            if cached_val is None:
+                raise ValueError(f"Table '{table_name}' does not exist in Client Database.")
+            return cached_val
 
         try:
             target_eng = DynamicEnginePool.get_engine(connection_id)
@@ -826,14 +836,16 @@ class ClientDatabaseAdapter:
             all_tables = inspector.get_table_names(schema=target_schema)
             schema_to_use = target_schema
             if clean_table not in all_tables:
-                all_tables_default = inspector.get_table_names()
+                all_tables_default = inspector.get_table_names() if target_schema else []
                 if clean_table in all_tables_default:
                     schema_to_use = None
                 else:
+                    ClientDatabaseAdapter._columns_cache[cache_key] = None
                     raise ValueError(f"Table '{table_name}' does not exist in Client Database.")
 
             cols = inspector.get_columns(clean_table, schema=schema_to_use)
             if not cols:
+                ClientDatabaseAdapter._columns_cache[cache_key] = None
                 raise ValueError(f"Table '{clean_table}' has no columns or does not exist.")
 
             pk_constraint = inspector.get_pk_constraint(clean_table, schema=schema_to_use) or {}
@@ -1424,11 +1436,19 @@ class ClientDatabaseAdapter:
                 continue
         return []
 
+    _user_profile_cache: Dict[str, Any] = {}
+
     @classmethod
     def get_user_profile(cls, user_id: int, schema: Optional[str] = None, connection_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Retrieves user metadata (role and department) dynamically from the Client Database.
         """
+        if not user_id:
+            return None
+        cache_key = f"{connection_id}:{schema}:{user_id}"
+        if cache_key in cls._user_profile_cache:
+            return cls._user_profile_cache[cache_key]
+
         from sqlalchemy import inspect
         target_schema = cls._resolve_target_schema(schema, connection_id)
         eng = DynamicEnginePool.get_engine(connection_id)
@@ -1449,6 +1469,7 @@ class ClientDatabaseAdapter:
                     break
 
             if not found_u:
+                cls._user_profile_cache[cache_key] = None
                 return None
 
             full_u = f"{u_schema}.{found_u}" if u_schema else found_u
@@ -1466,7 +1487,7 @@ class ClientDatabaseAdapter:
                         email_val = r_dict.get("Email") or r_dict.get("email") or r_dict.get("NormalizedEmail")
                         dept_val = r_dict.get("DepartmentId") or r_dict.get("department_id") or r_dict.get("dept_id") or ""
                         role_n = r_dict.get("role_name") or r_dict.get("role") or "USER"
-                        return {
+                        prof = {
                             "id": str(r_dict.get(pk_col)),
                             "name": str(name_val),
                             "email": email_val,
@@ -1475,8 +1496,11 @@ class ClientDatabaseAdapter:
                             "dept_id": str(dept_val),
                             "department_name": r_dict.get("department_name") or r_dict.get("department")
                         }
+                        cls._user_profile_cache[cache_key] = prof
+                        return prof
                 except Exception as ex:
                     logger.debug(f"ClientDatabaseAdapter: get_user_profile lookup error: {ex}")
         except Exception as e:
             logger.warning(f"ClientDatabaseAdapter: Error fetching user profile for user_id={user_id}: {e}")
+        cls._user_profile_cache[cache_key] = None
         return None

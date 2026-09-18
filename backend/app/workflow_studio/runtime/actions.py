@@ -420,6 +420,8 @@ ActionRegistry.register("CREATE", _db_create_handler)
 ActionRegistry.register("INSERT", _db_create_handler)
 
 
+_GLOBAL_MAIL_TBL_CACHE: Dict[str, Any] = {}
+
 def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generic Email Notification Handler:
@@ -451,11 +453,9 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
             if p.startswith("role:"):
                 role_target = p.replace("role:", "").strip()
                 try:
-                    # 1. Query all users assigned to this role in the connected DB (via mapping table or role col)
                     role_users = ClientDatabaseAdapter.get_users_by_role(role_target, connection_id=conn_id)
                     matched_emails = [u["email"] for u in role_users if u.get("email")]
 
-                    # 2. Fallback: check get_users()
                     if not matched_emails:
                         users = ClientDatabaseAdapter.get_users(connection_id=conn_id)
                         matched_emails = [
@@ -489,7 +489,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                         logger.warning(f"ActionRegistry SEND_EMAIL: No user found for user target '{user_target}' (connection_id={conn_id})")
                 except Exception as ex:
                     logger.error(f"ActionRegistry SEND_EMAIL: Error resolving user '{user_target}': {ex}")
-            elif "{{" in p:
+            elif "{" in p:
                 interpolated = ClientDatabaseAdapter._resolve_template_value(p, context_vars)
                 if interpolated:
                     resolved_emails.append(str(interpolated))
@@ -532,25 +532,36 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     email_type_val = "HTML" if is_html else "TEXT"
 
     # 3. Attempt insert into client email queue if table exists
-    # 3. Attempt insert into client email queue if table exists
     email_job_id = None
+
     try:
-        from sqlalchemy import inspect
-        eng = DynamicEnginePool.get_engine(conn_id)
-        inspector = inspect(eng)
         target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
+        cache_key = f"{conn_id}:{target_schema}"
 
-        all_tbls = inspector.get_table_names(schema=target_schema) if target_schema else inspector.get_table_names()
-        tbl_map = {t.lower(): t for t in all_tbls}
+        if cache_key in _GLOBAL_MAIL_TBL_CACHE:
+            found_mail_tbl, cols = _GLOBAL_MAIL_TBL_CACHE[cache_key]
+        else:
+            from sqlalchemy import inspect
+            eng = DynamicEnginePool.get_engine(conn_id)
+            inspector = inspect(eng)
 
-        found_mail_tbl = None
-        for cand in ["mst_email_job", "email_jobs", "email_queue", "mst_email_jobs", "outgoing_emails"]:
-            if cand in tbl_map:
-                found_mail_tbl = tbl_map[cand]
-                break
+            all_tbls = inspector.get_table_names(schema=target_schema) if target_schema else inspector.get_table_names()
+            tbl_map = {t.lower(): t for t in all_tbls}
 
-        if found_mail_tbl:
-            cols = {c["name"].lower(): c["name"] for c in inspector.get_columns(found_mail_tbl, schema=target_schema)}
+            found_mail_tbl = None
+            for cand in ["mst_email_job", "email_jobs", "email_queue", "mst_email_jobs", "outgoing_emails"]:
+                if cand in tbl_map:
+                    found_mail_tbl = tbl_map[cand]
+                    break
+
+            cols = {}
+            if found_mail_tbl:
+                cols = {c["name"].lower(): c["name"] for c in inspector.get_columns(found_mail_tbl, schema=target_schema)}
+            
+            _GLOBAL_MAIL_TBL_CACHE[cache_key] = (found_mail_tbl, cols)
+
+        if found_mail_tbl and cols:
+            eng = DynamicEnginePool.get_engine(conn_id)
             full_mail_tbl = f"{target_schema}.{found_mail_tbl}" if target_schema else found_mail_tbl
 
             insert_data = {}
@@ -603,44 +614,34 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                 conn.execute(text(insert_sql), params)
                 email_job_id = 1  # Successfully queued
 
-            # Trigger email dispatcher in background thread immediately (Non-blocking)
-            try:
-                import threading
-                from app.workflow.services.email_dispatcher import EmailDispatcher
-                threading.Thread(
-                    target=EmailDispatcher.process_pending_email_jobs,
-                    kwargs={"conn_id": conn_id, "limit": 10},
-                    daemon=True
-                ).start()
-            except Exception as dispatch_ex:
-                logger.debug(f"ActionRegistry: Immediate dispatch notice: {dispatch_ex}")
     except Exception as queue_err:
         logger.debug(f"ActionRegistry: Email queue insert skipped: {queue_err}")
 
-    # 4. If not queued in client DB (no email job table), send directly via SMTP in background thread
-    send_status = "Queued" if email_job_id else "Pending"
+    # 4. If not queued in client DB (no email job table), send directly via SMTP in non-blocking background thread
+    send_status = "Queued" if email_job_id else "Dispatched"
     if not email_job_id:
+        def _async_direct_smtp():
+            try:
+                from app.workflow.services.email_dispatcher import EmailDispatcher
+                smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id)
+                if smtp_cfg:
+                    EmailDispatcher.send_smtp_email(
+                        smtp_cfg=smtp_cfg,
+                        to_email=to_email,
+                        subject=subject,
+                        body=final_email_body,
+                        email_type=email_type_val,
+                        cc=cc_email
+                    )
+                    logger.info(f"ActionRegistry: Background direct SMTP dispatch delivered to {to_email}")
+            except Exception as direct_err:
+                logger.warning(f"ActionRegistry: Direct SMTP email sending warning: {direct_err}")
+
         try:
             import threading
-            from app.workflow.services.email_dispatcher import EmailDispatcher
-            smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id)
-            if smtp_cfg:
-                threading.Thread(
-                    target=EmailDispatcher.send_smtp_email,
-                    kwargs={
-                        "smtp_cfg": smtp_cfg,
-                        "to_email": to_email,
-                        "subject": subject,
-                        "body": final_email_body,
-                        "email_type": email_type_val,
-                        "cc": cc_email
-                    },
-                    daemon=True
-                ).start()
-                send_status = "Sent"
-                logger.info(f"ActionRegistry: Background direct SMTP dispatch started for {to_email}")
-        except Exception as direct_err:
-            logger.warning(f"ActionRegistry: Direct SMTP email sending warning: {direct_err}")
+            threading.Thread(target=_async_direct_smtp, daemon=True).start()
+        except Exception as th_err:
+            logger.debug(f"ActionRegistry: Thread spawn notice: {th_err}")
 
     context_vars["email_to"] = to_email
     if cc_email:

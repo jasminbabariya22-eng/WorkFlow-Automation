@@ -94,14 +94,19 @@ class HubActionRequest(BaseModel):
 # HELPER: DYNAMIC SPEC RESOLUTION
 # ==========================================
 
-def resolve_workflow_meta(spec_id: str, db: Session) -> Dict[str, Any]:
+_workflow_meta_cache: Dict[str, Any] = {}
+
+def resolve_workflow_meta(spec_id: str, db: Session, bypass_cache: bool = False) -> Dict[str, Any]:
     """
-    Intelligently resolves any workflow by spec_id, numeric ID, or name.
+    Intelligently resolves any workflow by spec_id, numeric ID, or name with caching.
     Auto-discovers target table, database connection, approval roles,
     form fields, allowed actions, and node structure.
     """
     clean_key = str(spec_id).strip().lower().replace("-", "_")
     
+    if not bypass_cache and clean_key in _workflow_meta_cache:
+        return _workflow_meta_cache[clean_key]
+
     # 1. Check registered binding first
     binding = get_binding(spec_id, db=db)
     if not binding and clean_key != spec_id:
@@ -208,10 +213,7 @@ def resolve_workflow_meta(spec_id: str, db: Session) -> Dict[str, Any]:
                     "type": n_type
                 })
 
-    if not detected_table:
-        detected_table = clean_key
-
-    # Resolve table column metadata safely
+    # Resolve table column metadata safely only if table is explicitly detected
     target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
     columns = []
     pks = []
@@ -219,16 +221,17 @@ def resolve_workflow_meta(spec_id: str, db: Session) -> Dict[str, Any]:
     status_col = binding.get("status_column", "status") if binding else "status"
     table_exists = False
 
-    try:
-        col_meta = ClientDatabaseAdapter.get_table_columns(detected_table, schema=target_schema, connection_id=conn_id)
-        columns = [c["name"] for c in col_meta.get("columns", [])]
-        pks = col_meta.get("primary_keys") or []
-        primary_key = pks[0] if pks else primary_key
-        table_exists = bool(columns)
-    except Exception:
-        table_exists = False
+    if detected_table:
+        try:
+            col_meta = ClientDatabaseAdapter.get_table_columns(detected_table, schema=target_schema, connection_id=conn_id)
+            columns = [c["name"] for c in col_meta.get("columns", [])]
+            pks = col_meta.get("primary_keys") or []
+            primary_key = pks[0] if pks else primary_key
+            table_exists = bool(columns)
+        except Exception:
+            table_exists = False
 
-    return {
+    resolved_dict = {
         "spec_id": spec_id,
         "clean_key": clean_key,
         "title": title,
@@ -246,6 +249,8 @@ def resolve_workflow_meta(spec_id: str, db: Session) -> Dict[str, Any]:
         "steps": steps_summary,
         "is_active": True
     }
+    _workflow_meta_cache[clean_key] = resolved_dict
+    return resolved_dict
 
 
 # ==========================================
@@ -545,7 +550,7 @@ def submit_workflow_hub_record(
         }
 
         wf_res = StudioExecutionAdapter.start_workflow(
-            entity_type=table_name,
+            entity_type=table_name or spec_id or "generic",
             entity_id=int(new_record_id),
             user_id=parsed_user_id,
             variables=wf_variables,

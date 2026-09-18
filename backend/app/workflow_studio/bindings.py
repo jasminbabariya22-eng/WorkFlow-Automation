@@ -58,6 +58,7 @@ class WorkflowModuleBinding(WorkflowBase):
 
 # In-memory defaults as fallback (empty by default; all bindings are database-driven)
 FALLBACK_BINDINGS: Dict[str, Dict[str, Any]] = {}
+_BINDINGS_CACHE: Dict[str, Any] = {}
 
 
 def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
@@ -65,6 +66,12 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
     Retrieves the workflow binding dynamically from PostgreSQL table workflow.wf_module_bindings.
     Falls back safely to dynamic discovery across BPMN / Workflow definitions.
     """
+    if not module_key:
+        return None
+    clean_k = str(module_key).lower().replace("-", "_").strip()
+    if clean_k in _BINDINGS_CACHE:
+        return _BINDINGS_CACHE[clean_k]
+
     own_db = False
     if db is None:
         try:
@@ -81,7 +88,9 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
         ).first()
 
         if record:
-            return record.to_dict()
+            res_dict = record.to_dict()
+            _BINDINGS_CACHE[clean_k] = res_dict
+            return res_dict
 
         # 2. Exact match (case-insensitive / normalized)
         clean_key = module_key.lower().replace("-", "_").strip()
@@ -91,14 +100,18 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
         for b in all_bindings:
             b_key = b.module_key.lower().replace("-", "_").strip()
             if b_key == clean_key:
-                return b.to_dict()
+                res_dict = b.to_dict()
+                _BINDINGS_CACHE[clean_k] = res_dict
+                return res_dict
 
         # 2b. Known aliases for leave requests
         if clean_key in ("emp_leave_request", "emp_leave_requests", "leave_request", "leave_requests", "leave", "leaves"):
             for b in all_bindings:
                 b_key = b.module_key.lower().replace("-", "_").strip()
                 if b_key in ("emp_leave_request", "leave_requests", "emp_leave_requests", "leave_request") and b.table_name == "leave_requests":
-                    return b.to_dict()
+                    res_dict = b.to_dict()
+                    _BINDINGS_CACHE[clean_k] = res_dict
+                    return res_dict
 
         # 3. Dynamic lookup in BPMNDefinition / WorkflowDefinition
         from app.workflow.persistence.models import BPMNDefinition
@@ -110,13 +123,30 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
             (BPMNDefinition.spec_id == clean_key)
         ).first()
         if bpmn:
-            table_name = "leave_requests" if "leave" in clean_key else (bpmn.spec_id or "test")
+            table_name = None
+            if "leave" in clean_key:
+                table_name = "leave_requests"
+            elif bpmn.json_content:
+                try:
+                    import json
+                    js = json.loads(bpmn.json_content) if isinstance(bpmn.json_content, str) else bpmn.json_content
+                    for nd in js.get("nodes", []):
+                        nd_type = str(nd.get("type", "")).upper()
+                        nd_data = nd.get("data", {})
+                        if nd_type in ("RECORD", "ACTION", "DB_CREATE", "DB_UPDATE", "DB_READ", "DATABASE"):
+                            tbl = nd_data.get("table") or nd_data.get("entity") or nd_data.get("table_name")
+                            if tbl:
+                                table_name = tbl
+                                break
+                except Exception:
+                    pass
+
             dyn_binding = {
                 "binding_id": 9000 + bpmn.id,
                 "module_key": module_key,
                 "title": bpmn.name or module_key,
                 "workflow_id": bpmn.id,
-                "connection_id": bpmn.connection_id or 4,
+                "connection_id": bpmn.connection_id or 1,
                 "table_name": table_name,
                 "primary_key": "leave_request_id" if table_name == "leave_requests" else "id",
                 "status_column": "status",
@@ -126,6 +156,7 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
                 "form_schema": {},
                 "is_active": True
             }
+            _BINDINGS_CACHE[clean_k] = dyn_binding
             return dyn_binding
 
         wf = db.query(WorkflowDefinition).filter(
@@ -150,6 +181,7 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
                 "form_schema": {},
                 "is_active": True
             }
+            _BINDINGS_CACHE[clean_k] = dyn_binding
             return dyn_binding
 
     except Exception as e:
@@ -158,7 +190,10 @@ def get_binding(module_key: str, db: Optional[Session] = None) -> Optional[Dict[
         if own_db and db:
             db.close()
 
-    return FALLBACK_BINDINGS.get(module_key)
+    fb = FALLBACK_BINDINGS.get(module_key)
+    if fb:
+        _BINDINGS_CACHE[clean_k] = fb
+    return fb
 
 
 def list_bindings(db: Optional[Session] = None) -> Dict[str, Any]:
