@@ -16,8 +16,8 @@
   --color-warning: #d97706;
   --color-error: #dc2626;
 
-  --font-display: 'Outfit', sans-serif;
-  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   --glass-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.06);
   --glass-blur: none;
@@ -28,12 +28,17 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  font-family: inherit;
 }
 
 body {
   background-color: var(--bg-base);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   height: 100vh;
 }
@@ -99,9 +104,9 @@ body {
 
 .brand-name {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.2px;
   color: #0f172a;
 }
 
@@ -117,12 +122,12 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   border-radius: 8px;
   color: #64748b;
   cursor: pointer;
   font-weight: 500;
-  font-size: 13.5px;
+  font-size: 13px;
   transition: var(--transition-smooth);
   user-select: none;
 }
@@ -163,7 +168,7 @@ body {
 
 .view-title {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: #0f172a;
 }
@@ -175,7 +180,7 @@ body {
   padding: 6px 12px;
   background: #f1f5f9;
   border-radius: 20px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   color: #475569;
   border: 1px solid #e2e8f0;
@@ -205,10 +210,11 @@ body {
 .search-input {
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  padding: 9px 14px;
+  padding: 8px 14px;
   border-radius: 8px;
   color: #0f172a;
-  font-size: 13.5px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   width: 250px;
   transition: var(--transition-smooth);
 }
@@ -226,10 +232,11 @@ body {
 .filter-select {
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  padding: 9px 14px;
+  padding: 8px 14px;
   border-radius: 8px;
   color: #0f172a;
-  font-size: 13.5px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   outline: none;
   cursor: pointer;
   transition: var(--transition-smooth);
@@ -258,19 +265,19 @@ body {
 
 .glass-table th,
 .glass-table td {
-  padding: 14px 20px;
+  padding: 12px 18px;
   border-bottom: 1px solid #e2e8f0;
-  font-size: 13.5px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .glass-table th {
   background: #f8fafc;
-  color: #64748b;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 11.5px;
-  letter-spacing: 0.5px;
+  color: #475569;
+  font-weight: 600;
+  text-transform: capitalize;
+  font-size: 12px;
+  letter-spacing: 0.2px;
 }
 
 .glass-table tbody tr {
@@ -287,9 +294,9 @@ body {
 .status-badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  padding: 3px 9px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
 }
 
@@ -322,10 +329,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 16px;
-  border-radius: 8px;
+  padding: 8px 14px;
+  border-radius: 6px;
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: 13px;
+  font-family: var(--font-sans);
   cursor: pointer;
   border: none;
   transition: var(--transition-smooth);
@@ -367,7 +375,7 @@ body {
 }
 
 .btn-sm {
-  padding: 6px 12px;
+  padding: 5px 10px;
   font-size: 12px;
 }
 
