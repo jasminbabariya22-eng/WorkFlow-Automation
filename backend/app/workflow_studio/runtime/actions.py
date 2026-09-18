@@ -614,6 +614,18 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                 conn.execute(text(insert_sql), params)
                 email_job_id = 1  # Successfully queued
 
+            # Trigger immediate non-blocking dispatch in background thread
+            try:
+                import threading
+                from app.workflow.services.email_dispatcher import EmailDispatcher
+                threading.Thread(
+                    target=EmailDispatcher.process_pending_email_jobs,
+                    kwargs={"conn_id": conn_id, "limit": 20},
+                    daemon=True
+                ).start()
+            except Exception as th_ex:
+                logger.debug(f"ActionRegistry: Thread spawn notice: {th_ex}")
+
     except Exception as queue_err:
         logger.debug(f"ActionRegistry: Email queue insert skipped: {queue_err}")
 

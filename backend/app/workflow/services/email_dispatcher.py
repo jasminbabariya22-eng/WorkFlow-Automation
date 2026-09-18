@@ -269,36 +269,33 @@ class EmailDispatcher:
                     now_dt = datetime.now()
                     job_table = f"{sch}.{tbl_name}" if sch else tbl_name
 
-                    # 1. AUTO-RECOVER STALE 'Processing' JOBS (older than 45 seconds)
+                    # 1. NORMALIZE NON-STANDARD / LEGACY STATUSES TO (New, Sent, Failed)
                     try:
-                        stale_cutoff = now_dt - timedelta(seconds=45)
-                        recover_where = [f"{status_col} = 'Processing'"]
-                        if created_col:
-                            recover_where.append(f"{created_col} <= :stale_cutoff")
+                        normalize_where = [f"{status_col} NOT IN ('New', 'Sent', 'Failed')"]
                         if attempts_col and total_attempts_col:
-                            recover_sql = f"""
+                            normalize_sql = f"""
                                 UPDATE {job_table}
                                 SET {status_col} = CASE
                                         WHEN COALESCE({attempts_col}, 0) >= COALESCE({total_attempts_col}, 3) THEN 'Failed'
-                                        ELSE 'Pending'
+                                        ELSE 'New'
                                     END
-                                WHERE {" AND ".join(recover_where)}
+                                WHERE {" AND ".join(normalize_where)}
                             """
                         else:
-                            recover_sql = f"""
+                            normalize_sql = f"""
                                 UPDATE {job_table}
-                                SET {status_col} = 'Pending'
-                                WHERE {" AND ".join(recover_where)}
+                                SET {status_col} = 'New'
+                                WHERE {" AND ".join(normalize_where)}
                             """
                         with eng.begin() as conn:
-                            rec_res = conn.execute(text(recover_sql), {"stale_cutoff": stale_cutoff})
-                            if rec_res.rowcount and rec_res.rowcount > 0:
-                                logger.warning(f"[EMAIL_DISPATCHER] Auto-recovered {rec_res.rowcount} orphaned 'Processing' email jobs in '{job_table}' back to Pending/Failed.")
-                    except Exception as rec_ex:
-                        logger.debug(f"[EMAIL_DISPATCHER] Stale recovery note: {rec_ex}")
+                            norm_res = conn.execute(text(normalize_sql))
+                            if norm_res.rowcount and norm_res.rowcount > 0:
+                                logger.info(f"[EMAIL_DISPATCHER] Normalized {norm_res.rowcount} email job(s) in '{job_table}' to 'New'/'Failed'.")
+                    except Exception as norm_ex:
+                        logger.debug(f"[EMAIL_DISPATCHER] Status normalization note: {norm_ex}")
 
-                    # 2. SELECT CANDIDATE EMAIL JOBS
-                    where_clauses = [f"{status_col} IN ('New', 'Pending', 'NEW', 'PENDING')"]
+                    # 2. SELECT CANDIDATE 'New' EMAIL JOBS
+                    where_clauses = [f"{status_col} = 'New'"]
                     if deleted_col:
                         where_clauses.append(f"({deleted_col} = 0 OR {deleted_col} IS NULL)")
                     if attempts_col and total_attempts_col:
@@ -311,7 +308,7 @@ class EmailDispatcher:
                     select_sql = f"""
                         SELECT * FROM {job_table}
                         WHERE {" AND ".join(where_clauses)}
-                        ORDER BY {pk_col} ASC
+                        ORDER BY {pk_col} DESC
                     """
                     rows = []
                     try:
@@ -325,7 +322,7 @@ class EmailDispatcher:
                     if not rows:
                         continue
 
-                    logger.info(f"[EMAIL_DISPATCHER] Found {len(rows)} pending email job(s) in '{job_table}' to process.")
+                    logger.info(f"[EMAIL_DISPATCHER] Found {len(rows)} new email job(s) in '{job_table}' to process.")
                     smtp_cache: Dict[int, Dict[str, Any]] = {}
 
                     for job in rows:
@@ -348,31 +345,32 @@ class EmailDispatcher:
                         except Exception:
                             attempt_delay_ms = 5000
 
-                        # 3. ATOMIC CLAIM: Mark job as 'Processing' and increment attempts atomically
-                        claim_set = [f"{status_col} = 'Processing'"]
+                        # 3. ATOMIC CLAIM: Increment attempt counter while keeping status valid
+                        claim_set = []
                         if attempts_col:
                             claim_set.append(f"{attempts_col} = COALESCE({attempts_col}, 0) + 1")
 
                         claim_where = [
                             f"{pk_col} = :jid",
-                            f"{status_col} IN ('New', 'Pending', 'NEW', 'PENDING')"
+                            f"{status_col} = 'New'"
                         ]
                         if attempts_col and total_attempts_col:
                             claim_where.append(f"(COALESCE({attempts_col}, 0) < COALESCE({total_attempts_col}, 3) OR {total_attempts_col} = 0)")
 
-                        claim_sql = f"""
-                            UPDATE {job_table}
-                            SET {', '.join(claim_set)}
-                            WHERE {' AND '.join(claim_where)}
-                        """
-                        with eng.begin() as conn:
-                            claim_res = conn.execute(text(claim_sql), {"jid": job_id})
-                            if claim_res.rowcount == 0:
-                                # Another worker claimed or reached max attempts
-                                continue
+                        if claim_set:
+                            claim_sql = f"""
+                                UPDATE {job_table}
+                                SET {', '.join(claim_set)}
+                                WHERE {' AND '.join(claim_where)}
+                            """
+                            with eng.begin() as conn:
+                                claim_res = conn.execute(text(claim_sql), {"jid": job_id})
+                                if claim_res.rowcount == 0:
+                                    # Another worker claimed or reached max attempts
+                                    continue
 
                         new_attempt_count = curr_attempts + 1
-                        logger.info(f"[EMAIL_DISPATCHER] Claimed Job #{job_id} [Attempt {new_attempt_count}/{total_attempts}] for processing.")
+                        logger.info(f"[EMAIL_DISPATCHER] Processing Job #{job_id} [Attempt {new_attempt_count}/{total_attempts}].")
 
                         # Guaranteed processing block
                         job_start_time = time.time()
@@ -387,7 +385,7 @@ class EmailDispatcher:
                             if not to_email or "@" not in to_email:
                                 err_msg = f"Invalid recipient email address: '{to_email}'"
                                 logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Rejected: {err_msg}")
-                                invalid_set = [f"{status_col} = 'Invalid_Email'"]
+                                invalid_set = [f"{status_col} = 'Failed'"]
                                 binds = {"jid": job_id}
                                 if error_col:
                                     invalid_set.append(f"{error_col} = :err")
@@ -399,7 +397,7 @@ class EmailDispatcher:
                                         WHERE {pk_col} = :jid
                                     """), binds)
                                 total_failed += 1
-                                all_details.append({"job_id": job_id, "status": "Invalid_Email", "to": to_email, "error": err_msg})
+                                all_details.append({"job_id": job_id, "status": "Failed", "to": to_email, "error": err_msg})
                                 continue
 
                             if server_id not in smtp_cache:
@@ -425,7 +423,7 @@ class EmailDispatcher:
                                         WHERE {pk_col} = :jid
                                     """), binds)
                                 total_failed += 1
-                                all_details.append({"job_id": job_id, "status": "No_SMTP_Config", "error": err_msg})
+                                all_details.append({"job_id": job_id, "status": "Failed", "error": err_msg})
                                 continue
 
                             cls.send_smtp_email(
@@ -437,7 +435,7 @@ class EmailDispatcher:
                                 cc=cc
                             )
 
-                            # 4. MARK AS SENT
+                            # 4. MARK AS 'Sent'
                             sent_set = [f"{status_col} = 'Sent'"]
                             binds = {"jid": job_id}
                             if sent_on_col:
@@ -448,10 +446,10 @@ class EmailDispatcher:
 
                             with eng.begin() as conn:
                                 conn.execute(text(f"""
-                                    UPDATE {job_table}
-                                    SET {', '.join(sent_set)}
-                                    WHERE {pk_col} = :jid
-                                """), binds)
+                                        UPDATE {job_table}
+                                        SET {', '.join(sent_set)}
+                                        WHERE {pk_col} = :jid
+                                    """), binds)
 
                             exec_ms = round((time.time() - job_start_time) * 1000, 2)
                             logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Successfully Delivered to {to_email} ({exec_ms}ms)")
@@ -474,14 +472,14 @@ class EmailDispatcher:
                             
                             next_dt = datetime.now() + timedelta(milliseconds=attempt_delay_ms)
                             is_failed = (total_attempts > 0 and new_attempt_count >= total_attempts)
-                            final_status = 'Failed' if is_failed else 'Pending'
+                            final_status = 'Failed' if is_failed else 'New'
 
                             if is_failed:
                                 logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Permanently FAILED after {new_attempt_count} attempts. Reason: {err_msg}")
                             else:
                                 logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Scheduled retry #{new_attempt_count + 1} at {next_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
-                            # 5. MARK AS PENDING / FAILED SAFELY
+                            # 5. MARK AS 'New' (for retry) OR 'Failed' (if max attempts reached)
                             fail_set = [f"{status_col} = :st"]
                             binds = {"st": final_status, "jid": job_id}
                             if next_attempt_col:
