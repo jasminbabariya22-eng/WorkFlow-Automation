@@ -13,50 +13,9 @@ export default function EmailNodeSection({
   const [showCc, setShowCc] = useState(() => Boolean(data.cc || data.email_cc))
   const [showBcc, setShowBcc] = useState(() => Boolean(data.bcc || data.email_bcc))
 
-  const [customVarInput, setCustomVarInput] = useState('')
-  const [userCustomVars, setUserCustomVars] = useState(() => {
-    // Persist user-added parameter keys in local component state
-    return data.custom_parameters || []
-  })
-
-  // Dynamically extract columns from the introspected database table with single-brace {field} syntax
-  const tableVars = (availableFields || [])
-    .filter(f => !['is_deleted'].includes(f.name))
-    .map(f => ({ label: f.name, token: `{${f.name}}` }))
-
-  // Standard runtime context variables
-  const contextVars = [
-    { label: 'id', token: '{id}' },
-    { label: 'status', token: '{status}' },
-    { label: 'email', token: '{email}' },
-    { label: 'user_name', token: '{user_name}' },
-    { label: 'created_at', token: '{created_at}' }
-  ]
-
-  // User-defined API parameters added via UI
-  const customParamVars = userCustomVars.map(p => ({ label: p, token: `{${p}}` }))
-
-  // Combine table fields, context variables, and user-defined custom parameters dynamically
-  const existingKeys = new Set(tableVars.map(v => v.label.toLowerCase()))
-  const activeVars = [
-    ...customParamVars,
-    ...tableVars,
-    ...contextVars.filter(v => !existingKeys.has(v.label.toLowerCase()))
-  ]
-
   // Strictly filter roles and users from the connected database (connectDB)
   const dbRoles = Array.from(new Set((backendRoles || []).map(r => r.name || r.id).filter(Boolean)))
   const dbUsers = (backendUsers || []).filter(u => u && u.email && u.email.trim())
-
-  // Helper to add custom parameter token
-  const addCustomParameter = (paramName) => {
-    const clean = paramName.trim().replace(/^\{+|\}+$/g, '')
-    if (clean && !userCustomVars.includes(clean)) {
-      const updated = [...userCustomVars, clean]
-      setUserCustomVars(updated)
-      handleFieldChange('custom_parameters', updated)
-    }
-  }
 
   // Helper to append recipient (email or role:RoleName) cleanly with comma separation
   const appendRecipient = (fieldName, item) => {
@@ -68,17 +27,6 @@ export default function EmailNodeSection({
       if (!parts.includes(item)) {
         handleFieldChange(fieldName, `${currentVal}, ${item}`)
       }
-    }
-  }
-
-  // Insert variable token into body or subject
-  const insertToken = (fieldName, token) => {
-    const currentVal = data[fieldName] || ''
-    if (!currentVal) {
-      handleFieldChange(fieldName, token)
-    } else {
-      const separator = ['to', 'cc', 'bcc'].includes(fieldName) ? ', ' : ' '
-      handleFieldChange(fieldName, `${currentVal.trim()}${separator}${token}`)
     }
   }
 
@@ -232,7 +180,7 @@ export default function EmailNodeSection({
                   )}
                 </select>
 
-                {/* Role Selector Dropdown from connectDB */}
+                {/* Role Recipient Dropdown */}
                 <select
                   id="email-to-role-dropdown"
                   name="email_to_role_select"
@@ -241,29 +189,35 @@ export default function EmailNodeSection({
                   defaultValue=""
                   onChange={(e) => {
                     if (e.target.value) {
-                      appendRecipient('to', e.target.value)
+                      appendRecipient('to', `role:${e.target.value}`)
                       e.target.value = ''
                     }
                   }}
-                  title="Select role from connected database"
-                  style={{ maxWidth: '110px' }}
+                  title="Assign notification to all users having this role"
+                  style={{ maxWidth: '120px' }}
                 >
-                  <option value="" disabled>+ Role (DB)...</option>
+                  <option value="" disabled>+ Add Role...</option>
                   {dbRoles.length > 0 ? (
                     dbRoles.map(r => (
-                      <option key={`to-role-${r}`} value={`role:${r}`}>Role: {r}</option>
+                      <option key={`to-role-${r}`} value={r}>
+                        Role: {r}
+                      </option>
                     ))
                   ) : (
-                    <option value="" disabled>No DB roles found</option>
+                    <>
+                      <option value="ADMIN">Role: ADMIN</option>
+                      <option value="MANAGER">Role: MANAGER</option>
+                    </>
                   )}
                 </select>
 
+                {/* Show CC / BCC toggles */}
                 {!showCc && (
                   <button
                     type="button"
                     className="wf-link-btn"
                     onClick={() => setShowCc(true)}
-                    style={{ fontSize: '11px', color: '#818cf8' }}
+                    style={{ fontSize: '11px', color: '#6366f1' }}
                   >
                     + CC
                   </button>
@@ -273,7 +227,7 @@ export default function EmailNodeSection({
                     type="button"
                     className="wf-link-btn"
                     onClick={() => setShowBcc(true)}
-                    style={{ fontSize: '11px', color: '#818cf8' }}
+                    style={{ fontSize: '11px', color: '#6366f1' }}
                   >
                     + BCC
                   </button>
@@ -283,65 +237,25 @@ export default function EmailNodeSection({
             <input
               id="email-to-input"
               name="email_to"
-              aria-label="Email Recipients (To)"
+              aria-label="Recipient Email Address"
               type="text"
               className="wf-input text-xs"
               value={data.to || ''}
               onChange={(e) => handleFieldChange('to', e.target.value)}
-              placeholder={dbUsers.length > 0 ? `e.g. ${dbUsers[0].email}, role:${dbRoles[0] || 'EMPLOYEE'}` : 'e.g. jasminbabariya22@gmail.com, role:EMPLOYEE, {{email}}'}
+              placeholder="e.g. user@company.com, role:MANAGER, {email}"
             />
-            {/* Dynamic Quick Helper Chips from Connected Database */}
-            {(dbUsers.length > 0 || dbRoles.length > 0) && (
-              <div className="wf-token-bar" style={{ marginTop: '5px' }}>
-                <span className="wf-token-bar-label">Quick Add:</span>
-                {dbUsers.slice(0, 3).map(u => (
-                  <button
-                    key={`quick-user-${u.id || u.email}`}
-                    type="button"
-                    className="wf-token-chip"
-                    onClick={() => appendRecipient('to', u.email)}
-                    title={`Add ${u.email}`}
-                  >
-                    + {u.name ? u.name.split(' ')[0] : u.email}
-                  </button>
-                ))}
-                {dbRoles.slice(0, 3).map(r => (
-                  <button
-                    key={`quick-role-${r}`}
-                    type="button"
-                    className="wf-token-chip"
-                    onClick={() => appendRecipient('to', `role:${r}`)}
-                    title={`Add role:${r}`}
-                  >
-                    + Role: {r}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="wf-token-chip"
-                  onClick={() => appendRecipient('to', '{{email}}')}
-                  title="Add dynamic context {{email}}"
-                >
-                  + &#123;&#123;email&#125;&#125;
-                </button>
-              </div>
-            )}
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
-              Choose user email or role from the connected database, or type directly. Separate multiple recipients with commas.
-            </div>
           </div>
 
-          {/* CC Field (Optional) */}
+          {/* CC Field */}
           {showCc && (
             <div className="wf-field-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <label className="wf-field-label" htmlFor="email-cc-input" style={{ margin: 0 }}>CC (Carbon Copy)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  {/* User Email Dropdown from connectDB */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <select
                     id="email-cc-user-dropdown"
                     name="email_cc_user_select"
-                    aria-label="Add user email to CC"
+                    aria-label="Add CC user email"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
@@ -350,45 +264,32 @@ export default function EmailNodeSection({
                         e.target.value = ''
                       }
                     }}
-                    title="Select user email from connected database"
-                    style={{ maxWidth: '140px' }}
+                    style={{ maxWidth: '120px' }}
                   >
-                    <option value="" disabled>+ User Email (DB)...</option>
-                    {dbUsers.length > 0 ? (
-                      dbUsers.map(u => (
-                        <option key={`cc-user-${u.id || u.email}`} value={u.email}>
-                          {u.name ? `${u.name} (${u.email})` : u.email}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No DB users with email</option>
-                    )}
+                    <option value="" disabled>+ Add User...</option>
+                    {dbUsers.map(u => (
+                      <option key={`cc-user-${u.id || u.email}`} value={u.email}>{u.name || u.email}</option>
+                    ))}
                   </select>
 
-                  {/* Role Selector Dropdown from connectDB */}
                   <select
                     id="email-cc-role-dropdown"
                     name="email_cc_role_select"
-                    aria-label="Add role to CC"
+                    aria-label="Add CC role"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
                       if (e.target.value) {
-                        appendRecipient('cc', e.target.value)
+                        appendRecipient('cc', `role:${e.target.value}`)
                         e.target.value = ''
                       }
                     }}
-                    title="Select role from connected database"
                     style={{ maxWidth: '110px' }}
                   >
-                    <option value="" disabled>+ Role (DB)...</option>
-                    {dbRoles.length > 0 ? (
-                      dbRoles.map(r => (
-                        <option key={`cc-role-${r}`} value={`role:${r}`}>Role: {r}</option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No DB roles found</option>
-                    )}
+                    <option value="" disabled>+ Role...</option>
+                    {dbRoles.map(r => (
+                      <option key={`cc-role-${r}`} value={r}>{r}</option>
+                    ))}
                   </select>
 
                   <button
@@ -414,69 +315,35 @@ export default function EmailNodeSection({
                 className="wf-input text-xs"
                 value={data.cc || ''}
                 onChange={(e) => handleFieldChange('cc', e.target.value)}
-                placeholder={dbUsers.length > 1 ? `e.g. ${dbUsers[1].email}, role:${dbRoles[0] || 'MANAGER'}` : 'e.g. manager@example.com, role:MANAGER'}
+                placeholder="e.g. manager@example.com, role:HR"
               />
             </div>
           )}
 
-          {/* BCC Field (Optional) */}
+          {/* BCC Field */}
           {showBcc && (
             <div className="wf-field-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <label className="wf-field-label" htmlFor="email-bcc-input" style={{ margin: 0 }}>BCC (Blind Carbon Copy)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  {/* User Email Dropdown from connectDB */}
-                  <select
-                    id="email-bcc-user-dropdown"
-                    name="email_bcc_user_select"
-                    aria-label="Add user email to BCC"
-                    className="wf-token-dropdown"
-                    defaultValue=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        appendRecipient('bcc', e.target.value)
-                        e.target.value = ''
-                      }
-                    }}
-                    title="Select user email from connected database"
-                    style={{ maxWidth: '140px' }}
-                  >
-                    <option value="" disabled>+ User Email (DB)...</option>
-                    {dbUsers.length > 0 ? (
-                      dbUsers.map(u => (
-                        <option key={`bcc-user-${u.id || u.email}`} value={u.email}>
-                          {u.name ? `${u.name} (${u.email})` : u.email}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No DB users with email</option>
-                    )}
-                  </select>
-
-                  {/* Role Selector Dropdown from connectDB */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <select
                     id="email-bcc-role-dropdown"
                     name="email_bcc_role_select"
-                    aria-label="Add role to BCC"
+                    aria-label="Add BCC role"
                     className="wf-token-dropdown"
                     defaultValue=""
                     onChange={(e) => {
                       if (e.target.value) {
-                        appendRecipient('bcc', e.target.value)
+                        appendRecipient('bcc', `role:${e.target.value}`)
                         e.target.value = ''
                       }
                     }}
-                    title="Select role from connected database"
                     style={{ maxWidth: '110px' }}
                   >
-                    <option value="" disabled>+ Role (DB)...</option>
-                    {dbRoles.length > 0 ? (
-                      dbRoles.map(r => (
-                        <option key={`bcc-role-${r}`} value={`role:${r}`}>Role: {r}</option>
-                      ))
-                    ) : (
-                      <option value="" disabled>No DB roles found</option>
-                    )}
+                    <option value="" disabled>+ Role...</option>
+                    {dbRoles.map(r => (
+                      <option key={`bcc-role-${r}`} value={r}>{r}</option>
+                    ))}
                   </select>
 
                   <button
@@ -509,24 +376,9 @@ export default function EmailNodeSection({
 
           {/* Subject Field */}
           <div className="wf-field-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
-              <label className="wf-field-label" htmlFor="email-subject-input" style={{ margin: 0 }}>Subject <span style={{ color: '#f43f5e' }}>*</span></label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: '#94a3b8' }}>Insert:</span>
-                {activeVars.slice(0, 4).map(v => (
-                  <button
-                    key={`subj-var-${v.token}`}
-                    type="button"
-                    className="wf-token-chip"
-                    onClick={() => insertToken('subject', v.token)}
-                    title={`Insert ${v.token} into Subject`}
-                    style={{ fontSize: '10px', padding: '1px 6px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}
-                  >
-                    +{v.token}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <label className="wf-field-label" htmlFor="email-subject-input" style={{ marginBottom: '4px' }}>
+              Subject <span style={{ color: '#f43f5e' }}>*</span>
+            </label>
             <input
               id="email-subject-input"
               name="email_subject"
@@ -535,7 +387,7 @@ export default function EmailNodeSection({
               className="wf-input text-xs"
               value={data.subject || ''}
               onChange={(e) => handleFieldChange('subject', e.target.value)}
-              placeholder="e.g. Request Notification for #{id} - {status}"
+              placeholder="e.g. Request Notification for {name} - #{id}"
             />
           </div>
 
@@ -543,7 +395,7 @@ export default function EmailNodeSection({
           <div className="wf-field-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label className="wf-field-label" htmlFor="email-body-input" style={{ margin: 0 }}>Message Body</label>
-              <span style={{ fontSize: '10px', color: '#64748b' }}>Supports plain text & dynamic tokens (e.g. {`{parameter_key}`})</span>
+              <span style={{ fontSize: '10px', color: '#64748b' }}>Supports dynamic keys like {`{name}`}</span>
             </div>
             <textarea
               id="email-body-input"
@@ -553,59 +405,12 @@ export default function EmailNodeSection({
               rows={6}
               value={data.body || ''}
               onChange={(e) => handleFieldChange('body', e.target.value)}
-              placeholder="e.g. Hello {user_name}, your request has been processed. Use {param_name} to insert any key passed in API parameter dictionary."
+              placeholder="e.g. Hello {name}, your request has been processed. Status: {status}"
               style={{ lineHeight: '1.5' }}
             />
-          </div>
-
-          {/* Generic Available Variables & Parameters Bar */}
-          <div className="wf-var-palette">
-            <div className="wf-var-palette-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-              <span>Insert Variable / Parameter:</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <input
-                  type="text"
-                  placeholder="API parameter key..."
-                  value={customVarInput}
-                  onChange={(e) => setCustomVarInput(e.target.value)}
-                  style={{ fontSize: '10px', padding: '2px 6px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '140px', background: 'var(--wf-surface-card, #fff)', color: 'inherit' }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && customVarInput.trim()) {
-                      e.preventDefault()
-                      addCustomParameter(customVarInput)
-                      insertToken('body', `{${customVarInput.trim().replace(/^\{+|\}+$/g, '')}}`)
-                      setCustomVarInput('')
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="wf-token-chip"
-                  onClick={() => {
-                    if (customVarInput.trim()) {
-                      addCustomParameter(customVarInput)
-                      insertToken('body', `{${customVarInput.trim().replace(/^\{+|\}+$/g, '')}}`)
-                      setCustomVarInput('')
-                    }
-                  }}
-                  style={{ fontSize: '10px', padding: '2px 6px', height: '22px' }}
-                >
-                  +Add & Insert
-                </button>
-              </div>
-            </div>
-            <div className="wf-var-chips-wrap">
-              {activeVars.map(v => (
-                <button
-                  key={v.token}
-                  type="button"
-                  className="wf-var-pill wf-var-pill-db"
-                  onClick={() => insertToken('body', v.token)}
-                  title={`Click to insert ${v.token} into message body`}
-                >
-                  +{v.token}
-                </button>
-              ))}
+            {/* Dynamic key usage helper */}
+            <div style={{ marginTop: '6px', fontSize: '11px', color: '#64748b', lineHeight: 1.5, background: 'var(--wf-surface-card, rgba(248,250,252,0.8))', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(226,232,240,0.8)' }}>
+              <span>💡 Write any key like <code style={{ color: '#0284c7', background: 'rgba(2,132,199,0.1)', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>{`{name}`}</code> or <code style={{ color: '#0284c7', background: 'rgba(2,132,199,0.1)', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>{`{incident_id}`}</code> directly in Subject or Body. It will be replaced with the values passed in API request parameters.</span>
             </div>
           </div>
         </>
