@@ -670,7 +670,10 @@ def execute_workflow_hub_action(
     user_id = payload.user_id or auth_user_id or 1
     user_role = payload.role or (current_user.get("role") if isinstance(current_user, dict) else "MANAGER")
 
-    variables = dict(payload.variables or {})
+    raw_params = payload.parameter or payload.parameters or {}
+    variables = {**raw_params, **dict(payload.variables or {})}
+    variables["parameter"] = raw_params
+    variables["parameters"] = raw_params
     variables["connection_id"] = meta["connection_id"]
     variables["user_role"] = user_role
 
