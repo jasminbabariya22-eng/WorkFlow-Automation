@@ -71,27 +71,41 @@ class WorkflowConnectionManager:
         Synchronous-friendly broadcast function that can be safely called from
         sync endpoints, background workers, or adapter methods.
         """
+        from datetime import datetime
+
+        try:
+            ts_str = data.get("timestamp") or datetime.now().isoformat()
+        except Exception:
+            ts_str = ""
+
         payload = {
             "type": event_type,
             "data": data,
-            "timestamp": data.get("timestamp") or str(asyncio.get_event_loop().time() if self._main_loop else "")
+            "timestamp": ts_str
         }
 
-        # Try to schedule on running event loop
+        # Try to schedule on running event loop or main loop
+        loop = None
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = self._main_loop
 
         if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._async_broadcast(payload, target_user_id), loop)
+            try:
+                asyncio.run_coroutine_threadsafe(self._async_broadcast(payload, target_user_id), loop)
+            except Exception as e:
+                logger.debug(f"WebSocket threadsafe schedule notice: {e}")
         else:
             # Fallback for worker threads
             def run_in_thread():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                new_loop.run_until_complete(self._async_broadcast(payload, target_user_id))
-                new_loop.close()
+                try:
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    new_loop.run_until_complete(self._async_broadcast(payload, target_user_id))
+                    new_loop.close()
+                except Exception as ex:
+                    logger.debug(f"WebSocket background thread broadcast notice: {ex}")
 
             t = threading.Thread(target=run_in_thread, daemon=True)
             t.start()

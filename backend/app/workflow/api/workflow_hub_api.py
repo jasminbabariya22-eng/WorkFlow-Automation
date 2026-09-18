@@ -50,12 +50,12 @@ router = APIRouter(prefix="/api/v1/workflow-hub", tags=["Universal Workflow Hub 
 # ==========================================
 
 class UniversalWorkflowGatewayRequest(BaseModel):
-    spec_id: str = Field(..., description="Specification ID of the workflow (e.g. emp_leave_request, wfh_request_wf, etc.)")
-    operation: Optional[str] = Field("SUBMIT", description="Operation: SUBMIT, ACTION, APPROVE, REJECT, FETCH_RECORDS, GET_TASKS, SCHEMA, HISTORY, CATALOG")
+    spec_id: str = Field(..., description="Specification ID of the workflow (e.g. 'test_11', 'emp_leave_request', etc.)")
+    parameter: Dict[str, Any] = Field(..., description="Mandatory key-value parameters dictionary (e.g. {'id': '1', 'name': 'John'})")
+    operation: Optional[str] = Field("SUBMIT", description="Operation: SUBMIT (default), ACTION, APPROVE, REJECT, FETCH_RECORDS, GET_TASKS, SCHEMA, HISTORY, CATALOG")
     record_id: Optional[int] = Field(None, description="Target record primary key ID (required for ACTION and HISTORY)")
     action: Optional[str] = Field("APPROVE", description="Action code to execute: APPROVE, REJECT, etc.")
-    data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Payload data for SUBMIT")
-    parameter: Optional[Dict[str, Any]] = Field(None, description="Custom parameters dictionary (e.g. {'Name': 'Ram', 'Address': 'Delhi', 'pocket_no': '22'})")
+    data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional extra payload data")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
     user_id: Optional[int] = None
     user_name: Optional[str] = None
@@ -69,8 +69,8 @@ class UniversalWorkflowGatewayRequest(BaseModel):
 
 
 class HubSubmitRequest(BaseModel):
-    data: Dict[str, Any] = Field(default_factory=dict, description="Entity fields and initial workflow variables")
-    parameter: Optional[Dict[str, Any]] = Field(None, description="Custom parameters dictionary (e.g. {'Name': 'Ram', 'Address': 'Delhi'})")
+    parameter: Dict[str, Any] = Field(..., description="Mandatory key-value parameters dictionary (e.g. {'id': '1', 'name': 'John'})")
+    data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional extra entity fields and initial workflow variables")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
     variables: Optional[Dict[str, Any]] = None
     user_id: Optional[int] = None
@@ -82,11 +82,11 @@ class HubSubmitRequest(BaseModel):
 class HubActionRequest(BaseModel):
     record_id: int = Field(..., description="Target business entity record primary key ID")
     action: str = Field("APPROVE", description="Action code to execute (e.g. APPROVE, REJECT)")
+    parameter: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional parameters dictionary")
+    parameters: Optional[Dict[str, Any]] = None
     user_id: Optional[int] = None
     role: Optional[str] = None
     remarks: Optional[str] = ""
-    parameter: Optional[Dict[str, Any]] = None
-    parameters: Optional[Dict[str, Any]] = None
     variables: Optional[Dict[str, Any]] = None
 
 

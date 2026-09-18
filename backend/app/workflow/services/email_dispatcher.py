@@ -6,10 +6,11 @@ schema and table inspection, connects to the configured SMTP server, and deliver
 """
 
 import smtplib
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from sqlalchemy import text, inspect
 
 from app.core.logger import logger
@@ -23,6 +24,8 @@ class EmailDispatcher:
     """
 
     _smtp_config_cache: Dict[str, Any] = {}
+    _in_flight_jobs: Set[int] = set()
+    _in_flight_lock = threading.Lock()
 
     @classmethod
     def get_smtp_config(cls, conn_id: Optional[int] = None, email_server_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -182,7 +185,7 @@ class EmailDispatcher:
     def process_pending_email_jobs(cls, conn_id: Optional[int] = None, limit: int = 50) -> Dict[str, Any]:
         """
         Dynamically scans client database tables across all configured connections for 'New' or 'Pending'
-        emails and sends them immediately. Automatically recovers stale 'Processing' jobs.
+        emails and sends them immediately with thread-safe atomic claiming and 3-state lifecycle.
         """
         import time
         from datetime import timedelta
@@ -308,7 +311,7 @@ class EmailDispatcher:
                     select_sql = f"""
                         SELECT * FROM {job_table}
                         WHERE {" AND ".join(where_clauses)}
-                        ORDER BY {pk_col} DESC
+                        ORDER BY {pk_col} ASC
                     """
                     rows = []
                     try:
@@ -322,194 +325,224 @@ class EmailDispatcher:
                     if not rows:
                         continue
 
-                    logger.info(f"[EMAIL_DISPATCHER] Found {len(rows)} new email job(s) in '{job_table}' to process.")
                     smtp_cache: Dict[int, Dict[str, Any]] = {}
 
                     for job in rows:
-                        job_id = job.get(pk_col) or job.get("email_job_id") or job.get("id")
-                        raw_tot = job.get(total_attempts_col) if total_attempts_col else 3
+                        raw_id = job.get(pk_col) or job.get("email_job_id") or job.get("id")
+                        if raw_id is None:
+                            continue
+                        job_id = int(raw_id)
+
+                        # Thread-Safe In-Memory Exclusion
+                        with cls._in_flight_lock:
+                            if job_id in cls._in_flight_jobs:
+                                logger.debug(f"[EMAIL_DISPATCHER] Job #{job_id} already being dispatched by another worker thread. Skipping.")
+                                continue
+                            cls._in_flight_jobs.add(job_id)
+
                         try:
-                            total_attempts = int(raw_tot) if raw_tot is not None and str(raw_tot).strip() != "" else 3
-                        except Exception:
-                            total_attempts = 3
+                            raw_tot = job.get(total_attempts_col) if total_attempts_col else 3
+                            try:
+                                total_attempts = int(raw_tot) if raw_tot is not None and str(raw_tot).strip() != "" else 3
+                            except Exception:
+                                total_attempts = 3
 
-                        raw_att = job.get(attempts_col) if attempts_col else 0
-                        try:
-                            curr_attempts = int(raw_att) if raw_att is not None and str(raw_att).strip() != "" else 0
-                        except Exception:
-                            curr_attempts = 0
+                            raw_att = job.get(attempts_col) if attempts_col else 0
+                            try:
+                                curr_attempts = int(raw_att) if raw_att is not None and str(raw_att).strip() != "" else 0
+                            except Exception:
+                                curr_attempts = 0
 
-                        raw_delay = job.get(delay_col) if delay_col else 5000
-                        try:
-                            attempt_delay_ms = int(raw_delay) if raw_delay is not None and str(raw_delay).strip() != "" else 5000
-                        except Exception:
-                            attempt_delay_ms = 5000
+                            raw_delay = job.get(delay_col) if delay_col else 5000
+                            try:
+                                attempt_delay_ms = int(raw_delay) if raw_delay is not None and str(raw_delay).strip() != "" else 5000
+                            except Exception:
+                                attempt_delay_ms = 5000
 
-                        # 3. ATOMIC CLAIM: Increment attempt counter while keeping status valid
-                        claim_set = []
-                        if attempts_col:
-                            claim_set.append(f"{attempts_col} = COALESCE({attempts_col}, 0) + 1")
+                            # 3. ATOMIC CLAIM: Increment attempt counter and lock next_attempt_at into future (+5 mins)
+                            future_lock_dt = datetime.now() + timedelta(minutes=5)
+                            claim_set = []
+                            if attempts_col:
+                                claim_set.append(f"{attempts_col} = COALESCE({attempts_col}, 0) + 1")
+                            if next_attempt_col:
+                                claim_set.append(f"{next_attempt_col} = :lock_dt")
 
-                        claim_where = [
-                            f"{pk_col} = :jid",
-                            f"{status_col} = 'New'"
-                        ]
-                        if attempts_col and total_attempts_col:
-                            claim_where.append(f"(COALESCE({attempts_col}, 0) < COALESCE({total_attempts_col}, 3) OR {total_attempts_col} = 0)")
+                            claim_where = [
+                                f"{pk_col} = :jid",
+                                f"{status_col} = 'New'"
+                            ]
+                            if attempts_col and total_attempts_col:
+                                claim_where.append(f"(COALESCE({attempts_col}, 0) < COALESCE({total_attempts_col}, 3) OR {total_attempts_col} = 0)")
+                            if next_attempt_col:
+                                claim_where.append(f"({next_attempt_col} IS NULL OR {next_attempt_col} <= :now_dt)")
 
-                        if claim_set:
-                            claim_sql = f"""
-                                UPDATE {job_table}
-                                SET {', '.join(claim_set)}
-                                WHERE {' AND '.join(claim_where)}
-                            """
-                            with eng.begin() as conn:
-                                claim_res = conn.execute(text(claim_sql), {"jid": job_id})
-                                if claim_res.rowcount == 0:
-                                    # Another worker claimed or reached max attempts
+                            claim_binds = {"jid": job_id, "now_dt": datetime.now()}
+                            if next_attempt_col:
+                                claim_binds["lock_dt"] = future_lock_dt
+
+                            if claim_set:
+                                claim_sql = f"""
+                                    UPDATE {job_table}
+                                    SET {', '.join(claim_set)}
+                                    WHERE {' AND '.join(claim_where)}
+                                """
+                                with eng.begin() as conn:
+                                    claim_res = conn.execute(text(claim_sql), claim_binds)
+                                    if claim_res.rowcount == 0:
+                                        # Another worker thread/process claimed this row
+                                        continue
+
+                            new_attempt_count = curr_attempts + 1
+                            logger.info(f"[EMAIL_DISPATCHER] Processing Job #{job_id} [Attempt {new_attempt_count}/{total_attempts}].")
+
+                            # Guaranteed processing block
+                            job_start_time = time.time()
+                            try:
+                                server_id = job.get("email_server_id") or 1
+                                to_email = str(job.get("to_email") or job.get("email_to") or job.get("recipient") or "").strip()
+                                subject = str(job.get("subject") or job.get("email_subject") or "Notification")
+                                body = str(job.get("body") or job.get("email_body") or "")
+                                e_type = str(job.get("email_type") or "TEXT")
+                                cc = job.get("cc_email") or job.get("email_cc") or job.get("cc")
+
+                                if not to_email or "@" not in to_email:
+                                    err_msg = f"Invalid recipient email address: '{to_email}'"
+                                    logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Rejected: {err_msg}")
+                                    invalid_set = [f"{status_col} = 'Failed'"]
+                                    binds = {"jid": job_id}
+                                    if next_attempt_col:
+                                        invalid_set.append(f"{next_attempt_col} = NULL")
+                                    if error_col:
+                                        invalid_set.append(f"{error_col} = :err")
+                                        binds["err"] = err_msg
+                                    with eng.begin() as conn:
+                                        conn.execute(text(f"""
+                                            UPDATE {job_table}
+                                            SET {', '.join(invalid_set)}
+                                            WHERE {pk_col} = :jid
+                                        """), binds)
+                                    total_failed += 1
+                                    all_details.append({"job_id": job_id, "status": "Failed", "to": to_email, "error": err_msg})
                                     continue
 
-                        new_attempt_count = curr_attempts + 1
-                        logger.info(f"[EMAIL_DISPATCHER] Processing Job #{job_id} [Attempt {new_attempt_count}/{total_attempts}].")
+                                if server_id not in smtp_cache:
+                                    cfg = cls.get_smtp_config(cid, server_id)
+                                    if not cfg:
+                                        cfg = cls.get_smtp_config(None, server_id)
+                                    if cfg:
+                                        smtp_cache[server_id] = cfg
 
-                        # Guaranteed processing block
-                        job_start_time = time.time()
-                        try:
-                            server_id = job.get("email_server_id") or 1
-                            to_email = str(job.get("to_email") or job.get("email_to") or job.get("recipient") or "").strip()
-                            subject = str(job.get("subject") or job.get("email_subject") or "Notification")
-                            body = str(job.get("body") or job.get("email_body") or "")
-                            e_type = str(job.get("email_type") or "TEXT")
-                            cc = job.get("cc_email") or job.get("email_cc") or job.get("cc")
+                                smtp_cfg = smtp_cache.get(server_id)
+                                if not smtp_cfg:
+                                    err_msg = f"No active SMTP configuration found for email_server_id #{server_id}."
+                                    logger.error(f"[EMAIL_DISPATCHER] Job #{job_id} Failed: {err_msg}")
+                                    fail_set = [f"{status_col} = 'Failed'"]
+                                    binds = {"jid": job_id}
+                                    if next_attempt_col:
+                                        fail_set.append(f"{next_attempt_col} = NULL")
+                                    if error_col:
+                                        fail_set.append(f"{error_col} = :err")
+                                        binds["err"] = err_msg
+                                    with eng.begin() as conn:
+                                        conn.execute(text(f"""
+                                            UPDATE {job_table}
+                                            SET {', '.join(fail_set)}
+                                            WHERE {pk_col} = :jid
+                                        """), binds)
+                                    total_failed += 1
+                                    all_details.append({"job_id": job_id, "status": "Failed", "error": err_msg})
+                                    continue
 
-                            if not to_email or "@" not in to_email:
-                                err_msg = f"Invalid recipient email address: '{to_email}'"
-                                logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Rejected: {err_msg}")
-                                invalid_set = [f"{status_col} = 'Failed'"]
+                                cls.send_smtp_email(
+                                    smtp_cfg=smtp_cfg,
+                                    to_email=to_email,
+                                    subject=subject,
+                                    body=body,
+                                    email_type=e_type,
+                                    cc=cc
+                                )
+
+                                # 4. MARK AS 'Sent'
+                                sent_set = [f"{status_col} = 'Sent'"]
                                 binds = {"jid": job_id}
+                                if next_attempt_col:
+                                    sent_set.append(f"{next_attempt_col} = NULL")
+                                if sent_on_col:
+                                    sent_set.append(f"{sent_on_col} = :sent_dt")
+                                    binds["sent_dt"] = datetime.now()
                                 if error_col:
-                                    invalid_set.append(f"{error_col} = :err")
-                                    binds["err"] = err_msg
+                                    sent_set.append(f"{error_col} = NULL")
+
                                 with eng.begin() as conn:
                                     conn.execute(text(f"""
-                                        UPDATE {job_table}
-                                        SET {', '.join(invalid_set)}
-                                        WHERE {pk_col} = :jid
-                                    """), binds)
-                                total_failed += 1
-                                all_details.append({"job_id": job_id, "status": "Failed", "to": to_email, "error": err_msg})
-                                continue
+                                            UPDATE {job_table}
+                                            SET {', '.join(sent_set)}
+                                            WHERE {pk_col} = :jid
+                                        """), binds)
 
-                            if server_id not in smtp_cache:
-                                cfg = cls.get_smtp_config(cid, server_id)
-                                if not cfg:
-                                    cfg = cls.get_smtp_config(None, server_id)
-                                if cfg:
-                                    smtp_cache[server_id] = cfg
+                                exec_ms = round((time.time() - job_start_time) * 1000, 2)
+                                logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Successfully Delivered to {to_email} ({exec_ms}ms)")
+                                
+                                try:
+                                    WorkflowTelemetryLogger.log_audit_event(
+                                        action_name="SEND_EMAIL_DISPATCHED",
+                                        message=f"Email Job #{job_id} delivered to {to_email} (Subject: '{subject}')",
+                                        details={"job_id": job_id, "to": to_email, "subject": subject, "duration_ms": exec_ms}
+                                    )
+                                except Exception:
+                                    pass
 
-                            smtp_cfg = smtp_cache.get(server_id)
-                            if not smtp_cfg:
-                                err_msg = f"No active SMTP configuration found for email_server_id #{server_id}."
-                                logger.error(f"[EMAIL_DISPATCHER] Job #{job_id} Failed: {err_msg}")
-                                fail_set = [f"{status_col} = 'Failed'"]
-                                binds = {"jid": job_id}
+                                total_success += 1
+                                all_details.append({"job_id": job_id, "status": "Sent", "to": to_email, "subject": subject})
+
+                            except Exception as send_err:
+                                err_msg = str(send_err)[:255]
+                                logger.error(f"[EMAIL_DISPATCHER] Job #{job_id} Delivery Error on Attempt {new_attempt_count}/{total_attempts}: {send_err}")
+                                
+                                next_dt = datetime.now() + timedelta(milliseconds=attempt_delay_ms)
+                                is_failed = (total_attempts > 0 and new_attempt_count >= total_attempts)
+                                final_status = 'Failed' if is_failed else 'New'
+
+                                if is_failed:
+                                    logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Permanently FAILED after {new_attempt_count} attempts. Reason: {err_msg}")
+                                else:
+                                    logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Scheduled retry #{new_attempt_count + 1} at {next_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                                # 5. MARK AS 'New' (for retry) OR 'Failed' (if max attempts reached)
+                                fail_set = [f"{status_col} = :st"]
+                                binds = {"st": final_status, "jid": job_id}
+                                if next_attempt_col:
+                                    fail_set.append(f"{next_attempt_col} = :nxt")
+                                    binds["nxt"] = None if is_failed else next_dt
                                 if error_col:
                                     fail_set.append(f"{error_col} = :err")
                                     binds["err"] = err_msg
-                                with eng.begin() as conn:
-                                    conn.execute(text(f"""
-                                        UPDATE {job_table}
-                                        SET {', '.join(fail_set)}
-                                        WHERE {pk_col} = :jid
-                                    """), binds)
+
+                                try:
+                                    with eng.begin() as conn:
+                                        conn.execute(text(f"""
+                                            UPDATE {job_table}
+                                            SET {', '.join(fail_set)}
+                                            WHERE {pk_col} = :jid
+                                        """), binds)
+                                except Exception as update_err:
+                                    logger.error(f"[EMAIL_DISPATCHER] Fallback update error for job #{job_id}: {update_err}")
+
+                                try:
+                                    WorkflowTelemetryLogger.log_error(
+                                        message=f"Email Job #{job_id} Delivery Failed [Attempt {new_attempt_count}/{total_attempts}]",
+                                        error=err_msg,
+                                        details={"job_id": job_id, "to": to_email, "status": final_status, "attempts": new_attempt_count}
+                                    )
+                                except Exception:
+                                    pass
+
                                 total_failed += 1
-                                all_details.append({"job_id": job_id, "status": "Failed", "error": err_msg})
-                                continue
+                                all_details.append({"job_id": job_id, "status": final_status, "to": to_email, "error": err_msg})
 
-                            cls.send_smtp_email(
-                                smtp_cfg=smtp_cfg,
-                                to_email=to_email,
-                                subject=subject,
-                                body=body,
-                                email_type=e_type,
-                                cc=cc
-                            )
-
-                            # 4. MARK AS 'Sent'
-                            sent_set = [f"{status_col} = 'Sent'"]
-                            binds = {"jid": job_id}
-                            if sent_on_col:
-                                sent_set.append(f"{sent_on_col} = :sent_dt")
-                                binds["sent_dt"] = datetime.now()
-                            if error_col:
-                                sent_set.append(f"{error_col} = NULL")
-
-                            with eng.begin() as conn:
-                                conn.execute(text(f"""
-                                        UPDATE {job_table}
-                                        SET {', '.join(sent_set)}
-                                        WHERE {pk_col} = :jid
-                                    """), binds)
-
-                            exec_ms = round((time.time() - job_start_time) * 1000, 2)
-                            logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Successfully Delivered to {to_email} ({exec_ms}ms)")
-                            
-                            try:
-                                WorkflowTelemetryLogger.log_audit_event(
-                                    action_name="SEND_EMAIL_DISPATCHED",
-                                    message=f"Email Job #{job_id} delivered to {to_email} (Subject: '{subject}')",
-                                    details={"job_id": job_id, "to": to_email, "subject": subject, "duration_ms": exec_ms}
-                                )
-                            except Exception:
-                                pass
-
-                            total_success += 1
-                            all_details.append({"job_id": job_id, "status": "Sent", "to": to_email, "subject": subject})
-
-                        except Exception as send_err:
-                            err_msg = str(send_err)[:255]
-                            logger.error(f"[EMAIL_DISPATCHER] Job #{job_id} Delivery Error on Attempt {new_attempt_count}/{total_attempts}: {send_err}")
-                            
-                            next_dt = datetime.now() + timedelta(milliseconds=attempt_delay_ms)
-                            is_failed = (total_attempts > 0 and new_attempt_count >= total_attempts)
-                            final_status = 'Failed' if is_failed else 'New'
-
-                            if is_failed:
-                                logger.warning(f"[EMAIL_DISPATCHER] Job #{job_id} Permanently FAILED after {new_attempt_count} attempts. Reason: {err_msg}")
-                            else:
-                                logger.info(f"[EMAIL_DISPATCHER] Job #{job_id} Scheduled retry #{new_attempt_count + 1} at {next_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-
-                            # 5. MARK AS 'New' (for retry) OR 'Failed' (if max attempts reached)
-                            fail_set = [f"{status_col} = :st"]
-                            binds = {"st": final_status, "jid": job_id}
-                            if next_attempt_col:
-                                fail_set.append(f"{next_attempt_col} = :nxt")
-                                binds["nxt"] = next_dt
-                            if error_col:
-                                fail_set.append(f"{error_col} = :err")
-                                binds["err"] = err_msg
-
-                            try:
-                                with eng.begin() as conn:
-                                    conn.execute(text(f"""
-                                        UPDATE {job_table}
-                                        SET {', '.join(fail_set)}
-                                        WHERE {pk_col} = :jid
-                                    """), binds)
-                            except Exception as update_err:
-                                logger.error(f"[EMAIL_DISPATCHER] Fallback update error for job #{job_id}: {update_err}")
-
-                            try:
-                                WorkflowTelemetryLogger.log_error(
-                                    message=f"Email Job #{job_id} Delivery Failed [Attempt {new_attempt_count}/{total_attempts}]",
-                                    error=err_msg,
-                                    details={"job_id": job_id, "to": to_email, "status": final_status, "attempts": new_attempt_count}
-                                )
-                            except Exception:
-                                pass
-
-                            total_failed += 1
-                            all_details.append({"job_id": job_id, "status": final_status, "to": to_email, "error": err_msg})
+                        finally:
+                            with cls._in_flight_lock:
+                                cls._in_flight_jobs.discard(job_id)
 
                     total_processed += len(rows)
 
