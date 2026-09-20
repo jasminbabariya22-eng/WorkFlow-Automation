@@ -158,8 +158,15 @@ def list_workflow_definitions(
 
         result = []
         for b in seen_specs.values():
-            name_label = b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title()
-            parsed_graph = resolve_workflow_graph(b, db)
+            name_label = b.name or (b.description.split('->')[0].split('(')[0].strip() if b.description else b.spec_id.replace('_', ' ').title())
+            nodes_cnt = 3
+            if b.json_content:
+                try:
+                    parsed = py_json.loads(b.json_content) if isinstance(b.json_content, str) else b.json_content
+                    if isinstance(parsed, dict) and 'nodes' in parsed:
+                        nodes_cnt = len(parsed['nodes'])
+                except Exception:
+                    pass
             result.append({
                 "id": b.id,
                 "workflow_id": b.id,
@@ -173,10 +180,10 @@ def list_workflow_definitions(
                 "is_deleted": b.is_deleted or 0,
                 "created_on": b.created_on.isoformat() if b.created_on else None,
                 "updated_on": b.created_on.isoformat() if b.created_on else None,
-                "tags": [b.spec_id.split('_')[0].upper()],
-                "nodes_count": len(parsed_graph.get('nodes', [])),
+                "tags": [b.spec_id.split('_')[0].upper()] if b.spec_id else ["WORKFLOW"],
+                "nodes_count": nodes_cnt,
                 "xml_content": b.xml_content,
-                "json_content": parsed_graph
+                "json_content": b.json_content
             })
         return success_response(data=result)
     except Exception as e:

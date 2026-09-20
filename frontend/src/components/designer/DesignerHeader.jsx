@@ -22,6 +22,7 @@ export default function DesignerHeader({
   versionNumber,
   workflowStatus,
   workflowConnectionId,
+  onUpdateWorkflowConnection,
   saveStatus,
   saveWorkflow,
   handleAutoLayout,
@@ -37,29 +38,34 @@ export default function DesignerHeader({
   setShowMoreMenu,
   onClose
 }) {
+  const [dbConnections, setDbConnections] = useState([])
   const [dbName, setDbName] = useState('')
+
+  const isEditable = !workflowStatus || workflowStatus.toLowerCase() === 'draft' || workflowStatus.toLowerCase() === 'inactive'
+
+  useEffect(() => {
+    const fetcher = workflowStorage.getDatabaseConnections || workflowStorage.getConnections
+    if (typeof fetcher === 'function') {
+      fetcher.call(workflowStorage, true).then(conns => {
+        setDbConnections(conns || [])
+      }).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     if (!workflowConnectionId) {
       setDbName('')
       return
     }
-    const fetcher = workflowStorage.getDatabaseConnections || workflowStorage.getConnections
-    if (typeof fetcher === 'function') {
-      fetcher.call(workflowStorage).then(conns => {
-        const found = (conns || []).find(c => c.connection_id === Number(workflowConnectionId))
-        if (found) {
-          setDbName(found.connection_name)
-        } else if (Number(workflowConnectionId) === 4) {
-          setDbName('test_emp_leave')
-        }
-      }).catch(() => {
-        if (Number(workflowConnectionId) === 4) setDbName('test_emp_leave')
-      })
+    const found = (dbConnections || []).find(c => Number(c.connection_id) === Number(workflowConnectionId))
+    if (found) {
+      setDbName(found.connection_name)
     } else if (Number(workflowConnectionId) === 4) {
       setDbName('test_emp_leave')
+    } else {
+      setDbName(`DB #${workflowConnectionId}`)
     }
-  }, [workflowConnectionId])
+  }, [workflowConnectionId, dbConnections])
 
   return (
     <header className="wf-designer-header">
@@ -81,7 +87,7 @@ export default function DesignerHeader({
             type="text"
             className="wf-header-title-input"
             value={workflowName}
-            onChange={(e) => setWorkflowName(e.target.value)}
+            onChange={(e) => setWorkflowName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
             placeholder="Specification ID (e.g. leave_request_wf)"
             title="Click to edit Specification ID"
             id="workflow-spec-name"
@@ -97,7 +103,50 @@ export default function DesignerHeader({
           <span className={`wf-badge-status ${workflowStatus.toLowerCase()}`}>
             {workflowStatus}
           </span>
-          {workflowConnectionId ? (
+          {isEditable && onUpdateWorkflowConnection ? (
+            <div 
+              className="wf-header-db-select-wrapper" 
+              title="Select Client Database Connection" 
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', maxWidth: '175px', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.28)', borderRadius: '6px', padding: '2px 6px', boxSizing: 'border-box' }}
+            >
+              <Database size={11} color="#38bdf8" style={{ flexShrink: 0 }} />
+              <select
+                id="designer-header-db-select"
+                aria-label="Select Client Database"
+                value={workflowConnectionId || ''}
+                onChange={(e) => {
+                  const val = e.target.value ? Number(e.target.value) : null
+                  onUpdateWorkflowConnection(val)
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#38bdf8',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  maxWidth: '140px',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  paddingRight: '2px'
+                }}
+              >
+                <option value="" style={{ background: '#0f172a', color: '#e2e8f0' }}>★ Default DB</option>
+                {dbConnections.map(conn => (
+                  <option key={conn.connection_id} value={conn.connection_id} style={{ background: '#0f172a', color: '#e2e8f0' }}>
+                    {conn.connection_name}
+                  </option>
+                ))}
+                {workflowConnectionId && !dbConnections.some(c => Number(c.connection_id) === Number(workflowConnectionId)) && (
+                  <option key={workflowConnectionId} value={workflowConnectionId} style={{ background: '#0f172a', color: '#e2e8f0' }}>
+                    {Number(workflowConnectionId) === 4 ? 'test_emp_leave' : `DB #${workflowConnectionId}`}
+                  </option>
+                )}
+              </select>
+            </div>
+          ) : workflowConnectionId ? (
             <span className="wf-badge-db bound" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.12)', borderColor: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}>
               <Database size={11} />
               {dbName || (Number(workflowConnectionId) === 4 ? 'test_emp_leave' : `DB #${workflowConnectionId}`)}
@@ -194,12 +243,12 @@ export default function DesignerHeader({
                 position: 'absolute',
                 right: 0,
                 top: '40px',
-                background: '#1a1f2c',
-                border: '1px solid rgba(255,255,255,0.12)',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
                 borderRadius: '8px',
                 padding: '6px',
                 minWidth: '180px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
                 zIndex: 100
               }}
               onClick={() => setShowMoreMenu(false)}
@@ -214,7 +263,7 @@ export default function DesignerHeader({
                   padding: '8px 12px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#e2e8f0',
+                  color: '#334155',
                   fontSize: '12px',
                   cursor: 'pointer',
                   borderRadius: '4px'
@@ -234,7 +283,7 @@ export default function DesignerHeader({
                   padding: '8px 12px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#e2e8f0',
+                  color: '#334155',
                   fontSize: '12px',
                   cursor: 'pointer',
                   borderRadius: '4px'
@@ -244,7 +293,7 @@ export default function DesignerHeader({
                 <Upload size={13} />
                 <span>Import JSON</span>
               </button>
-              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+              <div style={{ height: '1px', background: '#e2e8f0', margin: '4px 0' }} />
               <button
                 className="wf-dropdown-item"
                 style={{
@@ -255,7 +304,7 @@ export default function DesignerHeader({
                   padding: '8px 12px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#f87171',
+                  color: '#dc2626',
                   fontSize: '12px',
                   cursor: 'pointer',
                   borderRadius: '4px'

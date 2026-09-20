@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from app.workflow.database import get_workflow_db, WorkflowSessionLocal
 from app.core.dependencies import get_current_user
 from app.core.response import success_response, error_response
-from app.core.logger import logger
+from app.core.logger import logger, WorkflowTelemetryLogger
 from app.core.database import DynamicEnginePool, ClientDatabaseAdapter
 from app.workflow_studio.bindings import (
     get_binding,
@@ -50,8 +50,8 @@ router = APIRouter(prefix="/api/v1/workflow-hub", tags=["Universal Workflow Hub 
 # ==========================================
 
 class UniversalWorkflowGatewayRequest(BaseModel):
-    spec_id: str = Field(..., description="Specification ID of the workflow (e.g. 'test_11', 'emp_leave_request', etc.)")
-    parameter: Dict[str, Any] = Field(..., description="Mandatory key-value parameters dictionary (e.g. {'id': '1', 'name': 'John'})")
+    spec_id: str = Field(..., description="Specification ID of the workflow (e.g. 'email_notification', 'test_11', etc.)")
+    parameter: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Key-value parameters dictionary containing workflow inputs, subject, and plain text or HTML body")
     operation: Optional[str] = Field("SUBMIT", description="Operation: SUBMIT (default), ACTION, APPROVE, REJECT, FETCH_RECORDS, GET_TASKS, SCHEMA, HISTORY, CATALOG")
     record_id: Optional[int] = Field(None, description="Target record primary key ID (required for ACTION and HISTORY)")
     action: Optional[str] = Field("APPROVE", description="Action code to execute: APPROVE, REJECT, etc.")
@@ -69,7 +69,7 @@ class UniversalWorkflowGatewayRequest(BaseModel):
 
 
 class HubSubmitRequest(BaseModel):
-    parameter: Dict[str, Any] = Field(..., description="Mandatory key-value parameters dictionary (e.g. {'id': '1', 'name': 'John'})")
+    parameter: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Key-value parameters dictionary containing workflow inputs, subject, and plain text or HTML body")
     data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional extra entity fields and initial workflow variables")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
     variables: Optional[Dict[str, Any]] = None
@@ -562,6 +562,29 @@ def submit_workflow_hub_record(
         current_task = wf_res.get("current_task_code")
 
         logger.info(f"UniversalHub: Submitted {table_name} #{new_record_id}, job #{instance_id}, state={wf_status}")
+        
+        # Telemetry & Observability Event
+        if instance_id:
+            try:
+                WorkflowTelemetryLogger.log_audit_event(
+                    action_name="WORKFLOW_SUBMIT",
+                    message=f"Workflow '{spec_id}' submitted successfully. Instance #{instance_id}, State={wf_status}, Task={current_task}",
+                    instance_id=instance_id,
+                    actor_id=parsed_user_id,
+                    actor_role="ClientApp",
+                    entity_type=table_name or spec_id or "generic",
+                    entity_id=int(new_record_id),
+                    details={
+                        "spec_id": spec_id,
+                        "status": wf_status,
+                        "current_task": current_task,
+                        "parameter": raw_params,
+                        "email_to": (wf_res.get("variables") or {}).get("email_to"),
+                        "email_cc": (wf_res.get("variables") or {}).get("email_cc")
+                    }
+                )
+            except Exception:
+                pass
     except Exception as ex:
         wf_res = {}
         wf_error = str(ex)
@@ -705,6 +728,29 @@ def execute_workflow_hub_action(
                 dynamic_variables[vk] = vv
             else:
                 dynamic_variables[vk] = str(vv)
+
+        # Telemetry & Observability Event
+        if res.get("instance_id"):
+            try:
+                WorkflowTelemetryLogger.log_audit_event(
+                    action_name=f"ACTION_{action.upper()}",
+                    message=f"Action '{action}' executed on Workflow '{spec_id}' (Instance #{res.get('instance_id')}). State={res.get('status')}",
+                    instance_id=res.get("instance_id"),
+                    actor_id=user_id,
+                    actor_role=user_role or "ClientApp",
+                    entity_type=table_name or spec_id or "generic",
+                    entity_id=int(entity_id),
+                    details={
+                        "spec_id": spec_id,
+                        "action": action,
+                        "status": res.get("status"),
+                        "current_task": res.get("current_task_code"),
+                        "remarks": payload.remarks,
+                        "parameter": raw_params
+                    }
+                )
+            except Exception:
+                pass
 
         return success_response(
             message=f"Action '{action}' executed successfully on record #{entity_id}.",

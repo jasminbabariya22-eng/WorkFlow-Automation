@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   GitBranch,
   Activity,
-  User,
   CheckCircle2,
   AlertTriangle,
   X,
@@ -228,9 +227,16 @@ function App() {
           </ul>
         </div>
 
-        <div className="user-tag">
-          <User size={14} color="#8b949e" />
-          <span>Administrator</span>
+        <div style={{
+          fontSize: '11px',
+          color: '#94a3b8',
+          textAlign: 'center',
+          lineHeight: '1.4',
+          paddingTop: '16px',
+          borderTop: '1px solid #f1f5f9',
+          userSelect: 'none'
+        }}>
+          ©Copyright, Alethe Labs India Pvt Ltd
         </div>
       </div>
 
@@ -238,21 +244,24 @@ function App() {
       <div className="main-content">
         <div className="top-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {currentView === 'dashboard' && (
-              <img 
-                src={massCapperLogo} 
-                alt="MASSCapper" 
-                style={{
-                  height: '32px',
-                  width: 'auto',
-                  objectFit: 'contain',
-                  display: 'block'
-                }}
-              />
+            <img 
+              src={massCapperLogo} 
+              alt="MASSCapper" 
+              style={{
+                height: '32px',
+                width: 'auto',
+                objectFit: 'contain',
+                display: 'block'
+              }}
+            />
+            {currentView === 'monitoring' && (
+              <>
+                <div style={{ width: '1px', height: '20px', background: '#e2e8f0' }} />
+                <span className="view-title" style={{ fontSize: '15px', fontWeight: '700', color: '#132B6E' }}>
+                  Monitoring & Observability
+                </span>
+              </>
             )}
-            {/* {currentView === 'monitoring' && (
-              <span className="view-title">Workflow Monitoring & Traces</span>
-            )} */}
           </div>
         </div>
 

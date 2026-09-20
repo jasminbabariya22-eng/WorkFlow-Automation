@@ -47,37 +47,71 @@ function Dashboard({ onOpenDesigner, showToast }) {
     }
   })
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null })
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
   
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [showDbModal, setShowDbModal] = useState(false)
+  const [deleteModalWorkflow, setDeleteModalWorkflow] = useState(null)
   const [executingWorkflow, setExecutingWorkflow] = useState(null)
   const [bindingModalWorkflow, setBindingModalWorkflow] = useState(null)
   const [dbConnections, setDbConnections] = useState([])
   const [activeBindings, setActiveBindings] = useState({})
+  const [copiedId, setCopiedId] = useState(null)
 
   // Form payloads
   const [newDraft, setNewDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '' })
   const [importDraft, setImportDraft] = useState({ spec_id: '', name: '', description: '', tags: '', connection_id: '', file: null })
   const [submitting, setSubmitting] = useState(false)
 
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Reset page when search or status filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedSearch, statusFilter])
+
+  // Real-time Specification ID sanitizer helper
+  const sanitizeSpecId = (val) => String(val || '').toLowerCase().replace(/[^a-z0-9_]/g, '_')
+
+  // Copy Spec ID helper with visual feedback
+  const handleCopySpecId = (specId, e) => {
+    e.stopPropagation()
+    if (!specId) return
+    navigator.clipboard.writeText(specId)
+    setCopiedId(specId)
+    showToast(`Copied '${specId}' to clipboard`, 'success')
+    setTimeout(() => setCopiedId(null), 1500)
+  }
+
   // Fetch all workflow definitions & database connections without blocking UI
   const fetchWorkflows = async (showLoadingSpinner = false) => {
     if (showLoadingSpinner) setLoading(true)
     try {
-      const wfList = await workflowStorage.getWorkflows()
+      const [wfList, conns] = await Promise.all([
+        workflowStorage.getWorkflows(),
+        workflowStorage.getDatabaseConnections(true)
+      ])
       if (Array.isArray(wfList)) {
         setWorkflows(wfList)
       }
-      setLoading(false)
-
-      // Background non-blocking connection loader
-      workflowStorage.getDatabaseConnections().then(conns => {
-        if (conns) setDbConnections(conns)
-      }).catch(() => {})
+      if (Array.isArray(conns)) {
+        setDbConnections(conns)
+      }
     } catch (error) {
+      // Non-blocking fallback
+    } finally {
       setLoading(false)
     }
   }
@@ -89,14 +123,14 @@ function Dashboard({ onOpenDesigner, showToast }) {
   // Create Draft Definition
   const handleCreateDraft = async (e) => {
     e.preventDefault()
-    const cleanSpec = String(newDraft.spec_id || '').trim().replace(/\s+/g, '_').toLowerCase()
+    const cleanSpec = sanitizeSpecId(newDraft.spec_id)
     if (!cleanSpec || !String(newDraft.name || '').trim()) {
       showToast('Specification ID and Name are required.', 'error')
       return
     }
 
     // Frontend validation: Check if Specification ID already exists
-    const duplicate = workflows.some(w => String(w.spec_id || '').trim().toLowerCase() === cleanSpec)
+    const duplicate = workflows.some(w => sanitizeSpecId(w.spec_id) === cleanSpec)
     if (duplicate) {
       showToast(`Specification ID '${cleanSpec}' already exists. Please enter a unique key.`, 'error')
       return
@@ -104,7 +138,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
 
     setSubmitting(true)
     try {
-      const created = await workflowStorage.createWorkflow(newDraft)
+      const created = await workflowStorage.createWorkflow({ ...newDraft, spec_id: cleanSpec })
       showToast('Draft created successfully', 'success')
       setShowCreateModal(false)
       setNewDraft({ spec_id: '', name: '', description: '', tags: '', connection_id: '' })
@@ -160,27 +194,48 @@ function Dashboard({ onOpenDesigner, showToast }) {
 
   // Publish Draft
   const handlePublish = async (id, e) => {
-    e.stopPropagation()
-    await workflowStorage.publishWorkflow(id)
-    showToast('Workflow published successfully', 'success')
-    await fetchWorkflows()
+    if (e && e.stopPropagation) e.stopPropagation()
+    setWorkflows(prev => prev.map(w => (Number(w.id) === Number(id) || Number(w.workflow_id) === Number(id) ? { ...w, status: 'Active', is_active: true } : w)))
+    try {
+      await workflowStorage.publishWorkflow(id)
+      showToast('Workflow published successfully', 'success')
+      fetchWorkflows()
+    } catch (err) {
+      showToast(err.message || 'Failed to publish workflow', 'error')
+      fetchWorkflows()
+    }
   }
 
   // Activate Version
   const handleActivate = async (id, e) => {
-    e.stopPropagation()
-    await workflowStorage.activateWorkflow(id)
-    showToast('Workflow version activated', 'success')
-    await fetchWorkflows()
+    if (e && e.stopPropagation) e.stopPropagation()
+    // Instant optimistic state update (0ms immediate feedback)
+    setWorkflows(prev => prev.map(w => (Number(w.id) === Number(id) || Number(w.workflow_id) === Number(id) ? { ...w, status: 'Active', is_active: true } : w)))
+    try {
+      await workflowStorage.activateWorkflow(id)
+      showToast('Workflow version activated', 'success')
+      fetchWorkflows()
+    } catch (err) {
+      showToast(err.message || 'Failed to activate workflow', 'error')
+      fetchWorkflows()
+    }
   }
 
   // Deactivate Version
   const handleDeactivate = async (id, e) => {
-    e.stopPropagation()
-    await workflowStorage.deactivateWorkflow(id)
-    showToast('Workflow version deactivated successfully', 'success')
-    await fetchWorkflows()
+    if (e && e.stopPropagation) e.stopPropagation()
+    // Instant optimistic state update (0ms immediate feedback)
+    setWorkflows(prev => prev.map(w => (Number(w.id) === Number(id) || Number(w.workflow_id) === Number(id) ? { ...w, status: 'Inactive', is_active: false } : w)))
+    try {
+      await workflowStorage.deactivateWorkflow(id)
+      showToast('Workflow version deactivated successfully', 'success')
+      fetchWorkflows()
+    } catch (err) {
+      showToast(err.message || 'Failed to deactivate workflow', 'error')
+      fetchWorkflows()
+    }
   }
+
 
   // Clone/Duplicate Draft
   const handleDuplicate = async (id, e) => {
@@ -191,9 +246,8 @@ function Dashboard({ onOpenDesigner, showToast }) {
   }
 
   // Delete Version
-  const handleDelete = async (wf, e) => {
+  const handleDelete = (wf, e) => {
     e.stopPropagation()
-    const wfId = typeof wf === 'object' && wf !== null ? (wf.id || wf.workflow_id) : wf
     const isActive = typeof wf === 'object' && wf !== null ? Boolean(wf.is_active || wf.status === 'Active' || wf.status === 'ACTIVE') : false
 
     if (isActive) {
@@ -201,12 +255,16 @@ function Dashboard({ onOpenDesigner, showToast }) {
       return
     }
 
-    if (!window.confirm('Are you sure you want to delete this workflow version? This action is permanent.')) {
-      return
-    }
+    setDeleteModalWorkflow(wf)
+  }
+
+  const confirmDeleteWorkflow = async () => {
+    if (!deleteModalWorkflow) return
+    const wfId = typeof deleteModalWorkflow === 'object' ? (deleteModalWorkflow.id || deleteModalWorkflow.workflow_id) : deleteModalWorkflow
     try {
       await workflowStorage.deleteWorkflow(wfId)
-      showToast('Deleted successfully', 'success')
+      showToast('Workflow deleted successfully', 'success')
+      setDeleteModalWorkflow(null)
       await fetchWorkflows()
     } catch (err) {
       showToast(err.message || 'Failed to delete workflow', 'error')
@@ -232,15 +290,88 @@ function Dashboard({ onOpenDesigner, showToast }) {
 
   // Filters and queries calculations
   const filteredWorkflows = workflows.filter(wf => {
-    const matchesSearch = 
-      (wf.spec_id && wf.spec_id.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (wf.name && wf.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (wf.description && wf.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    const q = (debouncedSearch || '').toLowerCase().trim()
+    const matchesSearch = !q ||
+      (wf.spec_id && wf.spec_id.toLowerCase().includes(q)) ||
+      (wf.name && wf.name.toLowerCase().includes(q)) ||
+      (wf.description && wf.description.toLowerCase().includes(q))
       
     const matchesStatus = statusFilter === '' || wf.status === statusFilter
     
     return matchesSearch && matchesStatus
   })
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        if (prev.direction === 'asc') return { key, direction: 'desc' }
+        if (prev.direction === 'desc') return { key: null, direction: null }
+      }
+      return { key, direction: 'asc' }
+    })
+  }
+
+  const sortedWorkflows = [...filteredWorkflows].sort((a, b) => {
+    if (!sortConfig.key || !sortConfig.direction) return 0
+    let aVal = a[sortConfig.key]
+    let bVal = b[sortConfig.key]
+
+    if (sortConfig.key === 'database') {
+      const connA = dbConnections.find(c => c.connection_id === a.connection_id)
+      const connB = dbConnections.find(c => c.connection_id === b.connection_id)
+      aVal = connA ? connA.connection_name : (a.connection_id ? `DB #${a.connection_id}` : 'Default DB')
+      bVal = connB ? connB.connection_name : (b.connection_id ? `DB #${b.connection_id}` : 'Default DB')
+    } else if (sortConfig.key === 'updated_at') {
+      aVal = a.updated_at || a.updated_on || a.created_on || a.created_at || ''
+      bVal = b.updated_at || b.updated_on || b.created_on || b.created_at || ''
+    } else if (sortConfig.key === 'tags') {
+      aVal = Array.isArray(a.tags) ? a.tags.join(',') : (a.tags || '')
+      bVal = Array.isArray(b.tags) ? b.tags.join(',') : (b.tags || '')
+    }
+
+    if (aVal == null) aVal = ''
+    if (bVal == null) bVal = ''
+
+    if (typeof aVal === 'string') {
+      const cmp = aVal.localeCompare(String(bVal), undefined, { numeric: true, sensitivity: 'base' })
+      return sortConfig.direction === 'asc' ? cmp : -cmp
+    } else {
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1
+      return 0
+    }
+  })
+
+  // Pagination calculation (10 per page)
+  const totalPages = Math.max(1, Math.ceil(sortedWorkflows.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const paginatedWorkflows = sortedWorkflows.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize)
+
+  const SortIcon = ({ columnKey }) => {
+    const isActive = sortConfig.key === columnKey
+    const dir = isActive ? sortConfig.direction : null
+    return (
+      <svg 
+        width="8" 
+        height="12" 
+        viewBox="0 0 8 12" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+      >
+        <path 
+          d="M4 1L7.5 5H0.5L4 1Z" 
+          fill={dir === 'asc' ? 'var(--color-accent-primary, #0284c7)' : '#94a3b8'} 
+          opacity={dir === 'asc' ? 1 : 0.45}
+        />
+        <path 
+          d="M4 11L0.5 7H7.5L4 11Z" 
+          fill={dir === 'desc' ? 'var(--color-accent-primary, #0284c7)' : '#94a3b8'} 
+          opacity={dir === 'desc' ? 1 : 0.45}
+        />
+      </svg>
+    )
+  }
 
   return (
     <div className="dashboard-view">
@@ -272,79 +403,198 @@ function Dashboard({ onOpenDesigner, showToast }) {
             >
               <option value="">All Statuses</option>
               <option value="Draft">Draft</option>
-              <option value="Published">Published</option>
               <option value="Active">Active</option>
-              <option value="Archived">Archived</option>
+              <option value="Published">Published</option>
+              <option value="Inactive">Inactive</option>
             </select>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            className="btn btn-secondary" 
-            onClick={() => setShowDbModal(true)}
-            style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-            title="Configure and test Client Database connections"
-          >
+        <div className="dashboard-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button className="btn btn-secondary" onClick={() => setShowDbModal(true)} title="Manage Client Database Connectors">
             <Database size={16} />
-            <span>Database Connections</span>
+            <span>Client Databases ({dbConnections.length})</span>
           </button>
           <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
             <Upload size={16} />
             <span>Import BPMN</span>
           </button>
           <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-            <Plus size={18} />
-            <span>New Workflow</span>
+            <Plus size={16} />
+            <span>Create Workflow</span>
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px' }}>
-          <Loader className="spinner" size={32} color="var(--color-accent-secondary)" />
+        <div className="loading-state">
+          <div className="spinner"></div>
+          <span>Loading workflow specifications...</span>
         </div>
-      ) : filteredWorkflows.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '80px 0', border: '1px dashed var(--border-glass)', borderRadius: '12px', background: 'var(--bg-card)' }}>
-          <FileCode size={48} color="var(--color-text-muted)" style={{ marginBottom: '16px' }} />
-          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: '500', marginBottom: '8px' }}>No workflows found</h3>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>Create a new draft or import a BPMN file to start designing.</p>
+      ) : sortedWorkflows.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📂</div>
+          <p>No workflow definitions match your current filter.</p>
         </div>
       ) : (
         <div className="glass-table-container">
           <table className="glass-table">
             <thead>
               <tr>
-                <th>Specification ID</th>
-                <th>Process Name</th>
-                <th>Database</th>
-                <th>Version</th>
-                <th>Status</th>
-                <th>Tags</th>
-                <th>Last Updated</th>
+                <th onClick={() => handleSort('spec_id')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Specification ID</span>
+                    <SortIcon columnKey="spec_id" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Process Name</span>
+                    <SortIcon columnKey="name" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('database')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Database</span>
+                    <SortIcon columnKey="database" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('version')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Version</span>
+                    <SortIcon columnKey="version" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('status')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Status</span>
+                    <SortIcon columnKey="status" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('tags')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Tags</span>
+                    <SortIcon columnKey="tags" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('updated_at')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span>Last Updated</span>
+                    <SortIcon columnKey="updated_at" />
+                  </div>
+                </th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredWorkflows.map(wf => (
+              {paginatedWorkflows.map(wf => (
                 <tr key={wf.id} onClick={() => onOpenDesigner(wf.id)}>
-                  <td style={{ fontWeight: '600', color: 'var(--color-accent-secondary)' }}>{wf.spec_id}</td>
-                  <td style={{ fontWeight: '500' }}>{wf.name}</td>
                   <td>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: 'var(--color-accent-secondary)', fontWeight: '500' }}>{wf.spec_id}</span>
+                      <button
+                        type="button"
+                        className="btn-icon-subtle"
+                        title="Copy Specification ID"
+                        onClick={(e) => handleCopySpecId(wf.spec_id, e)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '3px 4px',
+                          cursor: 'pointer',
+                          color: copiedId === wf.spec_id ? '#16a34a' : '#94a3b8',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          borderRadius: '4px',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {copiedId === wf.spec_id ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                    </div>
+                  </td>
+                  <td>{wf.name}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {(() => {
-                      const connId = wf.connection_id
+                      const isEditable = !wf.is_active || wf.status === 'Draft' || wf.status === 'Inactive' || wf.status === 'Published'
+                      const connId = wf.connection_id ? Number(wf.connection_id) : null
+                      const conn = dbConnections.find(c => Number(c.connection_id) === connId)
+                      const activeLabel = conn ? conn.connection_name : (connId ? `DB #${connId}` : 'Default DB')
+
+                      if (isEditable) {
+                        return (
+                          <div 
+                            title={`Client Database: ${activeLabel} (Click to change)`}
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '4px', 
+                              maxWidth: '165px',
+                              background: connId ? 'rgba(56, 189, 248, 0.08)' : 'rgba(255,255,255,0.04)', 
+                              border: connId ? '1px solid rgba(56, 189, 248, 0.28)' : '1px solid rgba(255,255,255,0.1)', 
+                              borderRadius: '6px', 
+                              padding: '2px 6px',
+                              boxSizing: 'border-box'
+                            }}
+                          >
+                            <Database size={11} color={connId ? '#38bdf8' : '#94a3b8'} style={{ flexShrink: 0 }} />
+                            <select
+                              aria-label={`Select Client Database for ${wf.spec_id}`}
+                              value={connId || ''}
+                              onChange={async (e) => {
+                                const newId = e.target.value ? Number(e.target.value) : null
+                                try {
+                                  await workflowStorage.saveWorkflow(wf.id, { connection_id: newId })
+                                  showToast(`Database updated to ${newId ? (dbConnections.find(c => Number(c.connection_id) === newId)?.connection_name || `DB #${newId}`) : 'Default DB'} for '${wf.spec_id}'`, 'success')
+                                  await fetchWorkflows()
+                                } catch (err) {
+                                  showToast('Failed to update DB: ' + err.message, 'error')
+                                }
+                              }}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: connId ? '#38bdf8' : '#94a3b8',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                outline: 'none',
+                                maxWidth: '135px',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                paddingRight: '2px'
+                              }}
+                            >
+                              <option value="" style={{ background: '#0f172a', color: '#e2e8f0' }}>★ Default DB</option>
+                              {dbConnections.map(c => (
+                                <option key={c.connection_id} value={c.connection_id} style={{ background: '#0f172a', color: '#e2e8f0' }}>
+                                  {c.connection_name}
+                                </option>
+                              ))}
+                              {connId && !dbConnections.some(c => Number(c.connection_id) === connId) && (
+                                <option key={connId} value={connId} style={{ background: '#0f172a', color: '#e2e8f0' }}>
+                                  DB #{connId}
+                                </option>
+                              )}
+                            </select>
+                          </div>
+                        )
+                      }
+
                       if (!connId) {
                         return (
-                          <span style={{ fontSize: '11px', color: '#94a3b8', background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          <span style={{ fontSize: '11px', color: '#94a3b8', background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)', display: 'inline-flex', alignItems: 'center', gap: '4px', maxWidth: '165px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             ★ Default DB
                           </span>
                         )
                       }
-                      const conn = dbConnections.find(c => c.connection_id === connId)
                       return (
-                        <span style={{ fontSize: '11px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.25)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <Database size={10} />
-                          {conn ? conn.connection_name : `DB #${connId}`}
+                        <span style={{ fontSize: '11px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.25)', display: 'inline-flex', alignItems: 'center', gap: '4px', maxWidth: '165px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Database size={10} style={{ flexShrink: 0 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {conn ? conn.connection_name : `DB #${connId}`}
+                          </span>
                         </span>
                       )
                     })()}
@@ -429,6 +679,82 @@ function Dashboard({ onOpenDesigner, showToast }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Pagination Footer Bar */}
+      {!loading && sortedWorkflows.length > 0 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: '16px',
+          padding: '12px 18px',
+          background: 'var(--bg-glass)',
+          border: '1px solid var(--border-glass)',
+          borderRadius: '12px',
+          fontSize: '13px',
+          color: 'var(--color-text-muted)'
+        }}>
+          <div>
+            Showing <strong style={{ color: 'var(--color-text-main)' }}>{((safeCurrentPage - 1) * pageSize) + 1}</strong> to <strong style={{ color: 'var(--color-text-main)' }}>{Math.min(safeCurrentPage * pageSize, sortedWorkflows.length)}</strong> of <strong style={{ color: 'var(--color-text-main)' }}>{sortedWorkflows.length}</strong> workflows
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              style={{ opacity: safeCurrentPage <= 1 ? 0.4 : 1, cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer' }}
+            >
+              Previous
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - safeCurrentPage) <= 1)
+              .reduce((acc, p, idx, arr) => {
+                if (idx > 0 && p - arr[idx - 1] > 1) {
+                  acc.push('ellipsis-' + p)
+                }
+                acc.push(p)
+                return acc
+              }, [])
+              .map((item, idx) => {
+                if (typeof item === 'string') {
+                  return <span key={idx} style={{ padding: '0 4px', color: 'var(--color-text-muted)' }}>...</span>
+                }
+                const isActive = item === safeCurrentPage
+                return (
+                  <button
+                    key={item}
+                    onClick={() => setCurrentPage(item)}
+                    style={{
+                      minWidth: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      border: isActive ? '1px solid #132B6E' : '1px solid var(--border-glass)',
+                      background: isActive ? '#132B6E' : 'transparent',
+                      color: isActive ? '#ffffff' : 'var(--color-text-main)',
+                      fontWeight: isActive ? '700' : '500',
+                      fontSize: '12.5px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {item}
+                  </button>
+                )
+              })}
+
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              style={{ opacity: safeCurrentPage >= totalPages ? 0.4 : 1, cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer' }}
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
 
@@ -547,7 +873,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
                   placeholder="e.g. ImportedRiskWorkflow"
                   required
                   value={importDraft.spec_id}
-                  onChange={(e) => setImportDraft({ ...importDraft, spec_id: e.target.value })}
+                  onChange={(e) => setImportDraft({ ...importDraft, spec_id: sanitizeSpecId(e.target.value) })}
                 />
               </div>
               <div className="form-group">
@@ -585,7 +911,7 @@ function Dashboard({ onOpenDesigner, showToast }) {
                   name="import_spec_tags"
                   aria-label="Tags (comma-separated)"
                   className="form-control" 
-                  placeholder="imported, workflow"
+                  placeholder="imported, bpmn"
                   value={importDraft.tags}
                   onChange={(e) => setImportDraft({ ...importDraft, tags: e.target.value })}
                 />
@@ -635,6 +961,38 @@ function Dashboard({ onOpenDesigner, showToast }) {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {deleteModalWorkflow && (
+        <div className="modal-overlay" onClick={() => setDeleteModalWorkflow(null)}>
+          <div className="modal-content" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#dc2626' }}>
+                <Trash2 size={18} />
+                <span className="modal-title" style={{ fontSize: '16px', margin: 0, color: '#0f172a' }}>Delete Specification</span>
+              </div>
+              <X size={18} style={{ cursor: 'pointer', color: 'var(--color-text-muted)' }} onClick={() => setDeleteModalWorkflow(null)} />
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, margin: 0 }}>
+              Are you sure you want to permanently delete specification <strong style={{ color: '#0f172a' }}>{deleteModalWorkflow.spec_id || deleteModalWorkflow.name}</strong>? All associated graph definitions and drafts will be removed.
+            </p>
+            <div className="modal-actions" style={{ marginTop: '8px' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setDeleteModalWorkflow(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmDeleteWorkflow}
+                style={{ background: '#dc2626', color: '#fff' }}
+              >
+                <Trash2 size={14} />
+                <span>Delete Permanently</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Workflow Execution & Test Runner Modal */}
       {executingWorkflow && (
         <ExecutionModal 
@@ -648,7 +1006,10 @@ function Dashboard({ onOpenDesigner, showToast }) {
       {/* Client Database Connections & Data Sources Modal */}
       {showDbModal && (
         <DatabaseConnectionsModal 
-          onClose={() => setShowDbModal(false)}
+          onClose={() => {
+            setShowDbModal(false)
+            fetchWorkflows()
+          }}
           showToast={showToast}
         />
       )}

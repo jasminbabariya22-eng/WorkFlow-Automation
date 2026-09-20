@@ -190,9 +190,10 @@ def update_workflow_definition(
         if not definition:
             raise HTTPException(status_code=404, detail="Workflow definition not found")
 
-        # Draft versions can be updated in-place. Published versions are read-only.
-        if definition.status != "Draft" and definition.version != 1:
-            raise HTTPException(status_code=400, detail="Only Draft / Version 1 specifications can be edited in-place.")
+        # Allow editing Draft, Inactive, or non-active versions in-place
+        if definition.is_active and definition.status == "Active":
+            if payload.json_content or payload.xml_content:
+                raise HTTPException(status_code=400, detail="Active workflows cannot have graph structure modified. Please deactivate first.")
 
         if payload.name:
             definition.name = payload.name
@@ -210,13 +211,13 @@ def update_workflow_definition(
 
         if payload.tags:
             definition.tags = payload.tags
-        if payload.connection_id is not None:
+        if "connection_id" in payload.__fields_set__ or payload.connection_id is not None or hasattr(payload, "connection_id"):
             definition.connection_id = payload.connection_id
             
         definition.updated_on = datetime.now()
         db.commit()
         
-        return success_response(message="Draft workflow updated successfully")
+        return success_response(message="Workflow updated successfully")
     except Exception as e:
         db.rollback()
         return error_response(message=str(e), status_code=400)
@@ -433,7 +434,7 @@ def duplicate_workflow_definition(
     try:
         cloned = WorkflowManagementService.duplicate_workflow(db, id, current_user["id"])
         return success_response(
-            data={"id": cloned.id, "spec_id": cloned.spec_id},
+            data={"id": cloned.id, "spec_id": cloned.spec_id, "connection_id": cloned.connection_id},
             message=f"Cloned into new draft specification '{cloned.spec_id}' successfully"
         )
     except Exception as e:

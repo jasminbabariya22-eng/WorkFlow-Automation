@@ -76,7 +76,15 @@ class DynamicEnginePool:
         elif clean_type == "mysql":
             return f"mysql+pymysql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
         elif clean_type == "mssql":
-            return f"mssql+pymssql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+            try:
+                import pymssql
+                return f"mssql+pymssql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
+            except ImportError:
+                try:
+                    import pyodbc
+                    return f"mssql+pyodbc://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}?driver=ODBC+Driver+17+for+SQL+Server"
+                except ImportError:
+                    return f"mssql+pymssql://{encoded_user}:{encoded_pwd}@{host}:{port}/{database_name}"
         elif clean_type == "sqlite":
             return f"sqlite:///{database_name}"
         elif clean_type == "oracle":
@@ -379,17 +387,20 @@ class ClientDatabaseAdapter:
         return "public"
 
     @staticmethod
-    def _build_active_filter(col_meta_dict: dict) -> str:
-        if "is_deleted" in col_meta_dict:
-            dtype = str(col_meta_dict["is_deleted"].get("type", "")).lower()
+    def _build_active_filter(col_meta_dict: dict, alias: Optional[str] = None) -> str:
+        pfx = f"{alias}." if alias else ""
+        if "is_deleted" in col_meta_dict or "isdeleted" in col_meta_dict:
+            k = "is_deleted" if "is_deleted" in col_meta_dict else "isdeleted"
+            dtype = str(col_meta_dict[k].get("type", "")).lower()
             if "bool" in dtype:
-                return "WHERE is_deleted IS FALSE"
-            return "WHERE is_deleted = 0"
-        if "is_active" in col_meta_dict:
-            dtype = str(col_meta_dict["is_active"].get("type", "")).lower()
+                return f"WHERE {pfx}{k} IS FALSE"
+            return f"WHERE {pfx}{k} = 0"
+        if "is_active" in col_meta_dict or "isactive" in col_meta_dict:
+            k = "is_active" if "is_active" in col_meta_dict else "isactive"
+            dtype = str(col_meta_dict[k].get("type", "")).lower()
             if "bool" in dtype:
-                return "WHERE is_active IS TRUE"
-            return "WHERE is_active = 1"
+                return f"WHERE {pfx}{k} IS TRUE"
+            return f"WHERE {pfx}{k} = 1"
         return ""
 
     @staticmethod
@@ -441,6 +452,104 @@ class ClientDatabaseAdapter:
             return []
 
     @staticmethod
+    def get_reports_to(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieves user hierarchy with parent user email based on ParentUserId self-join on AspNetUsers:
+        SELECT 
+            u.Id                 AS UserId,
+            u.UserName           AS UserName,
+            u.FullName           AS UserFullName,
+            u.Email              AS UserEmail,
+            u.ParentUserId       AS ParentUserId,
+            COALESCE(p.FullName, p.UserName, p.Email) AS ParentUserName,
+            p.Email              AS ParentUserEmail
+        FROM AspNetUsers u
+        LEFT JOIN AspNetUsers p ON u.ParentUserId = p.Id;
+        """
+        from sqlalchemy import inspect
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            inspector = inspect(eng)
+            target_schema = ClientDatabaseAdapter._resolve_target_schema(schema, connection_id)
+
+            schema_tables = inspector.get_table_names(schema=target_schema) if target_schema else []
+            all_tables = inspector.get_table_names()
+
+            table_map = {t.lower(): (t, target_schema) for t in schema_tables}
+            for t in all_tables:
+                if t.lower() not in table_map:
+                    table_map[t.lower()] = (t, None)
+
+            user_candidates = ["aspnetusers", "users", "mst_users", "tbl_users", "user_master", "user", "app_users", "employees", "mst_employees", "sec_users"]
+            found_table = None
+            active_schema = None
+
+            for candidate in user_candidates:
+                if candidate in table_map:
+                    found_table, active_schema = table_map[candidate]
+                    break
+
+            if not found_table:
+                return []
+
+            cols_meta = inspector.get_columns(found_table, schema=active_schema)
+            col_meta_dict = {c["name"].lower(): c for c in cols_meta}
+            col_names_lower = list(col_meta_dict.keys())
+
+            id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["id", "user_id", "employee_id", "emp_id", "code", "userid"]), cols_meta[0]["name"])
+            email_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["email", "normalizedemail", "email_id", "mail", "user_email"]), None)
+            full_name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["fullname", "full_name"]), None)
+            user_name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["username", "user_name", "normalizedusername", "name", "employee_name"]), None)
+            parent_user_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["parentuserid", "parent_user_id", "parentid", "parent_id", "reportstoid", "reportsto", "reports_to", "reports_to_id", "managerid", "manager_id"]), None)
+
+            if not parent_user_col or not email_col:
+                return []
+
+            table_ref = f"{active_schema}.{found_table}" if active_schema else found_table
+
+            p_name_expr = f"COALESCE(p.{full_name_col}, p.{user_name_col}, p.{email_col})" if (full_name_col and user_name_col) else (f"COALESCE(p.{user_name_col}, p.{email_col})" if user_name_col else f"p.{id_col}")
+            u_name_expr = f"u.{full_name_col}" if full_name_col else (f"u.{user_name_col}" if user_name_col else f"u.{id_col}")
+
+            query = f"""
+                SELECT 
+                    u.{id_col} AS UserId,
+                    {f"u.{user_name_col} AS UserName," if user_name_col else f"u.{id_col} AS UserName,"}
+                    {f"u.{full_name_col} AS UserFullName," if full_name_col else f"{u_name_expr} AS UserFullName,"}
+                    u.{email_col} AS UserEmail,
+                    u.{parent_user_col} AS ParentUserId,
+                    {p_name_expr} AS ParentUserName,
+                    p.{email_col} AS ParentUserEmail
+                FROM {table_ref} u
+                LEFT JOIN {table_ref} p ON CAST(u.{parent_user_col} AS VARCHAR(255)) = CAST(p.{id_col} AS VARCHAR(255))
+                WHERE u.{parent_user_col} IS NOT NULL
+            """
+
+            with eng.connect() as conn:
+                rows = conn.execute(text(query)).mappings().fetchall()
+                results = []
+                for r in rows:
+                    u_email = r.get("UserEmail")
+                    p_email = r.get("ParentUserEmail")
+                    u_name = r.get("UserFullName") or r.get("UserName") or u_email
+                    p_name = r.get("ParentUserName") or p_email or "Manager"
+
+                    if u_email and p_email:
+                        results.append({
+                            "user_id": str(r.get("UserId")),
+                            "user_name": str(u_name),
+                            "user_email": str(u_email),
+                            "parent_user_id": str(r.get("ParentUserId")),
+                            "parent_user_name": str(p_name),
+                            "parent_user_email": str(p_email),
+                            "display_label": f"{p_name} -> {u_name} ({u_email} -> {p_email})",
+                            "both_emails": f"{u_email}, {p_email}"
+                        })
+                return results
+        except Exception as ex:
+            logger.warning(f"ClientDatabaseAdapter: get_reports_to error: {ex}")
+            return []
+
+    @staticmethod
     def get_users(schema: Optional[str] = None, connection_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Retrieves users from the Client Database dynamically. Auto-adapts to column naming conventions including AspNetUsers."""
         from sqlalchemy import inspect
@@ -477,7 +586,8 @@ class ClientDatabaseAdapter:
             email_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["email", "normalizedemail", "email_id", "mail", "user_email"]), None)
 
             has_first_last = "first_name" in col_names_lower and "last_name" in col_names_lower
-            name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["fullname", "full_name", "username", "user_name", "name", "employee_name", "normalizedusername"]), None)
+            full_name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["fullname", "full_name"]), None)
+            user_name_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["username", "user_name", "normalizedusername", "name", "employee_name"]), None)
 
             role_id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["role_id", "user_role_id", "role", "roleid"]), None)
             dept_id_col = next((c["name"] for c in cols_meta if c["name"].lower() in ["departmentid", "department_id", "dept_id", "department", "dept"]), None)
@@ -489,10 +599,13 @@ class ClientDatabaseAdapter:
             if has_first_last:
                 select_fields.append("first_name")
                 select_fields.append("last_name")
-            elif name_col:
-                select_fields.append(f"{name_col} AS name")
             else:
-                select_fields.append(f"{id_col} AS name")
+                if full_name_col:
+                    select_fields.append(f"{full_name_col} AS full_name")
+                if user_name_col and user_name_col != full_name_col:
+                    select_fields.append(f"{user_name_col} AS user_name")
+                elif not full_name_col and not user_name_col:
+                    select_fields.append(f"{id_col} AS user_name")
 
             if email_col:
                 select_fields.append(f"{email_col} AS email")
@@ -504,16 +617,19 @@ class ClientDatabaseAdapter:
             query = f"SELECT {', '.join(select_fields)} FROM {table_ref} {filter_clause} ORDER BY {id_col}"
 
             with eng.connect() as conn:
-                rows = conn.execute(text(query)).mappings().fetchmany(100)
+                rows = conn.execute(text(query)).mappings().fetchall()
                 result = []
                 for u in rows:
                     if has_first_last:
                         display_name = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or str(u["id"])
                     else:
-                        display_name = str(u.get("name") or u["id"])
+                        display_name = u.get("full_name") or u.get("user_name") or u.get("email") or str(u["id"])
+
                     result.append({
                         "id": str(u["id"]),
-                        "name": display_name,
+                        "name": str(display_name),
+                        "user_name": str(u.get("user_name")) if u.get("user_name") is not None else None,
+                        "full_name": str(u.get("full_name")) if u.get("full_name") is not None else None,
                         "email": u.get("email"),
                         "role_id": str(u.get("role_id")) if u.get("role_id") is not None else None,
                         "dept_id": str(u.get("dept_id")) if u.get("dept_id") is not None else None
@@ -1477,16 +1593,16 @@ class ClientDatabaseAdapter:
             pk_col = next((cols[c] for c in ["id", "user_id", "employee_id", "emp_id", "userid"] if c in cols), list(cols.values())[0])
 
             with eng.connect() as conn:
-                # Direct single table lookup
                 try:
-                    sql_simple = f"SELECT * FROM {full_u} WHERE CAST({pk_col} AS VARCHAR(255)) = :uid"
-                    row = conn.execute(text(sql_simple), {"uid": str(user_id)}).mappings().first()
+                    sql = f"SELECT * FROM {full_u} WHERE CAST({pk_col} AS VARCHAR(255)) = :uid"
+                    row = conn.execute(text(sql), {"uid": str(user_id)}).mappings().first()
                     if row:
                         r_dict = dict(row)
                         name_val = r_dict.get("FullName") or r_dict.get("full_name") or r_dict.get("UserName") or r_dict.get("username") or r_dict.get("name") or str(user_id)
                         email_val = r_dict.get("Email") or r_dict.get("email") or r_dict.get("NormalizedEmail")
                         dept_val = r_dict.get("DepartmentId") or r_dict.get("department_id") or r_dict.get("dept_id") or ""
                         role_n = r_dict.get("role_name") or r_dict.get("role") or "USER"
+
                         prof = {
                             "id": str(r_dict.get(pk_col)),
                             "name": str(name_val),

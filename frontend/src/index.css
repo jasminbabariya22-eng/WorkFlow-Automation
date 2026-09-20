@@ -8,8 +8,8 @@
 
   --color-text-primary: #0f172a;
   --color-text-muted: #64748b;
-  --color-accent: #6366f1;
-  --color-accent-glow: rgba(99, 102, 241, 0.2);
+  --color-accent: #132B6E;
+  --color-accent-glow: rgba(19, 43, 110, 0.2);
   --color-accent-secondary: #0284c7;
 
   --color-success: #16a34a;
@@ -29,6 +29,7 @@
   margin: 0;
   padding: 0;
   font-family: inherit;
+  font-weight: 400;
 }
 
 body {
@@ -36,6 +37,7 @@ body {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -104,8 +106,8 @@ body {
 
 .brand-name {
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 600;
   letter-spacing: 0.2px;
   color: #0f172a;
 }
@@ -126,7 +128,7 @@ body {
   border-radius: 8px;
   color: #64748b;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 400;
   font-size: 13px;
   transition: var(--transition-smooth);
   user-select: none;
@@ -138,10 +140,14 @@ body {
 }
 
 .nav-item.active {
-  color: #4f46e5;
-  background: #eef2ff;
-  font-weight: 600;
-  border-left: 3px solid #4f46e5;
+  color: #132B6E;
+  background: rgba(19, 43, 110, 0.08);
+  font-weight: 700;
+  border-left: 3px solid #132B6E;
+}
+
+.nav-item.active span {
+  font-weight: 700;
 }
 
 /* Main Workspace */
@@ -170,7 +176,7 @@ body {
   font-family: var(--font-display);
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: #132B6E;
 }
 
 .user-tag {
@@ -181,7 +187,7 @@ body {
   background: #f1f5f9;
   border-radius: 20px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
   color: #475569;
   border: 1px solid #e2e8f0;
 }
@@ -268,16 +274,30 @@ body {
   padding: 12px 18px;
   border-bottom: 1px solid #e2e8f0;
   font-size: 13px;
+  font-weight: 400;
   white-space: nowrap;
 }
 
 .glass-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   background: #f8fafc;
-  color: #475569;
-  font-weight: 600;
+  color: #0f172a;
+  font-weight: 700;
   text-transform: capitalize;
   font-size: 12px;
   letter-spacing: 0.2px;
+  transition: color 0.15s ease;
+  box-shadow: 0 1px 0 #e2e8f0;
+}
+
+.glass-table th span {
+  font-weight: 700;
+}
+
+.glass-table th:hover {
+  color: #132B6E;
 }
 
 .glass-table tbody tr {
@@ -297,7 +317,7 @@ body {
   padding: 3px 9px;
   border-radius: 12px;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .status-badge.draft {
@@ -331,7 +351,7 @@ body {
   gap: 8px;
   padding: 8px 14px;
   border-radius: 6px;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   font-family: var(--font-sans);
   cursor: pointer;
@@ -341,13 +361,13 @@ body {
 }
 
 .btn-primary {
-  background: #4f46e5;
+  background: #132B6E;
   color: #fff;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
+  box-shadow: 0 2px 8px rgba(19, 43, 110, 0.25);
 }
 
 .btn-primary:hover {
-  background: #4338ca;
+  background: #0d1e4d;
   transform: translateY(-1px);
 }
 
@@ -454,7 +474,7 @@ body {
   border: none;
   color: #64748b;
   padding: 12px;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   cursor: pointer;
   transition: var(--transition-smooth);
@@ -480,7 +500,7 @@ body {
 .form-label {
   display: block;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-text-muted);
   text-transform: uppercase;
   margin-bottom: 8px;
@@ -495,7 +515,7 @@ body {
   border-radius: 8px;
   color: var(--color-text-primary);
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 400;
   transition: var(--transition-smooth);
 }
 
@@ -663,8 +683,8 @@ textarea.form-control {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 24px;
-  height: calc(100vh - 110px);
-  padding: 0 32px 32px 32px;
+  height: calc(100vh - 175px);
+  padding: 0;
 }
 
 .sidebar-card-list {
@@ -2149,13 +2169,13 @@ textarea.form-control {
 }
 
 .wf-header-title-wrapper:focus-within {
-  border-color: #6366f1;
+  border-color: #132B6E;
   background: #ffffff;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 2px rgba(19, 43, 110, 0.15);
 }
 
 .wf-title-icon {
-  color: #6366f1;
+  color: #132B6E;
   flex-shrink: 0;
 }
 
@@ -2165,7 +2185,7 @@ textarea.form-control {
   outline: none;
   color: #0f172a;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   width: 100%;
   padding: 0;
 }
@@ -2188,7 +2208,7 @@ textarea.form-control {
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2196,7 +2216,7 @@ textarea.form-control {
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2217,7 +2237,7 @@ textarea.form-control {
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2241,7 +2261,7 @@ textarea.form-control {
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   transition: all 0.25s ease;
 }
@@ -2269,13 +2289,13 @@ textarea.form-control {
 }
 
 .wf-save-saving {
-  color: #4338ca;
+  color: #132B6E;
   background: #e0e7ff;
   border: 1px solid #c7d2fe;
 }
 
 .wf-save-saving .wf-save-dot {
-  background: #6366f1;
+  background: #132B6E;
   animation: pulse-save 0.8s ease-in-out infinite;
 }
 
@@ -2339,7 +2359,7 @@ textarea.form-control {
   padding: 0 12px;
   border-radius: 6px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -2383,16 +2403,16 @@ textarea.form-control {
 }
 
 .wf-btn-primary {
-  background: #4f46e5;
+  background: #132B6E;
   color: #ffffff;
-  border: 1px solid #4338ca;
-  font-weight: 600;
-  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+  border: 1px solid #0d1e4d;
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(19, 43, 110, 0.25);
 }
 
 .wf-btn-primary:hover {
-  background: #4338ca;
-  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.35);
+  background: #0d1e4d;
+  box-shadow: 0 4px 10px rgba(19, 43, 110, 0.35);
 }
 
 .wf-btn-icon {
@@ -4753,59 +4773,57 @@ textarea.form-control {
   gap: 2px;
 }
 
-.wf-email-toolbar {
+.wf-email-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .wf-email-toolbar-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   color: #0f172a;
 }
 
-.wf-email-tabs {
-  display: flex;
+.wf-email-tabs-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   padding: 3px;
-  border-radius: 6px;
+  border-radius: 8px;
+  margin-bottom: 14px;
 }
 
-.wf-email-tab-btn {
+.wf-email-tab-pill {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  font-size: 11px;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
   font-weight: 600;
   color: #64748b;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.wf-email-tab-btn:hover {
+.wf-email-tab-pill:hover {
   color: #0f172a;
-  background: #e2e8f0;
 }
 
-.wf-email-tab-btn.active {
-  background: #6366f1;
-  color: #ffffff;
-  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.25);
+.wf-email-tab-pill.active {
+  background: #ffffff;
+  color: #4f46e5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .wf-token-bar {
@@ -5312,4 +5330,30 @@ textarea.form-control {
   color: #dc2626;
   border-color: #fca5a5;
   background: #fee2e2;
+}
+
+/* Custom Scrollbar Styles for Connectors & Modals */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dashboard-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }

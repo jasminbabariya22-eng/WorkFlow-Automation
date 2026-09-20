@@ -942,6 +942,22 @@ function DesignerCanvas({ workflowId, onSelectWorkflow, onClose, showToast }) {
     }
   }, [workflowId, workflowName, workflowConnectionId, nodes, edges, showToast])
 
+  const handleUpdateWorkflowConnection = useCallback(async (newConnId) => {
+    setWorkflowConnectionId(newConnId)
+    if (workflowId) {
+      try {
+        await workflowStorage.saveWorkflow(workflowId, {
+          name: workflowName,
+          connection_id: newConnId,
+          json_content: JSON.stringify({ nodes, edges })
+        })
+        showToast('Client Database connection updated', 'success')
+      } catch (err) {
+        showToast('Failed to update DB connection: ' + err.message, 'error')
+      }
+    }
+  }, [workflowId, workflowName, nodes, edges, showToast])
+
   // =========================================================================
   // AUTO-SAVE WITH DEBOUNCE (1000ms)
   // =========================================================================
@@ -1658,6 +1674,7 @@ function DesignerCanvas({ workflowId, onSelectWorkflow, onClose, showToast }) {
         versionNumber={versionNumber}
         workflowStatus={workflowStatus}
         workflowConnectionId={workflowConnectionId}
+        onUpdateWorkflowConnection={handleUpdateWorkflowConnection}
         saveStatus={saveStatus}
         saveWorkflow={handleSaveDraft}
         handleUndo={handleUndo}

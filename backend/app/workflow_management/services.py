@@ -317,6 +317,7 @@ class WorkflowManagementService:
             description=f"Draft copy of {source.name or source.spec_id}",
             xml_content=updated_xml,
             json_content=source.json_content,
+            connection_id=getattr(source, "connection_id", None),
             is_active=False,
             status="Draft",
             tags=source.tags,

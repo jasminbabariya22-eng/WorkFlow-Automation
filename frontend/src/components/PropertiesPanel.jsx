@@ -31,6 +31,7 @@ export default function PropertiesPanel({
   const [backendEntities, setBackendEntities] = useState([])
   const [backendStatuses, setBackendStatuses] = useState([])
   const [backendActions, setBackendActions] = useState([])
+  const [backendReportsTo, setBackendReportsTo] = useState([])
   const [availableFields, setAvailableFields] = useState([])
   const [metadataError, setMetadataError] = useState(null)
 
@@ -60,7 +61,8 @@ export default function PropertiesPanel({
           workflowStorage.getMetadataDepartments(activeConnId),
           workflowStorage.getMetadataTables(activeConnId),
           workflowStorage.getMetadataStatuses(null, activeConnId),
-          workflowStorage.getMetadataActions()
+          workflowStorage.getMetadataActions(),
+          workflowStorage.getMetadataReportsTo(activeConnId)
         ])
 
         if (isMounted) {
@@ -70,6 +72,7 @@ export default function PropertiesPanel({
           const entities = results[3].status === 'fulfilled' && Array.isArray(results[3].value) ? results[3].value : []
           const statuses = results[4].status === 'fulfilled' && Array.isArray(results[4].value) ? results[4].value : []
           const actions = results[5].status === 'fulfilled' && Array.isArray(results[5].value) ? results[5].value : []
+          const reportsTo = results[6].status === 'fulfilled' && Array.isArray(results[6].value) ? results[6].value : []
 
           setBackendRoles(roles.map(r => ({ id: String(r.id), name: r.name })))
           setBackendUsers(users.map(u => ({
@@ -84,6 +87,7 @@ export default function PropertiesPanel({
           setBackendEntities(entities.map(e => ({ name: e.name || e.table_name })))
           setBackendStatuses(statuses.map(s => ({ id: String(s.id), name: s.name, type: s.type })))
           setBackendActions(actions.map(a => ({ id: a.action_code || a.id, label: a.name || a.label })))
+          setBackendReportsTo(reportsTo)
           setMetadataError(null)
         }
       } catch (err) {
@@ -130,7 +134,7 @@ export default function PropertiesPanel({
     return (
       <aside className="wf-properties-panel">
         <div className="wf-properties-header">
-          <Sliders size={14} color="#818cf8" />
+          <Sliders size={14} color="#132B6E" />
           <span>PROPERTIES</span>
         </div>
         <div className="wf-empty-properties">
@@ -154,7 +158,7 @@ export default function PropertiesPanel({
     return (
       <aside className="wf-properties-panel">
         <div className="wf-properties-header">
-          <Sliders size={14} color="#818cf8" />
+          <Sliders size={14} color="#132B6E" />
           <span>PROPERTIES</span>
         </div>
         <div className="wf-prop-subtitle">Transition Connection</div>
@@ -533,8 +537,10 @@ export default function PropertiesPanel({
           <NotificationSection
             data={data}
             name={name}
+            workflowConnectionId={workflowConnectionId}
             backendRoles={backendRoles}
             backendUsers={backendUsers}
+            backendReportsTo={backendReportsTo}
             availableFields={availableFields}
             handleFieldChange={handleFieldChange}
             handleFieldsChange={handleFieldsChange}

@@ -86,6 +86,7 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
   const [connections, setConnections] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('list') // 'list' | 'form'
+  const [connSearch, setConnSearch] = useState('')
   
   // Form State
   const [editingId, setEditingId] = useState(null)
@@ -502,187 +503,227 @@ export default function DatabaseConnectionsModal({ onClose, showToast }) {
                   </button>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {connections.map(conn => {
-                    const engine = DB_ENGINES.find(e => e.id === (conn.db_type || '').toLowerCase()) || DB_ENGINES[0]
-                    return (
-                      <div 
-                        key={conn.connection_id}
+                <div>
+                  {connections.length > 2 && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <input
+                        type="text"
+                        placeholder="Search connections by name, host, or database..."
+                        value={connSearch}
+                        onChange={(e) => setConnSearch(e.target.value)}
                         style={{
-                          background: conn.is_default ? '#f0f9ff' : '#ffffff',
-                          border: conn.is_default ? '1.5px solid #38bdf8' : '1px solid #e2e8f0',
-                          borderRadius: '12px',
-                          padding: '16px 18px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: '16px',
-                          boxShadow: conn.is_default ? '0 4px 12px rgba(56, 189, 248, 0.12)' : '0 1px 3px rgba(0,0,0,0.04)',
-                          transition: 'all 0.15s ease'
+                          width: '100%',
+                          padding: '8px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '13px',
+                          outline: 'none',
+                          boxSizing: 'border-box'
                         }}
-                      >
-                        {/* Profile Info */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', overflow: 'hidden' }}>
-                          <div style={{
-                            width: '44px',
-                            height: '44px',
-                            borderRadius: '10px',
-                            background: engine.badgeBg,
-                            border: `1px solid ${engine.badgeBorder}`,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: engine.badgeColor,
-                            flexShrink: 0
-                          }}>
-                            <Database size={22} />
-                          </div>
+                      />
+                    </div>
+                  )}
 
-                          <div style={{ overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: '700', fontSize: '15px', color: '#0f172a' }}>
-                                {conn.connection_name}
-                              </span>
-
-                              <span style={{
+                  <div 
+                    className="custom-scrollbar"
+                    style={{ 
+                      maxHeight: '420px', 
+                      overflowY: 'auto', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '12px',
+                      paddingRight: '6px'
+                    }}
+                  >
+                    {connections
+                      .filter(c => {
+                        if (!connSearch.trim()) return true
+                        const q = connSearch.toLowerCase().trim()
+                        return (
+                          (c.connection_name && c.connection_name.toLowerCase().includes(q)) ||
+                          (c.database_name && c.database_name.toLowerCase().includes(q)) ||
+                          (c.host && c.host.toLowerCase().includes(q)) ||
+                          (c.db_type && c.db_type.toLowerCase().includes(q))
+                        )
+                      })
+                      .map(conn => {
+                        const engine = DB_ENGINES.find(e => e.id === (conn.db_type || '').toLowerCase()) || DB_ENGINES[0]
+                        return (
+                          <div 
+                            key={conn.connection_id}
+                            style={{
+                              background: conn.is_default ? '#f0f9ff' : '#ffffff',
+                              border: conn.is_default ? '1.5px solid #38bdf8' : '1px solid #e2e8f0',
+                              borderRadius: '12px',
+                              padding: '16px 18px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '16px',
+                              boxShadow: conn.is_default ? '0 4px 12px rgba(56, 189, 248, 0.12)' : '0 1px 3px rgba(0,0,0,0.04)',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {/* Profile Info */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', overflow: 'hidden' }}>
+                              <div style={{
+                                width: '44px',
+                                height: '44px',
+                                borderRadius: '10px',
                                 background: engine.badgeBg,
                                 border: `1px solid ${engine.badgeBorder}`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 color: engine.badgeColor,
-                                fontSize: '10px',
-                                fontWeight: '700',
-                                padding: '2px 7px',
-                                borderRadius: '4px',
-                                textTransform: 'uppercase'
+                                flexShrink: 0
                               }}>
-                                {engine.name}
-                              </span>
+                                <Database size={22} />
+                              </div>
 
-                              {conn.is_default && (
-                                <span style={{
-                                  background: '#dcfce7',
-                                  border: '1px solid #bbf7d0',
-                                  color: '#15803d',
-                                  fontSize: '10px',
-                                  fontWeight: '700',
-                                  padding: '2px 7px',
-                                  borderRadius: '4px',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '3px'
-                                }}>
-                                  <CheckCircle2 size={10} />
-                                  <span>Active Default</span>
-                                </span>
-                              )}
+                              <div style={{ overflow: 'hidden' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: '700', fontSize: '15px', color: '#0f172a' }}>
+                                    {conn.connection_name}
+                                  </span>
+
+                                  <span style={{
+                                    background: engine.badgeBg,
+                                    border: `1px solid ${engine.badgeBorder}`,
+                                    color: engine.badgeColor,
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }}>
+                                    {engine.name}
+                                  </span>
+
+                                  {conn.is_default && (
+                                    <span style={{
+                                      background: '#e0f2fe',
+                                      border: '1px solid #bae6fd',
+                                      color: '#0284c7',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      padding: '2px 7px',
+                                      borderRadius: '4px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px'
+                                    }}>
+                                      <Star size={10} />
+                                      DEFAULT
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {conn.db_type === 'sqlite' ? (
+                                    <span>File: <code>{conn.database_name}</code></span>
+                                  ) : (
+                                    <span>{conn.username}@{conn.host}:{conn.port}/{conn.database_name} {conn.default_schema ? `(Schema: ${conn.default_schema})` : ''}</span>
+                                  )}
+                                </p>
+                              </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '14px', marginTop: '5px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
-                              {conn.db_type === 'sqlite' ? (
-                                <span><strong>File:</strong> <code>{conn.database_name}</code></span>
-                              ) : (
-                                <>
-                                  <span><strong>Host:</strong> {conn.host}:{conn.port}</span>
-                                  <span><strong>Database:</strong> <code>{conn.database_name}</code></span>
-                                  {conn.default_schema && <span><strong>Schema:</strong> {conn.default_schema}</span>}
-                                  {conn.username && <span><strong>User:</strong> {conn.username}</span>}
-                                </>
+                            {/* Action Buttons */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                              <button 
+                                type="button"
+                                onClick={() => handleTestSingleConnection(conn.connection_id)}
+                                disabled={testingCardId === conn.connection_id}
+                                title="Live Test Connection & Inspect Tables"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '6px 11px',
+                                  borderRadius: '7px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  background: '#ffffff',
+                                  border: '1px solid #38bdf8',
+                                  color: '#0284c7',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                {testingCardId === conn.connection_id ? (
+                                  <Loader size={12} className="wf-spin" />
+                                ) : (
+                                  <Zap size={12} />
+                                )}
+                                <span>Test</span>
+                              </button>
+
+                              {!conn.is_default && (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleSetDefault(conn.connection_id)}
+                                  title="Set as Default Active Database"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '6px 11px',
+                                    borderRadius: '7px',
+                                    fontSize: '12px',
+                                    fontWeight: '600',
+                                    background: '#ffffff',
+                                    border: '1px solid #fde047',
+                                    color: '#b45309',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <Star size={12} />
+                                  <span>Set Default</span>
+                                </button>
+                              )}
+
+                              <button 
+                                type="button"
+                                onClick={() => handleOpenEdit(conn)}
+                                title="Edit Profile"
+                                aria-label={`Edit ${conn.connection_name} profile`}
+                                style={{
+                                  background: '#ffffff',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '7px',
+                                  padding: '6px 9px',
+                                  color: '#475569',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <Edit3 size={13} />
+                              </button>
+
+                              {!conn.is_default && (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDelete(conn.connection_id, conn.is_default)}
+                                  title="Delete Profile"
+                                  aria-label={`Delete ${conn.connection_name} profile`}
+                                  style={{
+                                    background: '#ffffff',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: '7px',
+                                    padding: '6px 9px',
+                                    color: '#dc2626',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                               )}
                             </div>
                           </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <button 
-                            type="button"
-                            onClick={() => handleTestCard(conn)}
-                            disabled={testingCardId === conn.connection_id}
-                            title="Live Test Connection & Inspect Tables"
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '6px 11px',
-                              borderRadius: '7px',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              background: '#ffffff',
-                              border: '1px solid #38bdf8',
-                              color: '#0284c7',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {testingCardId === conn.connection_id ? (
-                              <Loader size={12} className="wf-spin" />
-                            ) : (
-                              <Zap size={12} />
-                            )}
-                            <span>Test</span>
-                          </button>
-
-                          {!conn.is_default && (
-                            <button 
-                              type="button"
-                              onClick={() => handleSetDefault(conn.connection_id)}
-                              title="Set as Default Active Database"
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                padding: '6px 11px',
-                                borderRadius: '7px',
-                                fontSize: '12px',
-                                fontWeight: '600',
-                                background: '#ffffff',
-                                border: '1px solid #fde047',
-                                color: '#b45309',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <Star size={12} />
-                              <span>Set Default</span>
-                            </button>
-                          )}
-
-                          <button 
-                            type="button"
-                            onClick={() => handleOpenEdit(conn)}
-                            title="Edit Profile"
-                            aria-label={`Edit ${conn.connection_name} profile`}
-                            style={{
-                              background: '#ffffff',
-                              border: '1px solid #cbd5e1',
-                              borderRadius: '7px',
-                              padding: '6px 9px',
-                              color: '#475569',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <Edit3 size={13} />
-                          </button>
-
-                          {!conn.is_default && (
-                            <button 
-                              type="button"
-                              onClick={() => handleDelete(conn.connection_id, conn.is_default)}
-                              title="Delete Profile"
-                              aria-label={`Delete ${conn.connection_name} profile`}
-                              style={{
-                                background: '#ffffff',
-                                border: '1px solid #fecaca',
-                                borderRadius: '7px',
-                                padding: '6px 9px',
-                                color: '#dc2626',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+                        )
+                      })}
+                  </div>
                 </div>
               )}
             </div>

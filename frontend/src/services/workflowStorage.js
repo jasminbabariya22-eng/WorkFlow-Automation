@@ -380,6 +380,7 @@ export const workflowStorage = {
       id: newId,
       spec_id: `${item.spec_id}_copy`,
       name: `${item.name} (Copy)`,
+      connection_id: item.connection_id || null,
       status: 'Draft',
       is_active: false,
       version: 1,
@@ -391,29 +392,54 @@ export const workflowStorage = {
     return clone
   },
 
-    // 7. Publish Workflow
-    publishWorkflow: async (id) => {
-      try {
-        await fetch(`/workflow/definitions/${id}/publish`, { method: 'POST', signal: AbortSignal.timeout(2000) })
-      } catch (_e) { }
-      return workflowStorage.saveWorkflow(id, { status: 'Published', is_active: true })
-    },
+  // 7. Publish Workflow
+  publishWorkflow: async (id) => {
+    try {
+      await fetch(`/workflow/definitions/${id}/publish`, { method: 'POST', signal: AbortSignal.timeout(3000) })
+    } catch (_e) { }
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
+      if (stored) {
+        const list = JSON.parse(stored)
+        const updated = list.map(w => (Number(w.id) === Number(id) ? { ...w, status: 'Active', is_active: true } : w))
+        localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+      }
+    } catch (_e) { }
+    return true
+  },
 
-      // 8. Activate Workflow
-      activateWorkflow: async (id) => {
-        try {
-          await fetch(`/workflow/definitions/${id}/activate`, { method: 'POST', signal: AbortSignal.timeout(2000) })
-        } catch (_e) { }
-        return workflowStorage.saveWorkflow(id, { status: 'Active', is_active: true })
-      },
+  // 8. Activate Workflow
+  activateWorkflow: async (id) => {
+    try {
+      await fetch(`/workflow/definitions/${id}/activate`, { method: 'POST', signal: AbortSignal.timeout(3000) })
+    } catch (_e) { }
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
+      if (stored) {
+        const list = JSON.parse(stored)
+        const updated = list.map(w => (Number(w.id) === Number(id) ? { ...w, status: 'Active', is_active: true } : w))
+        localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+      }
+    } catch (_e) { }
+    return true
+  },
 
-        // 9. Deactivate Workflow
-        deactivateWorkflow: async (id) => {
-          try {
-            await fetch(`/workflow/definitions/${id}/deactivate`, { method: 'POST', signal: AbortSignal.timeout(2000) })
-          } catch (_e) { }
-          return workflowStorage.saveWorkflow(id, { status: 'Inactive', is_active: false })
-        },
+  // 9. Deactivate Workflow
+  deactivateWorkflow: async (id) => {
+    try {
+      await fetch(`/workflow/definitions/${id}/deactivate`, { method: 'POST', signal: AbortSignal.timeout(3000) })
+    } catch (_e) { }
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.WORKFLOWS)
+      if (stored) {
+        const list = JSON.parse(stored)
+        const updated = list.map(w => (Number(w.id) === Number(id) ? { ...w, status: 'Inactive', is_active: false } : w))
+        localStorage.setItem(STORAGE_KEYS.WORKFLOWS, JSON.stringify(updated))
+      }
+    } catch (_e) { }
+    return true
+  },
+
 
           // 10. Delete Workflow
           deleteWorkflow: async (id) => {
@@ -652,13 +678,21 @@ export const workflowStorage = {
         history = histJson.data || []
       }
 
-      return { variables, logs, history }
+      return {
+        variables,
+        logs,
+        history,
+        activity_logs: logs,
+        transitions: history
+      }
     } catch (_e) { }
 
     return {
       variables: {},
       logs: [],
-      history: []
+      history: [],
+      activity_logs: [],
+      transitions: []
     }
   },
 
@@ -699,6 +733,20 @@ export const workflowStorage = {
                           const url = connectionId ? `/workflow-studio/metadata/departments?connection_id=${connectionId}` : '/workflow-studio/metadata/departments'
                           const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
                           if (!res.ok) throw new Error(`Failed to load departments from Client DB (${res.status})`)
+                          const data = await res.json()
+                          const result = Array.isArray(data) ? data : (data.data || [])
+                          setCachedMetadata(cacheKey, result)
+                          return result
+                        },
+
+                        getMetadataReportsTo: async (connectionId = null) => {
+                          const cacheKey = `reports_to_${connectionId || 'default'}`
+                          const cached = getCachedMetadata(cacheKey)
+                          if (cached) return cached
+
+                          const url = connectionId ? `/workflow-studio/metadata/reports-to?connection_id=${connectionId}` : '/workflow-studio/metadata/reports-to'
+                          const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+                          if (!res.ok) throw new Error(`Failed to load reports-to from Client DB (${res.status})`)
                           const data = await res.json()
                           const result = Array.isArray(data) ? data : (data.data || [])
                           setCachedMetadata(cacheKey, result)
@@ -847,7 +895,48 @@ export const workflowStorage = {
                                             }
                                           },
 
+                                          getTelemetryLogs: async (params = {}) => {
+                                            try {
+                                              const q = new URLSearchParams()
+                                              if (params.level && params.level !== 'ALL') q.set('level', params.level)
+                                              if (params.event_type) q.set('event_type', params.event_type)
+                                              if (params.instance_id) q.set('instance_id', params.instance_id)
+                                              if (params.search) q.set('search', params.search)
+                                              if (params.limit) q.set('limit', params.limit)
+
+                                              const [eventsRes, metricsRes] = await Promise.allSettled([
+                                                fetch(`/workflow/monitoring/telemetry${q.toString() ? '?' + q.toString() : ''}`, { signal: AbortSignal.timeout(4000) }),
+                                                fetch('/workflow/monitoring/metrics', { signal: AbortSignal.timeout(4000) })
+                                              ])
+
+                                              let events = []
+                                              let metrics = null
+
+                                              if (eventsRes.status === 'fulfilled' && eventsRes.value.ok) {
+                                                const json = await eventsRes.value.json().catch(() => ({}))
+                                                events = json.data || []
+                                              }
+                                              if (metricsRes.status === 'fulfilled' && metricsRes.value.ok) {
+                                                const json = await metricsRes.value.json().catch(() => ({}))
+                                                metrics = json.data || null
+                                              }
+
+                                              return { events, metrics }
+                                            } catch (_e) {
+                                              return { events: [], metrics: null }
+                                            }
+                                          },
+
                                             clearTelemetry: async () => {
+                                              try {
+                                                const res = await fetch('/workflow/monitoring/telemetry/clear', { method: 'POST', signal: AbortSignal.timeout(5000) })
+                                                return res.ok
+                                              } catch (_e) {
+                                                return false
+                                              }
+                                            },
+
+                                            clearTelemetryBuffer: async () => {
                                               try {
                                                 const res = await fetch('/workflow/monitoring/telemetry/clear', { method: 'POST', signal: AbortSignal.timeout(5000) })
                                                 return res.ok
@@ -863,14 +952,28 @@ export const workflowStorage = {
                                                   return cached
                                                 }
                                                 try {
-                                                  const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(3000) })
+                                                  const res = await fetch('/workflow-studio/connections', { signal: AbortSignal.timeout(5000) })
                                                   if (res.ok) {
                                                     const data = await res.json()
                                                     const list = Array.isArray(data) ? data : (data.data || [])
-                                                    setCachedMetadata('db_connections_list', list)
-                                                    return list
+                                                    if (list.length > 0) {
+                                                      setCachedMetadata('db_connections_list', list)
+                                                      try {
+                                                        localStorage.setItem('workflow_studio_database_connections', JSON.stringify(list))
+                                                      } catch (_) {}
+                                                      return list
+                                                    }
                                                   }
                                                 } catch (_e) { }
+
+                                                try {
+                                                  const stored = localStorage.getItem('workflow_studio_database_connections')
+                                                  if (stored) {
+                                                    const parsed = JSON.parse(stored)
+                                                    if (Array.isArray(parsed) && parsed.length > 0) return parsed
+                                                  }
+                                                } catch (_) {}
+
                                                 return cached || []
                                               },
 

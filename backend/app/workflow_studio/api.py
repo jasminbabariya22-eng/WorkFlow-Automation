@@ -304,6 +304,18 @@ def get_client_departments(connection_id: Optional[int] = Query(None)):
         raise HTTPException(status_code=503, detail=f"Client Database metadata error: {str(e)}")
 
 
+@catalog_router.get("/metadata/reports-to", response_model=List[Dict[str, Any]])
+def get_client_reports_to(connection_id: Optional[int] = Query(None)):
+    """
+    Retrieves user report-to hierarchy dynamically from the Client Database.
+    """
+    from app.core.database import ClientDatabaseAdapter
+    try:
+        return ClientDatabaseAdapter.get_reports_to(connection_id=connection_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Client Database metadata error: {str(e)}")
+
+
 @catalog_router.get("/metadata/entities", response_model=List[Dict[str, Any]])
 def get_client_entities(connection_id: Optional[int] = Query(None)):
     """

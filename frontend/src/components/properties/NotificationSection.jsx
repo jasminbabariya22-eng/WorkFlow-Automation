@@ -4,8 +4,10 @@ import EmailNodeSection from './EmailNodeSection'
 export default function NotificationSection({
   data,
   name,
+  workflowConnectionId = null,
   backendRoles = [],
   backendUsers = [],
+  backendReportsTo = [],
   availableFields = [],
   handleFieldChange,
   handleFieldsChange
@@ -18,8 +20,10 @@ export default function NotificationSection({
     return (
       <EmailNodeSection
         data={data}
+        workflowConnectionId={workflowConnectionId}
         backendRoles={backendRoles}
         backendUsers={backendUsers}
+        backendReportsTo={backendReportsTo}
         availableFields={availableFields}
         handleFieldChange={handleFieldChange}
         handleFieldsChange={handleFieldsChange}

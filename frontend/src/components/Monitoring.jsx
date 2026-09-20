@@ -18,7 +18,9 @@ import {
   Terminal,
   ShieldCheck,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Copy,
+  Check
 } from 'lucide-react'
 
 import { workflowStorage } from '../services/workflowStorage'
@@ -86,6 +88,7 @@ function Monitoring({ showToast }) {
   const [telemetryLoading, setTelemetryLoading] = useState(false)
   const [telemetryLevel, setTelemetryLevel] = useState('ALL')
   const [telemetrySearch, setTelemetrySearch] = useState('')
+  const [debouncedTelemetrySearch, setDebouncedTelemetrySearch] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [metrics, setMetrics] = useState({
     uptime_seconds: 0,
@@ -98,6 +101,14 @@ function Monitoring({ showToast }) {
   })
   const [expandedLogId, setExpandedLogId] = useState(null)
 
+  // Debounce telemetry search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedTelemetrySearch(telemetrySearch)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [telemetrySearch])
+
   // 1. Fetch Instances List (Fast non-blocking)
   const fetchInstances = async (showLoadingSpinner = false) => {
     if (showLoadingSpinner) setLoading(true)
@@ -107,75 +118,70 @@ function Monitoring({ showToast }) {
         data = (data || []).filter(i => String(i.status || '').toLowerCase() === statusFilter.toLowerCase())
       }
       if (entityFilter) {
-        data = (data || []).filter(i => String(i.entity_type || '').toLowerCase() === entityFilter.toLowerCase())
+        data = (data || []).filter(i => String(i.entity_type || '').toLowerCase().includes(entityFilter.toLowerCase()))
       }
-      const list = data || []
-      setInstances(list)
+      setInstances(data || [])
       setLoading(false)
 
-      if (list.length > 0) {
-        const toSelect = selectedInstance && list.some(i => i.instance_id === selectedInstance.instance_id)
-          ? selectedInstance
-          : list[0]
-        setSelectedInstance(toSelect)
-        loadInstanceDetails(toSelect.instance_id, list)
+      if (data && data.length > 0 && !selectedInstance) {
+        setSelectedInstance(data[0])
       }
-    } catch (e) {
+    } catch (err) {
       setLoading(false)
     }
   }
 
-  // 2. Load Selected Instance Details (Decoupled Background Fetch)
-  const loadInstanceDetails = async (instanceId, instancesList = instances) => {
+  // 2. Fetch Instance Deep Inspection (Variables, Traces, History)
+  const fetchInstanceDetails = async (instanceId) => {
+    if (!instanceId) return
     setDetailsLoading(true)
-    const instObj = instancesList.find(i => i.instance_id === instanceId)
-    if (instObj) setSelectedInstance(instObj)
     try {
-      const details = await workflowStorage.getInstanceDetails(instanceId)
-      let vars = details.variables || {}
-      if (Object.keys(vars).length === 0 && details.logs && details.logs.length > 0) {
-        details.logs.forEach(l => {
-          if (l.variables && typeof l.variables === 'object') {
-            vars = { ...vars, ...l.variables }
-          }
-        })
+      const res = await workflowStorage.getInstanceDetails(instanceId)
+      if (res) {
+        setVariables(res.variables || {})
+        setLogs(res.activity_logs || res.logs || [])
+        setHistory(res.transitions || res.history || [])
       }
-      setVariables(vars)
-      setLogs(details.logs || [])
-      setHistory(details.history || [])
-    } catch (e) {
-      // Graceful fallback
-    } finally {
+      setDetailsLoading(false)
+    } catch (err) {
       setDetailsLoading(false)
     }
   }
+  const loadInstanceDetails = (instanceId, inst = null) => {
+    if (inst) setSelectedInstance(inst)
+    fetchInstanceDetails(instanceId)
+  }
 
-  // 3. Fetch Live Telemetry & Metrics
+  // 3. Fetch Live Telemetry Feed
   const fetchTelemetryData = async () => {
     setTelemetryLoading(true)
     try {
-      const [logsData, metricsData] = await Promise.all([
-        workflowStorage.getLiveTelemetry({
-          level: telemetryLevel,
-          search: telemetrySearch,
-          limit: 150
-        }),
-        workflowStorage.getObservabilityMetrics()
-      ])
-      setTelemetryLogs(logsData || [])
-      if (metricsData) setMetrics(metricsData)
-    } catch (e) {
-      console.error(e)
-    } finally {
+      const res = await workflowStorage.getTelemetryLogs({
+        level: telemetryLevel,
+        search: debouncedTelemetrySearch,
+        limit: 100
+      })
+      if (res) {
+        setTelemetryLogs(res.events || [])
+        if (res.metrics) {
+          setMetrics(res.metrics)
+        }
+      }
+      setTelemetryLoading(false)
+    } catch (err) {
       setTelemetryLoading(false)
     }
   }
 
+  // 4. Clear Telemetry Buffer
   const handleClearTelemetry = async () => {
-    const ok = await workflowStorage.clearTelemetry()
-    if (ok) {
+    try {
+      await workflowStorage.clearTelemetryBuffer()
+      setTelemetryLogs([])
       showToast?.('Telemetry buffer cleared', 'success')
       fetchTelemetryData()
+    } catch (err) {
+      showToast?.('Failed to clear buffer', 'error')
     }
   }
 
@@ -184,22 +190,30 @@ function Monitoring({ showToast }) {
   }, [statusFilter, entityFilter])
 
   useEffect(() => {
+    if (selectedInstance?.instance_id) {
+      fetchInstanceDetails(selectedInstance.instance_id)
+    }
+  }, [selectedInstance?.instance_id])
+
+  useEffect(() => {
     if (viewMode === 'telemetry') {
       fetchTelemetryData()
     }
-  }, [viewMode, telemetryLevel, telemetrySearch])
+  }, [viewMode, telemetryLevel, debouncedTelemetrySearch])
 
-  // Auto-refresh interval for telemetry
+  // Auto-refresh interval for telemetry (pauses when browser tab is inactive)
   useEffect(() => {
     if (viewMode !== 'telemetry' || !autoRefresh) return
     const timer = setInterval(() => {
-      fetchTelemetryData()
+      if (!document.hidden) {
+        fetchTelemetryData()
+      }
     }, 3000)
     return () => clearInterval(timer)
-  }, [viewMode, autoRefresh, telemetryLevel, telemetrySearch])
+  }, [viewMode, autoRefresh, telemetryLevel, debouncedTelemetrySearch])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '24px 32px', gap: '18px', overflowY: 'auto', background: 'var(--bg-base)' }}>
       
       {/* Top Header & View Mode Switcher */}
       <div style={{
@@ -209,7 +223,7 @@ function Monitoring({ showToast }) {
         background: '#ffffff',
         border: '1px solid #e2e8f0',
         borderRadius: '12px',
-        padding: '12px 20px',
+        padding: '16px 20px',
         boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -217,11 +231,11 @@ function Monitoring({ showToast }) {
             width: '36px',
             height: '36px',
             borderRadius: '10px',
-            background: 'linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%)',
+            background: 'linear-gradient(135deg, #132B6E 0%, #1e3a8a 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(14, 165, 233, 0.3)'
+            boxShadow: '0 2px 8px rgba(19, 43, 110, 0.25)'
           }}>
             <Activity size={20} color="#fff" />
           </div>
@@ -250,7 +264,7 @@ function Monitoring({ showToast }) {
               border: 'none',
               cursor: 'pointer',
               background: viewMode === 'instances' ? '#ffffff' : 'transparent',
-              color: viewMode === 'instances' ? '#0284c7' : '#64748b',
+              color: viewMode === 'instances' ? '#132B6E' : '#64748b',
               boxShadow: viewMode === 'instances' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.15s ease'
             }}
@@ -271,7 +285,7 @@ function Monitoring({ showToast }) {
               border: 'none',
               cursor: 'pointer',
               background: viewMode === 'telemetry' ? '#ffffff' : 'transparent',
-              color: viewMode === 'telemetry' ? '#059669' : '#64748b',
+              color: viewMode === 'telemetry' ? '#132B6E' : '#64748b',
               boxShadow: viewMode === 'telemetry' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.15s ease'
             }}
@@ -359,7 +373,7 @@ function Monitoring({ showToast }) {
                   <div 
                     key={inst.instance_id}
                     className={`instance-card ${selectedInstance?.instance_id === inst.instance_id ? 'active' : ''}`}
-                    onClick={() => loadInstanceDetails(inst.instance_id)}
+                    onClick={() => loadInstanceDetails(inst.instance_id, inst)}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: '700', fontSize: '13px', color: '#0284c7' }}>
@@ -862,14 +876,53 @@ function Monitoring({ showToast }) {
                       {isExpanded && (
                         <div style={{
                           marginTop: '8px',
-                          padding: '10px',
+                          padding: '12px 14px',
                           background: '#f8fafc',
                           border: '1px solid #e2e8f0',
-                          borderRadius: '6px',
+                          borderRadius: '8px',
                           fontSize: '11px'
                         }}>
-                          <div style={{ color: '#0284c7', fontWeight: '600', marginBottom: '4px' }}>Structured Telemetry Payload:</div>
-                          <pre style={{ margin: 0, color: '#334155', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <span style={{ color: '#132B6E', fontWeight: '700' }}>Structured Telemetry Payload:</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                navigator.clipboard.writeText(JSON.stringify(log, null, 2))
+                                showToast?.('Telemetry payload copied to clipboard', 'success')
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#ffffff',
+                                border: '1px solid #cbd5e1',
+                                color: '#334155',
+                                fontSize: '11px',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <Copy size={11} />
+                              <span>Copy JSON</span>
+                            </button>
+                          </div>
+                          <pre style={{
+                            margin: 0,
+                            color: '#334155',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            maxHeight: '260px',
+                            overflowY: 'auto',
+                            background: '#ffffff',
+                            padding: '10px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid #e2e8f0',
+                            fontFamily: 'monospace',
+                            fontSize: '11px'
+                          }}>
                             {JSON.stringify(log, null, 2)}
                           </pre>
                         </div>

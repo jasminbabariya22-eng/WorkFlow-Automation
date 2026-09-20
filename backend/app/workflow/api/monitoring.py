@@ -162,18 +162,28 @@ def get_instance_variables(
         variables = {}
         if inst.serialized_state:
             try:
-                state_data = json.loads(inst.serialized_state)
-                # Merge data from all tasks in order of execution
-                tasks = state_data.get("tasks", {})
-                sorted_tasks = sorted(
-                    tasks.values(),
-                    key=lambda t: t.get("last_state_change", 0)
-                )
-                for task in sorted_tasks:
-                    if isinstance(task.get("data"), dict):
-                        variables.update(task["data"])
-            except Exception:
-                variables = {"error": "Failed to parse workflow variables from serialized state."}
+                state_data = json.loads(inst.serialized_state) if isinstance(inst.serialized_state, str) else inst.serialized_state
+                if isinstance(state_data, dict):
+                    # 1. Studio execution dictionary format
+                    if isinstance(state_data.get("variables"), dict):
+                        variables.update(state_data["variables"])
+
+                    # 2. SpiffWorkflow task states format
+                    tasks = state_data.get("tasks", {})
+                    if isinstance(tasks, dict) and tasks:
+                        sorted_tasks = sorted(
+                            tasks.values(),
+                            key=lambda t: t.get("last_state_change", 0) if isinstance(t, dict) else 0
+                        )
+                        for task in sorted_tasks:
+                            if isinstance(task, dict) and isinstance(task.get("data"), dict):
+                                variables.update(task["data"])
+
+                    # 3. Direct key-value fallback
+                    if not variables:
+                        variables = {k: v for k, v in state_data.items() if k not in ("version_id", "status", "workflow_name", "tasks")}
+            except Exception as parse_ex:
+                variables = {"error": f"Failed to parse workflow variables: {parse_ex}"}
                 
         return success_response(data=variables)
     except Exception as e:

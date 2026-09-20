@@ -489,6 +489,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                         logger.warning(f"ActionRegistry SEND_EMAIL: No user found for user target '{user_target}' (connection_id={conn_id})")
                 except Exception as ex:
                     logger.error(f"ActionRegistry SEND_EMAIL: Error resolving user '{user_target}': {ex}")
+
             elif "{" in p:
                 interpolated = ClientDatabaseAdapter._resolve_template_value(p, context_vars)
                 if interpolated:
@@ -501,118 +502,293 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         if not resolved_emails:
             return None
 
-        deduped = []
-        for e in resolved_emails:
-            if e not in deduped:
-                deduped.append(e)
-        return ", ".join(deduped)
+        # Restrict duplicate emails using Python set (case-insensitive deduplication)
+        seen_emails: set = set()
+        deduped_emails = []
+        for raw_e in resolved_emails:
+            for sub_e in str(raw_e).split(","):
+                clean_e = sub_e.strip()
+                if clean_e:
+                    key = clean_e.lower()
+                    if key not in seen_emails:
+                        seen_emails.add(key)
+                        deduped_emails.append(clean_e)
+
+        return ", ".join(deduped_emails) if deduped_emails else None
 
     raw_to = context_vars.get("to") or context_vars.get("to_email") or context_vars.get("email_to") or config.get("to") or config.get("recipient")
     to_email = _resolve_recipient_list(raw_to)
     if not to_email:
         to_email = context_vars.get("employee_email") or context_vars.get("email") or context_vars.get("user_email") or "applicant@company.com"
+        to_email = _resolve_recipient_list(to_email)
 
     raw_cc = context_vars.get("cc") or context_vars.get("cc_email") or context_vars.get("email_cc") or config.get("cc") or config.get("email_cc")
     cc_email = _resolve_recipient_list(raw_cc)
 
+    # Restrict duplicates across TO and CC using set
+    if cc_email and to_email:
+        to_set = {e.strip().lower() for e in to_email.split(",") if e.strip()}
+        cc_list = [e.strip() for e in cc_email.split(",") if e.strip() and e.strip().lower() not in to_set]
+        cc_email = ", ".join(cc_list) if cc_list else None
+
     raw_bcc = context_vars.get("bcc") or context_vars.get("bcc_email") or context_vars.get("email_bcc") or config.get("bcc") or config.get("email_bcc")
     bcc_email = _resolve_recipient_list(raw_bcc)
 
-    # 2. Resolve Subject & Body with Variable Interpolation
+    # Restrict duplicates across TO, CC, and BCC using set
+    if bcc_email:
+        existing_set = {e.strip().lower() for e in (to_email or "").split(",") if e.strip()}
+        if cc_email:
+            existing_set.update({e.strip().lower() for e in cc_email.split(",") if e.strip()})
+        bcc_list = [e.strip() for e in bcc_email.split(",") if e.strip() and e.strip().lower() not in existing_set]
+        bcc_email = ", ".join(bcc_list) if bcc_list else None
+
+    # 2. Resolve Subject & Body with Variable Interpolation (Supports full HTML bodies)
     display_id = f"#{entity_id}" if entity_id else ""
-    raw_subject = config.get("subject") or f"Notification for Request {display_id}"
+    raw_subject = (
+        context_vars.get("subject") or 
+        context_vars.get("title") or 
+        config.get("subject") or 
+        f"Notification for Request {display_id}"
+    )
     subject = str(ClientDatabaseAdapter._resolve_template_value(raw_subject, context_vars) or raw_subject)
 
-    raw_body = config.get("body") or f"Your request {display_id} has been processed successfully."
+    raw_from = (
+        context_vars.get("from_email") or
+        context_vars.get("from") or
+        context_vars.get("sender") or
+        context_vars.get("sender_email") or
+        config.get("from") or
+        config.get("from_email") or
+        config.get("sender") or
+        ""
+    )
+    from_email = str(ClientDatabaseAdapter._resolve_template_value(raw_from, context_vars) or raw_from).strip() if raw_from else None
+    explicit_server_id = config.get("email_server_id") or context_vars.get("email_server_id")
+
+    raw_body = (
+        context_vars.get("html_body") or
+        context_vars.get("body") or 
+        context_vars.get("email_body") or 
+        context_vars.get("message") or 
+        context_vars.get("content") or
+        config.get("body") or 
+        f"Your request {display_id} has been processed successfully."
+    )
     body_text = str(ClientDatabaseAdapter._resolve_template_value(raw_body, context_vars) or raw_body)
 
     clean_body = body_text.strip()
-    is_html = clean_body.startswith("<html") or clean_body.startswith("<div") or clean_body.startswith("<p") or "<br" in clean_body or "<table" in clean_body
+    import re
+    is_html = bool(re.search(r"<(?:!doctype|html|body|div|p|span|b|i|strong|em|h[1-6]|table|thead|tbody|tr|td|th|ul|ol|li|br|hr|img|a|style|font|pre|code)\b[^>]*>", clean_body, re.IGNORECASE))
     final_email_body = clean_body if is_html else body_text
     email_type_val = "HTML" if is_html else "TEXT"
 
     # 3. Attempt insert into client email queue if table exists
+    # 3. Attempt insert into client email queue if table exists
     email_job_id = None
 
     try:
+        from sqlalchemy import inspect
+        eng = DynamicEnginePool.get_engine(conn_id)
+        inspector = inspect(eng)
+
         target_schema = ClientDatabaseAdapter._resolve_target_schema(None, conn_id)
-        cache_key = f"{conn_id}:{target_schema}"
+        available_schemas = []
+        try:
+            available_schemas = inspector.get_schema_names()
+        except Exception:
+            pass
 
-        if cache_key in _GLOBAL_MAIL_TBL_CACHE:
-            found_mail_tbl, cols = _GLOBAL_MAIL_TBL_CACHE[cache_key]
-        else:
-            from sqlalchemy import inspect
-            eng = DynamicEnginePool.get_engine(conn_id)
-            inspector = inspect(eng)
+        schemas_to_check = []
+        if target_schema:
+            schemas_to_check.append(target_schema)
+        for s in ["dbo", "public", "ers"]:
+            if s in available_schemas and s not in schemas_to_check:
+                schemas_to_check.append(s)
+        for s in available_schemas:
+            if s not in schemas_to_check and s.lower() not in ("information_schema", "pg_catalog", "pg_toast", "sys", "guest"):
+                schemas_to_check.append(s)
+        if not schemas_to_check:
+            schemas_to_check = [None]
 
-            all_tbls = inspector.get_table_names(schema=target_schema) if target_schema else inspector.get_table_names()
-            tbl_map = {t.lower(): t for t in all_tbls}
+        found_mail_tbl = None
+        found_mail_schema = None
+        cols_dict = {}
 
-            found_mail_tbl = None
+        for sch in schemas_to_check:
+            try:
+                table_names = {t.lower(): t for t in inspector.get_table_names(schema=sch)}
+            except Exception:
+                table_names = {}
+
             for cand in ["mst_email_job", "email_jobs", "email_queue", "mst_email_jobs", "outgoing_emails"]:
-                if cand in tbl_map:
-                    found_mail_tbl = tbl_map[cand]
+                if cand in table_names:
+                    found_mail_tbl = table_names[cand]
+                    found_mail_schema = sch
                     break
-
-            cols = {}
             if found_mail_tbl:
-                cols = {c["name"].lower(): c["name"] for c in inspector.get_columns(found_mail_tbl, schema=target_schema)}
-            
-            _GLOBAL_MAIL_TBL_CACHE[cache_key] = (found_mail_tbl, cols)
+                break
 
-        if found_mail_tbl and cols:
-            eng = DynamicEnginePool.get_engine(conn_id)
-            full_mail_tbl = f"{target_schema}.{found_mail_tbl}" if target_schema else found_mail_tbl
+        if found_mail_tbl:
+            raw_cols = inspector.get_columns(found_mail_tbl, schema=found_mail_schema)
+            cols_dict = {c["name"].lower(): c["name"] for c in raw_cols}
+            cols_type_map = {c["name"].lower(): str(c.get("type", "")).lower() for c in raw_cols}
+
+            full_mail_tbl = f"{found_mail_schema}.{found_mail_tbl}" if found_mail_schema else found_mail_tbl
+
+            # Lookup valid active email_server_id from client database if email_server table exists
+            valid_server_id = None
+            if explicit_server_id and str(explicit_server_id).isdigit():
+                valid_server_id = int(explicit_server_id)
+
+            # Match by specific from_email address if specified
+            if not valid_server_id:
+                for sch in schemas_to_check:
+                    try:
+                        raw_table_names = inspector.get_table_names(schema=sch)
+                        table_map = {t.lower(): t for t in raw_table_names}
+                    except Exception:
+                        table_map = {}
+
+                    for s_tbl in ["email_server", "mst_email_server", "smtp_settings", "email_config", "email_servers", "tbl_email_server"]:
+                        if s_tbl in table_map:
+                            actual_tbl = table_map[s_tbl]
+                            s_ref = f"{sch}.{actual_tbl}" if sch else actual_tbl
+                            try:
+                                with eng.connect() as s_conn:
+                                    rows = s_conn.execute(text(f"SELECT * FROM {s_ref}")).fetchall()
+                                    for r in rows:
+                                        m = dict(r._mapping)
+                                        # Check is_deleted
+                                        is_del = None
+                                        for k, v in m.items():
+                                            if k.lower() == "is_deleted":
+                                                is_del = v
+                                                break
+                                        if is_del is not None and str(is_del).strip().lower() in ("1", "true", "t", "yes"):
+                                            continue
+
+                                        sid = None
+                                        for k, v in m.items():
+                                            if k.lower() in ("email_server_id", "server_id", "id"):
+                                                sid = v
+                                                break
+
+                                        s_user = ""
+                                        for k, v in m.items():
+                                            if k.lower() in ("outgoing_email_user", "email_user", "username", "email_id", "email"):
+                                                s_user = str(v or "").strip()
+                                                break
+
+                                        if from_email and "@" in from_email:
+                                            if s_user.lower() == from_email.lower().strip():
+                                                valid_server_id = sid or 1
+                                                break
+                                        else:
+                                            valid_server_id = sid or 1
+                                            break
+                            except Exception:
+                                pass
+                        if valid_server_id:
+                            break
+                    if valid_server_id:
+                        break
+
+            if not valid_server_id:
+                valid_server_id = 1
 
             insert_data = {}
-            if "email_server_id" in cols:
-                insert_data[cols["email_server_id"]] = 1
-            if "to_email" in cols:
-                insert_data[cols["to_email"]] = to_email
-            elif "email_to" in cols:
-                insert_data[cols["email_to"]] = to_email
+            if "email_server_id" in cols_dict:
+                insert_data[cols_dict["email_server_id"]] = valid_server_id
+
+            if from_email:
+                if "from_email" in cols_dict:
+                    insert_data[cols_dict["from_email"]] = from_email
+                elif "email_from" in cols_dict:
+                    insert_data[cols_dict["email_from"]] = from_email
+                elif "sender_email" in cols_dict:
+                    insert_data[cols_dict["sender_email"]] = from_email
+                elif "sender" in cols_dict:
+                    insert_data[cols_dict["sender"]] = from_email
+
+            if "to_email" in cols_dict:
+                insert_data[cols_dict["to_email"]] = to_email
+            elif "email_to" in cols_dict:
+                insert_data[cols_dict["email_to"]] = to_email
 
             if cc_email:
-                if "cc_email" in cols:
-                    insert_data[cols["cc_email"]] = cc_email
-                elif "email_cc" in cols:
-                    insert_data[cols["email_cc"]] = cc_email
+                if "cc_email" in cols_dict:
+                    insert_data[cols_dict["cc_email"]] = cc_email
+                elif "email_cc" in cols_dict:
+                    insert_data[cols_dict["email_cc"]] = cc_email
 
-            if "subject" in cols:
-                insert_data[cols["subject"]] = subject
-            elif "email_subject" in cols:
-                insert_data[cols["email_subject"]] = subject
+            if "subject" in cols_dict:
+                insert_data[cols_dict["subject"]] = subject
+            elif "email_subject" in cols_dict:
+                insert_data[cols_dict["email_subject"]] = subject
 
-            if "body" in cols:
-                insert_data[cols["body"]] = final_email_body
-            elif "email_body" in cols:
-                insert_data[cols["email_body"]] = final_email_body
+            if "body" in cols_dict:
+                insert_data[cols_dict["body"]] = final_email_body
+            elif "email_body" in cols_dict:
+                insert_data[cols_dict["email_body"]] = final_email_body
 
-            if "email_type" in cols:
-                insert_data[cols["email_type"]] = email_type_val
-            if "send_status" in cols:
-                insert_data[cols["send_status"]] = "New"
-            if "total_attempts" in cols:
-                insert_data[cols["total_attempts"]] = 3
-            if "send_attempts" in cols:
-                insert_data[cols["send_attempts"]] = 0
-            if "attempt_delay" in cols:
-                insert_data[cols["attempt_delay"]] = 5000
-            if "is_deleted" in cols:
-                insert_data[cols["is_deleted"]] = 0
-            if "created_on" in cols:
-                insert_data[cols["created_on"]] = now_dt
-            if "created_by" in cols and user_id:
-                insert_data[cols["created_by"]] = user_id
+            if "email_type" in cols_dict:
+                insert_data[cols_dict["email_type"]] = email_type_val
+            if "send_status" in cols_dict:
+                insert_data[cols_dict["send_status"]] = "New"
+            if "total_attempts" in cols_dict:
+                insert_data[cols_dict["total_attempts"]] = 3
+            if "send_attempts" in cols_dict:
+                insert_data[cols_dict["send_attempts"]] = 0
+            if "attempt_delay" in cols_dict:
+                insert_data[cols_dict["attempt_delay"]] = 5000
+            if "is_deleted" in cols_dict:
+                del_type = cols_type_map.get("is_deleted", "")
+                if "bit" in del_type or "bool" in del_type:
+                    insert_data[cols_dict["is_deleted"]] = False
+                else:
+                    insert_data[cols_dict["is_deleted"]] = 0
+            if "created_on" in cols_dict:
+                insert_data[cols_dict["created_on"]] = now_dt
+
+            if "created_by" in cols_dict and user_id is not None:
+                cb_type = cols_type_map.get("created_by", "")
+                if "int" in cb_type:
+                    insert_data[cols_dict["created_by"]] = int(user_id) if str(user_id).isdigit() else 1
+                else:
+                    insert_data[cols_dict["created_by"]] = str(user_id)
 
             col_names = list(insert_data.keys())
             param_names = [f":p_{i}" for i in range(len(col_names))]
             params = {f"p_{i}": v for i, v in enumerate(insert_data.values())}
 
+            pk_name = None
+            for p_cand in ["email_job_id", "job_id", "id"]:
+                if p_cand in cols_dict:
+                    pk_name = cols_dict[p_cand]
+                    break
+
             insert_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)})"
+            dialect_name = eng.dialect.name.lower()
+
             with eng.begin() as conn:
-                conn.execute(text(insert_sql), params)
-                email_job_id = 1  # Successfully queued
+                if "postgres" in dialect_name and pk_name:
+                    ret_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)}) RETURNING {pk_name}"
+                    res = conn.execute(text(ret_sql), params).first()
+                    if res:
+                        email_job_id = res[0]
+                else:
+                    conn.execute(text(insert_sql), params)
+                    if pk_name:
+                        try:
+                            max_res = conn.execute(text(f"SELECT MAX({pk_name}) FROM {full_mail_tbl}")).scalar()
+                            if max_res is not None:
+                                email_job_id = max_res
+                        except Exception:
+                            email_job_id = 1
+                    else:
+                        email_job_id = 1
+
+            logger.info(f"ActionRegistry: Successfully queued email #{email_job_id} into '{full_mail_tbl}' (To: {to_email}, Subject: '{subject}')")
 
             # Trigger immediate non-blocking dispatch in background thread
             try:
@@ -627,7 +803,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                 logger.debug(f"ActionRegistry: Thread spawn notice: {th_ex}")
 
     except Exception as queue_err:
-        logger.debug(f"ActionRegistry: Email queue insert skipped: {queue_err}")
+        logger.error(f"ActionRegistry: Failed to queue email into client database: {queue_err}", exc_info=True)
 
     # 4. If not queued in client DB (no email job table), send directly via SMTP in non-blocking background thread
     send_status = "Queued" if email_job_id else "Dispatched"
@@ -635,7 +811,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         def _async_direct_smtp():
             try:
                 from app.workflow.services.email_dispatcher import EmailDispatcher
-                smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id)
+                smtp_cfg = EmailDispatcher.get_smtp_config(conn_id=conn_id, email_server_id=valid_server_id, from_email=from_email)
                 if smtp_cfg:
                     EmailDispatcher.send_smtp_email(
                         smtp_cfg=smtp_cfg,
@@ -643,9 +819,10 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                         subject=subject,
                         body=final_email_body,
                         email_type=email_type_val,
-                        cc=cc_email
+                        cc=cc_email,
+                        from_email=from_email
                     )
-                    logger.info(f"ActionRegistry: Background direct SMTP dispatch delivered to {to_email}")
+                    logger.info(f"ActionRegistry: Background direct SMTP dispatch delivered to {to_email} (From: {from_email or smtp_cfg.get('outgoing_email_user')})")
             except Exception as direct_err:
                 logger.warning(f"ActionRegistry: Direct SMTP email sending warning: {direct_err}")
 
@@ -655,6 +832,12 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         except Exception as th_err:
             logger.debug(f"ActionRegistry: Thread spawn notice: {th_err}")
 
+    context_vars["email_job_id"] = email_job_id
+    if email_job_id and found_mail_tbl:
+        context_vars["email_queue_table"] = full_mail_tbl
+    if from_email:
+        context_vars["email_from"] = from_email
+        context_vars["from_email"] = from_email
     context_vars["email_to"] = to_email
     if cc_email:
         context_vars["email_cc"] = cc_email
@@ -664,6 +847,7 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     return {
         "status": "SUCCESS",
         "email_job_id": email_job_id,
+        "email_queue_table": full_mail_tbl if (email_job_id and found_mail_tbl) else None,
         "email_to": to_email,
         "email_cc": cc_email,
         "email_bcc": bcc_email,
