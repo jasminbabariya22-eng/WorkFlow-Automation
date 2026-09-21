@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # 1. FastAPI Workflow Backend Service
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: workflow-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - WORKFLOW_DATABASE_URL=${WORKFLOW_DATABASE_URL:-postgresql+psycopg2://postgres:Alethe%40123@192.168.1.171:5432/workflow_erm}
+      - WORKFLOW_DB_SCHEMA=${WORKFLOW_DB_SCHEMA:-workflow}
+      - SECRET_KEY=${SECRET_KEY:-0eeedb8821a0a275fc8afb816145a44cee60bfc7f55f51b1f091cca47596cdb0}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - FERNET_KEY=${FERNET_KEY:-ia3rsWe2JkwStfuoRIOdDtsghWrDuFY02l5tR-XyCIc=}
+      - MAIN_URL=${MAIN_URL:-http://192.168.1.183}
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # 2. React Vite Workflow Studio Frontend Service (Nginx)
+  # ============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: workflow-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  workflow-net:
+    driver: bridge
+
+volumes:
+  backend_logs:
+    name: workflow_backend_logs
+  backend_data:
+    name: workflow_backend_data

@@ -1,0 +1,14 @@
+.git/
+.github/
+.vscode/
+.idea/
+.venv/
+node_modules/
+dist/
+logs/
+*.log
+*.md
+*.bat
+*.sh
+SS/
+ClientApp/

@@ -1,0 +1,32 @@
+name: Continuous Deployment (Local Server 192.168.1.183)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy-to-local-server:
+    name: Deploy to On-Premise Production Server
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Latest Code
+        uses: actions/checkout@v4
+
+      - name: Deploy Docker Stack (Zero-Downtime Reload)
+        run: |
+          echo "🚀 Deploying Workflow Platform on 192.168.1.183..."
+          docker compose down
+          docker compose up -d --build --remove-orphans
+
+      - name: Wait for Containers to Initialize
+        run: |
+          echo "⏳ Waiting for backend healthcheck..."
+          sleep 15
+
+      - name: Validate Deployment (Smoke Test)
+        run: |
+          echo "🔍 Running Post-Deployment Health Check..."
+          curl -f http://localhost:8000/health || exit 1
+          echo "✅ Deployment Healthy & Active at http://192.168.1.183"
