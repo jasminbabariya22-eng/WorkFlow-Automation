@@ -35,6 +35,8 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run Backend Pytest Suite
+        env:
+          PYTHONPATH: .
         run: |
           cd backend
           pytest -v || echo "Pytest completed with status $?"

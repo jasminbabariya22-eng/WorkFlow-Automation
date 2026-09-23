@@ -2,8 +2,13 @@ name: Continuous Deployment (Local Server 192.168.1.183)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "development" ]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
 
 jobs:
   deploy-to-local-server:
@@ -14,11 +19,12 @@ jobs:
       - name: Checkout Latest Code
         uses: actions/checkout@v4
 
-      - name: Deploy Docker Stack (Zero-Downtime Reload)
+      - name: Deploy Docker Stack
         run: |
           echo "🚀 Deploying Workflow Platform on 192.168.1.183..."
-          docker compose down
+          docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
+          docker image prune -f
 
       - name: Wait for Containers to Initialize
         run: |
