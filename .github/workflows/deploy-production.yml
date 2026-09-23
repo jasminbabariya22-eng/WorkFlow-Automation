@@ -21,18 +21,24 @@ jobs:
 
       - name: Deploy Docker Stack
         run: |
-          echo "🚀 Deploying Workflow Platform on 192.168.1.183..."
+          Write-Host "🚀 Deploying Workflow Platform on 192.168.1.183..."
           docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
-          docker image prune -f
 
       - name: Wait for Containers to Initialize
         run: |
-          echo "⏳ Waiting for backend healthcheck..."
-          sleep 15
+          Write-Host "⏳ Waiting for backend healthcheck..."
+          Start-Sleep -Seconds 15
 
       - name: Validate Deployment (Smoke Test)
         run: |
-          echo "🔍 Running Post-Deployment Health Check..."
-          curl -f http://localhost:8000/health || exit 1
-          echo "✅ Deployment Healthy & Active at http://192.168.1.183"
+          Write-Host "🔍 Running Post-Deployment Health Check..."
+          try {
+            $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 10
+            Write-Host "Response:" ($response | ConvertTo-Json)
+            Write-Host "✅ Deployment Healthy & Active at http://192.168.1.183"
+          } catch {
+            Write-Error "Health check failed: $_"
+            exit 1
+          }
+
