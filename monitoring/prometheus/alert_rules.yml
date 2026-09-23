@@ -1,0 +1,20 @@
+groups:
+  - name: workflow_alerts
+    rules:
+      - alert: BackendServiceDown
+        expr: up{job="workflow-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Workflow Backend Service is Down"
+          description: "Backend container has been unreachable for more than 1 minute on 192.168.1.183."
+
+      - alert: HighRequestLatency
+        expr: http_request_duration_seconds_sum / http_request_duration_seconds_count > 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API Request Latency"
+          description: "Average API response latency exceeded 2 seconds for 2 minutes."

@@ -37,3 +37,6 @@ requests>=2.31.0
 
 # Cryptography
 cryptography>=42.0.0
+
+# Observability & Metrics (Prometheus)
+prometheus-client>=0.20.0

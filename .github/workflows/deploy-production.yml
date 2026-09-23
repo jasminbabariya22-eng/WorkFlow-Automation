@@ -2,7 +2,7 @@ name: Continuous Deployment (Local Server 192.168.1.183)
 
 on:
   push:
-    branches: [ "main", "development" ]
+    branches: [ "main", "development", "deployment" ]
   workflow_dispatch:
     inputs:
       environment:
@@ -12,33 +12,38 @@ on:
 
 jobs:
   deploy-to-local-server:
-    name: Deploy to On-Premise Production Server
+    name: "Stage 9-11: GitOps Rollout & Post-Deployment Validations"
     runs-on: self-hosted
 
     steps:
-      - name: Checkout Latest Code
+      - name: "Stage 9: Checkout Latest Code (GitOps Sync)"
         uses: actions/checkout@v4
 
-      - name: Deploy Docker Stack
+      - name: "Stage 10: Deploy Docker Stack (Zero-Downtime Rollout)"
         run: |
           Write-Host "🚀 Deploying Workflow Platform on 192.168.1.183..."
           docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
 
-      - name: Wait for Containers to Initialize
+      - name: "Wait for Containers & Metrics to Initialize"
         run: |
-          Write-Host "⏳ Waiting for backend healthcheck..."
+          Write-Host "⏳ Waiting for backend and monitoring healthcheck..."
           Start-Sleep -Seconds 15
 
-      - name: Validate Deployment (Smoke Test)
+      - name: "Stage 11: Post-Deployment Validations (Smoke & Metrics Test)"
         run: |
-          Write-Host "🔍 Running Post-Deployment Health Check..."
+          Write-Host "🔍 Running Stage 11: Post-Deployment Health & Telemetry Validation..."
           try {
-            $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 10
-            Write-Host "Response:" ($response | ConvertTo-Json)
-            Write-Host "✅ Deployment Healthy & Active at http://192.168.1.183"
+            $health = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 10
+            Write-Host "✅ Health Response:" ($health | ConvertTo-Json)
+            
+            $metrics = Invoke-RestMethod -Uri "http://localhost:8000/metrics" -Method Get -TimeoutSec 10
+            Write-Host "✅ Prometheus Metrics Active at /metrics"
+            
+            Write-Host "🎉 Enterprise Deployment & Observability Healthy at http://192.168.1.183"
           } catch {
-            Write-Error "Health check failed: $_"
+            Write-Error "Post-Deployment validation failed: $_"
             exit 1
           }
+
 

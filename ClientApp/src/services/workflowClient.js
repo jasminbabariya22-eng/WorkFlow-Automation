@@ -6,7 +6,7 @@
 
 class WorkflowClient {
   constructor() {
-    this.serverUrl = localStorage.getItem('workflow_server_url') ?? 'http://192.168.1.183:8000'
+    this.serverUrl = localStorage.getItem('workflow_server_url') ?? 'http://192.168.1.115:8000'
   }
 
   getServerUrl() {
@@ -14,7 +14,7 @@ class WorkflowClient {
       const stored = localStorage.getItem('workflow_server_url')
       if (stored && stored.trim()) return stored.trim().replace(/\/+$/, '')
     } catch (_e) {}
-    return this.serverUrl || 'http://192.168.1.183:8000'
+    return this.serverUrl || 'http://192.168.1.115:8000'
   }
 
   isConnected() {
