@@ -66,22 +66,21 @@ Expand-Archive -Path actions-runner.zip -DestinationPath .
 # Configure with your token
 .\config.cmd --url https://github.com/jasminbabariya22-eng/WorkFlow-Automation --token <YOUR_TOKEN>
 
-# Install and run as Windows Service
-.\actions-runner\svc.bat install
-.\actions-runner\svc.bat start
+# Install and run as Windows Service (or run directly with .\run.cmd)
+.\svc.cmd install
+.\svc.cmd start
 ```
 
 ---
 
 ## 3. How Automated Deployment Works
 
-1. **You develop on branch `development`**:
-   - Make code changes, run tests locally.
-2. **You create a Pull Request to `main`**:
-   - GitHub Actions automatically runs `ci.yml` (Pytest, Vite Build, Docker Build, Trivy Security Scan).
-3. **You merge the PR into `main`**:
-   - GitHub triggers `deploy-production.yml` on the self-hosted runner at `192.168.1.183`.
-   - The runner executes `docker compose up -d --build`.
+1. **You develop and push code to `development` or `main`**:
+   - Pushing code automatically triggers the CI/CD pipeline.
+2. **GitHub Actions runs Quality Gates & Security Scans**:
+   - `ci.yml` runs Pytest suites, Vite production build, and Trivy security scans.
+3. **Deployment Triggers on Server `192.168.1.183`**:
+   - The self-hosted runner executes `docker compose up -d --build`.
    - Your updated application is instantly live across your local network at:
      - **Web UI:** `http://192.168.1.183` or `http://192.168.1.183:3000`
      - **API Docs:** `http://192.168.1.183:8000/docs`
