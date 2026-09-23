@@ -4,7 +4,7 @@
  * Routes all workflow operations through the single master gateway POST /api/v1/workflow-hub.
  */
 
-const SERVER_URL = 'http://192.168.1.115:8000'
+const SERVER_URL = 'http://192.168.1.183:8000'
 
 class GenericWorkflowApi {
   constructor(baseUrl = SERVER_URL) {
@@ -16,7 +16,7 @@ class GenericWorkflowApi {
       const stored = localStorage.getItem('workflow_server_url')
       if (stored && stored.trim()) return stored.trim().replace(/\/+$/, '')
     } catch (_e) {}
-    return this.defaultBaseUrl || 'http://192.168.1.115:8000'
+    return this.defaultBaseUrl || 'http://192.168.1.183:8000'
   }
 
   /**

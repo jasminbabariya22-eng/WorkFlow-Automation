@@ -1,6 +1,6 @@
 # ⚡ Workflow Integration Guide
 
-This guide explains how to connect and run any workflow (such as **`emp_leave_request`**) between your local frontend UI (**ClientApp**) and the backend **Workflow Engine** running at `http://192.168.1.115:8000`.
+This guide explains how to connect and run any workflow (such as **`emp_leave_request`**) between your local frontend UI (**ClientApp**) and the backend **Workflow Engine** running at `http://192.168.1.183:8000`.
 
 ---
 
@@ -10,10 +10,10 @@ To run the complete workflow from start to finish, you only need these **3 URLs*
 
 | # | Action | HTTP Method | Exact Endpoint URL |
 |:---:|:---|:---:|:---|
-| **1** | **Start Leave Request** | `POST` | `http://192.168.1.115:8000/workflow/jobs/create` |
-| **2** | **Get Pending Approvals** | `GET` | `http://192.168.1.115:8000/workflow/tasks?role_code=MANAGER&status=READY` |
-| **3** | **Approve Task** | `POST` | `http://192.168.1.115:8000/workflow/tasks/{task_id}/complete` |
-| *-* | *Reject Task (Optional)* | `POST` | `http://192.168.1.115:8000/workflow/tasks/{task_id}/reject` |
+| **1** | **Start Leave Request** | `POST` | `http://192.168.1.183:8000/workflow/jobs/create` |
+| **2** | **Get Pending Approvals** | `GET` | `http://192.168.1.183:8000/workflow/tasks?role_code=MANAGER&status=READY` |
+| **3** | **Approve Task** | `POST` | `http://192.168.1.183:8000/workflow/tasks/{task_id}/complete` |
+| *-* | *Reject Task (Optional)* | `POST` | `http://192.168.1.183:8000/workflow/tasks/{task_id}/reject` |
 
 ---
 
@@ -25,7 +25,7 @@ In [`ClientApp/src/services/workflowClient.js`](file:///d:/WorkFlow/ClientApp/sr
 class WorkflowClient {
   constructor() {
     // Your Server Workflow Engine URL
-    this.serverUrl = 'http://192.168.1.115:8000'
+    this.serverUrl = 'http://192.168.1.183:8000'
   }
 }
 ```
@@ -37,7 +37,7 @@ class WorkflowClient {
 ### Step 1: Employee Applies for Leave (Trigger Workflow)
 
 * **HTTP Method**: `POST`
-* **URL**: `http://192.168.1.115:8000/workflow/jobs/create`
+* **URL**: `http://192.168.1.183:8000/workflow/jobs/create`
 * **Headers**: `Content-Type: application/json`
 * **Payload**:
 ```json
@@ -69,7 +69,7 @@ class WorkflowClient {
 ### Step 2: Manager Fetches Pending Tasks
 
 * **HTTP Method**: `GET`
-* **URL**: `http://192.168.1.115:8000/workflow/tasks?role_code=MANAGER&status=READY`
+* **URL**: `http://192.168.1.183:8000/workflow/tasks?role_code=MANAGER&status=READY`
 * **Response**:
 ```json
 {
@@ -92,7 +92,7 @@ class WorkflowClient {
 ### Step 3: Manager Approves the Task
 
 * **HTTP Method**: `POST`
-* **URL**: `http://192.168.1.115:8000/workflow/tasks/8801/complete`
+* **URL**: `http://192.168.1.183:8000/workflow/tasks/8801/complete`
 * **Headers**: `Content-Type: application/json`
 * **Payload**:
 ```json
@@ -129,5 +129,5 @@ You only change the **`workflow_key`**:
 ## 5. Live Backend Observability & Monitoring
 
 Once your UI triggers the endpoints, the backend engine executes the BPMN logic and records telemetry:
-* **Workflow Monitoring API**: `GET http://192.168.1.115:8000/workflow/monitoring/instances`
-* **Real-Time WebSocket**: `ws://192.168.1.115:8000/ws/workflow`
+* **Workflow Monitoring API**: `GET http://192.168.1.183:8000/workflow/monitoring/instances`
+* **Real-Time WebSocket**: `ws://192.168.1.183:8000/ws/workflow`
