@@ -185,9 +185,9 @@ function App() {
       <div className="sidebar">
         <div>
           <div className="brand-section" style={{ display: 'flex', alignItems: 'center', marginBottom: '36px' }}>
-            <img 
-              src={capperLogo} 
-              alt="Capper" 
+            <img
+              src={capperLogo}
+              alt="Capper"
               className="brand-logo-img"
               style={{
                 height: '32px',
@@ -226,27 +226,15 @@ function App() {
 
           </ul>
         </div>
-
-        <div style={{
-          fontSize: '11px',
-          color: '#94a3b8',
-          textAlign: 'center',
-          lineHeight: '1.4',
-          paddingTop: '16px',
-          borderTop: '1px solid #f1f5f9',
-          userSelect: 'none'
-        }}>
-          ©Copyright, Alethe Labs India Pvt Ltd
-        </div>
       </div>
 
       {/* Main Workspace Pane */}
       <div className="main-content">
         <div className="top-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <img 
-              src={massCapperLogo} 
-              alt="MASSCapper" 
+            <img
+              src={massCapperLogo}
+              alt="MASSCapper"
               style={{
                 height: '32px',
                 width: 'auto',
@@ -266,6 +254,28 @@ function App() {
         </div>
 
         {renderActiveView()}
+
+        {/* Footer */}
+        <footer className="border-top footer text-muted py-2 bg-white text-xs mt-auto" style={{
+          borderTop: '1px solid #e2e8f0',
+          padding: '8px 16px',
+          background: '#ffffff',
+          fontSize: '12px',
+          color: '#64748b',
+          textAlign: 'center',
+          marginTop: 'auto',
+          zIndex: 5,
+          flexShrink: 0
+        }}>
+          <div className="container text-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <span>&copy;2026, Alethe Consulting. All rights reserved. Powered by</span>
+            <img
+              src={massCapperLogo}
+              alt="MassCapper Logo"
+              style={{ height: '22px', width: 'auto', objectFit: 'contain', display: 'inline-block' }}
+            />
+          </div>
+        </footer>
       </div>
 
       {/* Global Notifications Toast */}

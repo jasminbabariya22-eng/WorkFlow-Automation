@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     FERNET_KEY: Optional[str] = "ia3rsWe2JkwStfuoRIOdDtsghWrDuFY02l5tR-XyCIc="
-    MAIN_URL: Optional[str] = "http://localhost:3000"
 
     class Config:
         env_file = ".env"
