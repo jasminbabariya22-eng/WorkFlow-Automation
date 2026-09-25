@@ -1,4 +1,4 @@
-name: Continuous Deployment (Local Server 192.168.1.183)
+name: Continuous Deployment (Local Server 192.168.1.191)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
 
       - name: "Stage 10: Deploy Docker Stack (Zero-Downtime Rollout)"
         run: |
-          Write-Host "🚀 Deploying Workflow Platform on 192.168.1.183..."
+          Write-Host "🚀 Deploying Workflow Platform on 192.168.1.191..."
           docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
 
@@ -38,7 +38,7 @@ jobs:
             $metrics = Invoke-RestMethod -Uri "http://localhost:8000/metrics" -Method Get -TimeoutSec 10
             Write-Host "✅ Prometheus Metrics Active at /metrics"
             
-            Write-Host "🎉 Enterprise Deployment & Observability Healthy at http://192.168.1.183"
+            Write-Host "🎉 Enterprise Deployment & Observability Healthy at https://192.168.1.191"
           } catch {
             Write-Error "Post-Deployment validation failed: $_"
             exit 1
