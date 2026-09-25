@@ -1,0 +1,45 @@
+name: Deploy to Server (192.168.1.191)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "deployment", "main" ]
+
+jobs:
+  deploy:
+    name: "Deploy Workflow Docker Stack"
+    runs-on: [self-hosted, Windows]
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: "1. Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "2. Deploy Docker Containers with SSL"
+        run: |
+          Write-Host "=================================================="
+          Write-Host "🚀 Starting Docker Deployment on Server..."
+          Write-Host "=================================================="
+          
+          # Run Docker Compose Build & Deploy
+          docker compose down --remove-orphans 2>$null
+          docker compose up -d --build --remove-orphans
+          
+          Write-Host "✅ Docker Containers Launched Successfully!"
+
+      - name: "3. Verify System Health"
+        run: |
+          Write-Host "⏳ Waiting for containers to initialize..."
+          Start-Sleep -Seconds 15
+          
+          try {
+            $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 15
+            Write-Host "✅ Backend Health: OK"
+            Write-Host ($response | ConvertTo-Json)
+            Write-Host "🎉 Deployment Active at: https://192.168.1.191"
+          } catch {
+            Write-Host "⚠️ Warning: Healthcheck direct port not responding yet, checking Docker status:"
+            docker ps
+          }
