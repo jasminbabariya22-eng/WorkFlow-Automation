@@ -96,17 +96,21 @@ cd backend
 # Install dependencies (if first time)
 pip install -r requirements.txt
 
-# Option A: Start for Local Development (Localhost only)
+# Option A: Start for Local Development (HTTP - Localhost only)
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-# Option B: Start for Server / LAN Network Deployment (Accessible from any network IP)
+# Option B: Start for Server / LAN Network Deployment (HTTP - Port 8000)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Option C: Start for Production / Secure Server Deployment (HTTPS / SSL Enabled)
+# (Auto-generates certificates in backend/certs if not present)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile certs/privkey.pem --ssl-certfile certs/fullchain.pem --reload
 ```
 
-* **Local Backend API Base:** `http://127.0.0.1:8000` (or `http://localhost:8000`)
-* **Server Backend API Base:** `http://<SERVER_IP>:8000` (e.g. `http://192.168.1.191:8000`)
-* **Interactive API Documentation (Swagger UI):** `http://<SERVER_IP_OR_LOCALHOST>:8000/docs`
-* **Universal Gateway Endpoint:** `POST http://<SERVER_IP_OR_LOCALHOST>:8000/api/v1/workflow-hub`
+* **Local Backend API Base (HTTP):** `http://127.0.0.1:8000`
+* **Secure Server API Base (HTTPS / SSL):** `https://<SERVER_IP>:8000` (e.g. `https://192.168.1.191:8000`)
+* **Interactive API Documentation (Swagger UI):** `https://<SERVER_IP>:8000/docs`
+* **Universal Gateway Endpoint (HTTPS):** `POST https://<SERVER_IP>:8000/api/v1/workflow-hub`
 
 ---
 
