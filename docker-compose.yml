@@ -32,7 +32,7 @@ services:
       start_period: 10s
 
   # ============================================================================
-  # 2. React Vite Workflow Studio Frontend Service (Nginx)
+  # 2. React Vite Workflow Studio Frontend Service (Nginx with SSL)
   # ============================================================================
   frontend:
     build:
@@ -42,7 +42,10 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
       - "3000:80"
+    volumes:
+      - ./backend/certs:/etc/nginx/ssl:ro
     depends_on:
       backend:
         condition: service_healthy
