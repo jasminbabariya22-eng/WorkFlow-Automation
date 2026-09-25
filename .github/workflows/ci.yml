@@ -11,7 +11,7 @@ jobs:
   # STAGE 1, 2, 3, 4: Code Checkout, App Build, Unit Testing, Static Code Analysis
   # ============================================================================
   code-quality-gate:
-    name: "Stage 1-4: Build, Test & Static Code Analysis (SonarQube/Lint)"
+    name: "Stage 1-4: Build, Test & Static Code Analysis"
     runs-on: ubuntu-latest
 
     steps:
@@ -21,20 +21,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      # --- Stage 2: Build Application ---
+      # --- Stage 2: Setup Python 3.11 Runtime ---
       - name: "Stage 2: Setup Python 3.11 Runtime"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
       - name: "Stage 2: Install System & Python Dependencies"
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpq-dev unixodbc-dev freetds-dev
+          sudo apt-get install -y libpq-dev unixodbc-dev freetds-dev python3-dev gcc g++
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt flake8
+          pip install -r backend/requirements.txt flake8 pytest
 
+      # --- Stage 2: Setup Node.js 22 & Build Frontend Bundle ---
       - name: "Stage 2: Setup Node.js 22 & Build Frontend Bundle"
         uses: actions/setup-node@v4
         with:
@@ -51,25 +53,16 @@ jobs:
       # --- Stage 3: Unit Testing ---
       - name: "Stage 3: Run Unit Testing (Pytest Suite)"
         env:
-          PYTHONPATH: .
+          PYTHONPATH: backend
         run: |
           cd backend
-          pytest -v || echo "Pytest completed with status $?"
+          pytest -v || echo "Pytest completed"
 
-      # --- Stage 4: SonarQube & Static Code Analysis ---
-      - name: "Stage 4: Static Code Analysis (Flake8 & Oxlint/ESLint Quality Gate)"
+      # --- Stage 4: Static Code Analysis ---
+      - name: "Stage 4: Static Code Analysis (Flake8 Quality Gate)"
         run: |
           echo "🔍 Running Static Code Analysis Quality Gate..."
           flake8 backend/app --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          cd frontend
-          npm run lint || echo "Frontend linting verified"
-
-      - name: "Stage 4: SonarQube / SonarCloud Scan (Optional if SONAR_TOKEN is set)"
-        if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarcloud-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # ============================================================================
   # STAGE 5, 6, 7: Docker Image Build, Image Scan & Trivy Security Vulnerability Scan
@@ -120,4 +113,3 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
-

@@ -1,8 +1,6 @@
 name: Continuous Deployment (Local Server 192.168.1.183)
 
 on:
-  push:
-    branches: [ "main", "development", "deployment" ]
   workflow_dispatch:
     inputs:
       environment:
@@ -45,5 +43,3 @@ jobs:
             Write-Error "Post-Deployment validation failed: $_"
             exit 1
           }
-
-
