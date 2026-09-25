@@ -9,37 +9,33 @@ jobs:
   deploy:
     name: "Deploy Workflow Docker Stack"
     runs-on: [self-hosted, Windows]
-    defaults:
-      run:
-        shell: powershell
 
     steps:
       - name: "1. Checkout Code"
         uses: actions/checkout@v4
 
-      - name: "2. Deploy Docker Containers with SSL"
+      - name: "2. Deploy Docker Stack"
+        shell: cmd
         run: |
-          Write-Host "=================================================="
-          Write-Host "🚀 Starting Docker Deployment on Server..."
-          Write-Host "=================================================="
-          
-          # Run Docker Compose Build & Deploy
-          docker compose down --remove-orphans 2>$null
+          echo ==================================================
+          echo Starting Docker Deployment on Server...
+          echo ==================================================
+          docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
-          
-          Write-Host "✅ Docker Containers Launched Successfully!"
 
-      - name: "3. Verify System Health"
+      - name: "3. Verify Deployment Health"
+        shell: powershell
         run: |
-          Write-Host "⏳ Waiting for containers to initialize..."
-          Start-Sleep -Seconds 15
+          Write-Host "Waiting for containers to initialize..."
+          Start-Sleep -Seconds 20
           
           try {
             $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 15
-            Write-Host "✅ Backend Health: OK"
+            Write-Host "✅ Health Response: OK"
             Write-Host ($response | ConvertTo-Json)
-            Write-Host "🎉 Deployment Active at: https://192.168.1.191"
+            Write-Host "🎉 Enterprise Platform Live at https://192.168.1.191"
           } catch {
-            Write-Host "⚠️ Warning: Healthcheck direct port not responding yet, checking Docker status:"
+            Write-Host "⚠️ Healthcheck warning: $_"
+            Write-Host "Checking active Docker containers:"
             docker ps
           }
