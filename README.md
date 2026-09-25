@@ -91,17 +91,22 @@ flowchart TD
 cd backend
 
 # Activate virtual environment (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate
 
 # Install dependencies (if first time)
 pip install -r requirements.txt
 
-# Start the FastAPI server
+# Option A: Start for Local Development (Localhost only)
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Option B: Start for Server / LAN Network Deployment (Accessible from any network IP)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-* **Backend API Base:** `http://127.0.0.1:8000`
-* **Interactive API Documentation (Swagger UI):** `http://127.0.0.1:8000/docs`
+* **Local Backend API Base:** `http://127.0.0.1:8000` (or `http://localhost:8000`)
+* **Server Backend API Base:** `http://<SERVER_IP>:8000` (e.g. `http://192.168.1.191:8000`)
+* **Interactive API Documentation (Swagger UI):** `http://<SERVER_IP_OR_LOCALHOST>:8000/docs`
+* **Universal Gateway Endpoint:** `POST http://<SERVER_IP_OR_LOCALHOST>:8000/api/v1/workflow-hub`
 
 ---
 
@@ -114,11 +119,15 @@ cd frontend
 # Install frontend dependencies
 npm install
 
-# Start Vite dev server
+# Option A: Start Vite dev server for Localhost
 npm run dev
+
+# Option B: Start Vite dev server for Server / Network Access
+npm run dev -- --host 0.0.0.0
 ```
 
-* **Workflow Studio Designer:** `http://localhost:5173`
+* **Local Workflow Studio Designer:** `http://localhost:5173`
+* **Network Workflow Studio Designer:** `http://<SERVER_IP>:5173`
 
 ---
 

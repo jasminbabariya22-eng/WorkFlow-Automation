@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, Optional, List, Set, Tuple
 from app.core.logger import logger
 
 
@@ -438,18 +438,24 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     now_dt = datetime.datetime.now()
     user_id = context_vars.get("user_id", 1)
 
-    # 1. Resolve Recipient Email List (Supports direct emails, role:RoleName, user:UserName, variables)
+    # 1. Resolve Recipient Email List (Supports direct emails, role:RoleName, user:UserName, variables, lists)
     def _resolve_recipient_list(raw_input: Any) -> Optional[str]:
         if not raw_input:
             return None
-        raw_str = str(raw_input).strip()
-        if not raw_str:
-            return None
+        
+        if isinstance(raw_input, (list, tuple, set)):
+            parts = [str(p).strip().strip("'\"") for p in raw_input if str(p).strip()]
+        else:
+            raw_str = str(raw_input).strip()
+            if not raw_str:
+                return None
+            parts = [p.strip().strip("'\"") for p in raw_str.split(",") if p.strip()]
 
-        parts = [p.strip() for p in raw_str.split(",") if p.strip()]
         resolved_emails = []
 
         for p in parts:
+            if not p:
+                continue
             if p.startswith("role:"):
                 role_target = p.replace("role:", "").strip()
                 try:
@@ -516,14 +522,83 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
 
         return ", ".join(deduped_emails) if deduped_emails else None
 
-    raw_to = context_vars.get("to") or context_vars.get("to_email") or context_vars.get("email_to") or config.get("to") or config.get("recipient")
-    to_email = _resolve_recipient_list(raw_to)
-    if not to_email:
-        to_email = context_vars.get("employee_email") or context_vars.get("email") or context_vars.get("user_email") or "applicant@company.com"
-        to_email = _resolve_recipient_list(to_email)
+    def _collect_recipient_sources(*sources) -> List[str]:
+        collected = []
+        for s in sources:
+            if not s:
+                continue
+            if isinstance(s, (list, tuple, set)):
+                for item in s:
+                    if item:
+                        collected.append(str(item).strip().strip("'\""))
+            elif isinstance(s, str):
+                for sub in s.split(","):
+                    clean = sub.strip().strip("'\"")
+                    if clean:
+                        collected.append(clean)
+            else:
+                clean = str(s).strip().strip("'\"")
+                if clean:
+                    collected.append(clean)
+        return collected
 
-    raw_cc = context_vars.get("cc") or context_vars.get("cc_email") or context_vars.get("email_cc") or config.get("cc") or config.get("email_cc")
-    cc_email = _resolve_recipient_list(raw_cc)
+    param_dict = context_vars.get("parameter") or context_vars.get("parameters") or {}
+    if not isinstance(param_dict, dict):
+        param_dict = {}
+
+    # Separate workflow node configured emails vs API request emails
+    node_to_sources = _collect_recipient_sources(
+        config.get("to"),
+        config.get("recipient"),
+        config.get("to_email"),
+        config.get("email_to")
+    )
+    node_to_raw = _resolve_recipient_list(node_to_sources)
+
+    req_to_sources = _collect_recipient_sources(
+        param_dict.get("to"),
+        param_dict.get("to_email"),
+        param_dict.get("email_to"),
+        context_vars.get("to"),
+        context_vars.get("to_email"),
+        context_vars.get("email_to")
+    )
+    req_to_raw = _resolve_recipient_list(req_to_sources)
+
+    # 1a. Merge all TO sources: Workflow Node configuration + API Request inputs
+    to_sources = node_to_sources + req_to_sources
+    to_email = _resolve_recipient_list(to_sources)
+    if not to_email:
+        fallback_to = _collect_recipient_sources(
+            context_vars.get("employee_email"),
+            context_vars.get("email"),
+            context_vars.get("user_email"),
+            param_dict.get("employee_email"),
+            param_dict.get("email"),
+            param_dict.get("user_email")
+        )
+        to_email = _resolve_recipient_list(fallback_to) if fallback_to else "applicant@company.com"
+
+    node_cc_sources = _collect_recipient_sources(
+        config.get("cc"),
+        config.get("email_cc"),
+        config.get("cc_email")
+    )
+    node_cc_raw = _resolve_recipient_list(node_cc_sources)
+
+    req_cc_sources = _collect_recipient_sources(
+        param_dict.get("cc"),
+        param_dict.get("cc_email"),
+        param_dict.get("email_cc"),
+        context_vars.get("cc"),
+        context_vars.get("cc_email"),
+        context_vars.get("email_cc")
+    )
+    req_cc_raw = _resolve_recipient_list(req_cc_sources)
+
+    # 1b. Merge all CC sources: Workflow Node configuration + API Request inputs
+    cc_sources = node_cc_sources + req_cc_sources
+    cc_email = _resolve_recipient_list(cc_sources)
 
     # Restrict duplicates across TO and CC using set
     if cc_email and to_email:
@@ -531,8 +606,19 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
         cc_list = [e.strip() for e in cc_email.split(",") if e.strip() and e.strip().lower() not in to_set]
         cc_email = ", ".join(cc_list) if cc_list else None
 
-    raw_bcc = context_vars.get("bcc") or context_vars.get("bcc_email") or context_vars.get("email_bcc") or config.get("bcc") or config.get("email_bcc")
-    bcc_email = _resolve_recipient_list(raw_bcc)
+    # 1c. Merge all BCC sources: Workflow Node configuration + API Request inputs
+    bcc_sources = _collect_recipient_sources(
+        config.get("bcc"),
+        config.get("email_bcc"),
+        config.get("bcc_email"),
+        context_vars.get("bcc"),
+        context_vars.get("bcc_email"),
+        context_vars.get("email_bcc"),
+        param_dict.get("bcc"),
+        param_dict.get("bcc_email"),
+        param_dict.get("email_bcc")
+    )
+    bcc_email = _resolve_recipient_list(bcc_sources)
 
     # Restrict duplicates across TO, CC, and BCC using set
     if bcc_email:
@@ -757,6 +843,17 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
                 else:
                     insert_data[cols_dict["created_by"]] = str(user_id)
 
+            resolved_wf_id = context_vars.get("workflow_id") or context_vars.get("definition_id")
+            resolved_inst_id = context_vars.get("instance_id") or context_vars.get("job_id") or entity_id
+            resolved_node_key = config.get("node_id") or config.get("id") or context_vars.get("node_key") or context_vars.get("step_key") or context_vars.get("current_task_code") or "email_node"
+
+            if "workflow_id" in cols_dict and resolved_wf_id is not None:
+                insert_data[cols_dict["workflow_id"]] = int(resolved_wf_id) if str(resolved_wf_id).isdigit() else 1
+            if "instance_id" in cols_dict and resolved_inst_id is not None:
+                insert_data[cols_dict["instance_id"]] = int(resolved_inst_id) if str(resolved_inst_id).isdigit() else None
+            if "node_key" in cols_dict and resolved_node_key:
+                insert_data[cols_dict["node_key"]] = str(resolved_node_key)
+
             col_names = list(insert_data.keys())
             param_names = [f":p_{i}" for i in range(len(col_names))]
             params = {f"p_{i}": v for i, v in enumerate(insert_data.values())}
@@ -770,23 +867,38 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
             insert_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)})"
             dialect_name = eng.dialect.name.lower()
 
-            with eng.begin() as conn:
-                if "postgres" in dialect_name and pk_name:
-                    ret_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)}) RETURNING {pk_name}"
-                    res = conn.execute(text(ret_sql), params).first()
-                    if res:
-                        email_job_id = res[0]
-                else:
-                    conn.execute(text(insert_sql), params)
-                    if pk_name:
-                        try:
-                            max_res = conn.execute(text(f"SELECT MAX({pk_name}) FROM {full_mail_tbl}")).scalar()
-                            if max_res is not None:
-                                email_job_id = max_res
-                        except Exception:
-                            email_job_id = 1
+            try:
+                with eng.begin() as conn:
+                    if "postgres" in dialect_name and pk_name:
+                        ret_sql = f"INSERT INTO {full_mail_tbl} ({', '.join(col_names)}) VALUES ({', '.join(param_names)}) RETURNING {pk_name}"
+                        res = conn.execute(text(ret_sql), params).first()
+                        if res:
+                            email_job_id = res[0]
                     else:
-                        email_job_id = 1
+                        conn.execute(text(insert_sql), params)
+                        if pk_name:
+                            try:
+                                max_res = conn.execute(text(f"SELECT MAX({pk_name}) FROM {full_mail_tbl}")).scalar()
+                                if max_res is not None:
+                                    email_job_id = max_res
+                            except Exception:
+                                email_job_id = 1
+                        else:
+                            email_job_id = 1
+            except Exception as ins_err:
+                err_str = str(ins_err).lower()
+                if "unique" in err_str or "duplicate" in err_str or "2601" in err_str or "2627" in err_str:
+                    logger.info(f"ActionRegistry: Duplicate email job for (wf:{resolved_wf_id}, inst:{resolved_inst_id}, node:{resolved_node_key}) safely blocked by database unique constraint.")
+                    try:
+                        with eng.connect() as q_conn:
+                            find_sql = f"SELECT {pk_name or 'email_job_id'} FROM {full_mail_tbl} WHERE workflow_id = :w_id AND instance_id = :i_id AND node_key = :n_k"
+                            existing_job = q_conn.execute(text(find_sql), {"w_id": resolved_wf_id, "i_id": resolved_inst_id, "n_k": str(resolved_node_key)}).scalar()
+                            if existing_job:
+                                email_job_id = existing_job
+                    except Exception:
+                        pass
+                else:
+                    raise
 
             logger.info(f"ActionRegistry: Successfully queued email #{email_job_id} into '{full_mail_tbl}' (To: {to_email}, Subject: '{subject}')")
 
@@ -844,10 +956,38 @@ def _email_notification_handler(config: Dict[str, Any], context_vars: Dict[str, 
     if bcc_email:
         context_vars["email_bcc"] = bcc_email
 
+    node_to_list = [e.strip() for e in node_to_raw.split(",") if e.strip()] if node_to_raw else []
+    node_cc_list = [e.strip() for e in node_cc_raw.split(",") if e.strip()] if node_cc_raw else []
+    req_to_list = [e.strip() for e in req_to_raw.split(",") if e.strip()] if req_to_raw else []
+    req_cc_list = [e.strip() for e in req_cc_raw.split(",") if e.strip()] if req_cc_raw else []
+    final_to_list = [e.strip() for e in to_email.split(",") if e.strip()] if to_email else []
+    final_cc_list = [e.strip() for e in cc_email.split(",") if e.strip()] if cc_email else []
+
+    context_vars["workflow_node_to"] = node_to_list
+    context_vars["workflow_node_cc"] = node_cc_list
+    context_vars["request_to"] = req_to_list
+    context_vars["request_cc"] = req_cc_list
+    context_vars["final_to"] = final_to_list
+    context_vars["final_cc"] = final_cc_list
+    context_vars["to"] = final_to_list
+    context_vars["cc"] = final_cc_list
+
     return {
         "status": "SUCCESS",
         "email_job_id": email_job_id,
         "email_queue_table": full_mail_tbl if (email_job_id and found_mail_tbl) else None,
+        "workflow_node_emails": {
+            "to": node_to_list,
+            "cc": node_cc_list
+        },
+        "request_emails": {
+            "to": req_to_list,
+            "cc": req_cc_list
+        },
+        "final_recipients": {
+            "to": final_to_list,
+            "cc": final_cc_list
+        },
         "email_to": to_email,
         "email_cc": cc_email,
         "email_bcc": bcc_email,

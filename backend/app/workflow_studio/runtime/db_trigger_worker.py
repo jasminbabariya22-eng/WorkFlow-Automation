@@ -96,8 +96,9 @@ class DatabaseTriggerWorker:
                     start_node = next((n for n in nodes if n.get("type") == "start" or str(n.get("id", "")).startswith("start")), None)
                     if start_node:
                         s_data = start_node.get("data", {})
-                        t_type = s_data.get("triggerType") or s_data.get("trigger_type")
-                        if t_type == "Database" or s_data.get("table") or s_data.get("entity"):
+                        t_type = str(s_data.get("triggerType") or s_data.get("trigger_type") or "").strip().lower()
+                        is_db_trigger = t_type in ("database", "db_event", "table_trigger", "db_insert", "db_update")
+                        if is_db_trigger:
                             table_name = s_data.get("table") or s_data.get("entity") or s_data.get("target_entity")
                             if table_name and str(table_name).strip().lower() not in ("", "target_table", "undefined", "null"):
                                 triggers.append({
@@ -130,8 +131,9 @@ class DatabaseTriggerWorker:
                     start_node = next((n for n in nodes if n.get("type") == "start" or str(n.get("id", "")).startswith("start")), None)
                     if start_node:
                         s_data = start_node.get("data", {})
-                        t_type = s_data.get("triggerType") or s_data.get("trigger_type")
-                        if t_type == "Database" or s_data.get("table") or s_data.get("entity"):
+                        t_type = str(s_data.get("triggerType") or s_data.get("trigger_type") or "").strip().lower()
+                        is_db_trigger = t_type in ("database", "db_event", "table_trigger", "db_insert", "db_update")
+                        if is_db_trigger:
                             table_name = s_data.get("table") or s_data.get("entity") or s_data.get("target_entity")
                             if table_name and str(table_name).strip().lower() not in ("", "target_table", "undefined", "null"):
                                 w_id = w.workflow_id
@@ -225,7 +227,17 @@ class DatabaseTriggerWorker:
             # Trigger condition matching
             should_trigger = False
             if is_new_insert and event_type in ("INSERT", "INSERT_OR_UPDATE") and matches_condition:
-                should_trigger = True
+                # Check if this entity was already launched via API or existing workflow instance
+                existing_inst = db.query(SpiffWorkflowInstance).filter(
+                    SpiffWorkflowInstance.entity_type == clean_table,
+                    SpiffWorkflowInstance.entity_id == rec_id
+                ).first()
+                if not existing_inst:
+                    should_trigger = True
+                else:
+                    cls._processed_ids[cache_key].add(rec_id)
+                    if rec_id > cls._table_max_ids[cache_key]:
+                        cls._table_max_ids[cache_key] = rec_id
             elif event_type in ("UPDATE", "INSERT_OR_UPDATE") and matches_condition and rec_id not in cls._processed_ids[cache_key]:
                 should_trigger = True
 

@@ -52,13 +52,21 @@ export default function EmailNodeSection({
           const list = await res.json()
           if (isMounted && Array.isArray(list)) {
             setEmailServers(list)
-            if (data.email_server_id && !data.from) {
+            if (data.email_server_id) {
               const matched = list.find(s => String(s.email_server_id) === String(data.email_server_id))
               if (matched && (matched.from_email || matched.outgoing_email_user)) {
-                onFieldChange('from', matched.from_email || matched.outgoing_email_user)
+                const sFrom = matched.from_email || matched.outgoing_email_user
+                if (!data.from || data.from !== sFrom) {
+                  onFieldChange('from', sFrom)
+                }
               }
-            } else if ((!data.from || data.from === 'j') && list.length > 0) {
-              // Pre-select first available valid email if unset or placeholder
+            } else if (data.from && data.from !== 'j') {
+              const matched = list.find(s => (s.from_email || s.outgoing_email_user) === data.from)
+              if (matched && matched.email_server_id) {
+                onFieldChange('email_server_id', matched.email_server_id)
+              }
+            } else if (!data.from && list.length > 0) {
+              // Pre-select first available valid email only if unset
               const firstEmail = list[0].from_email || list[0].outgoing_email_user
               onFieldsChange({
                 from: firstEmail,
@@ -268,14 +276,25 @@ export default function EmailNodeSection({
                 name="email_from"
                 aria-label="From Sender Email"
                 className="wf-select font-mono"
-                value={data.from || ''}
+                value={
+                  data.email_server_id && emailServers.some(s => String(s.email_server_id) === String(data.email_server_id))
+                    ? String(data.email_server_id)
+                    : (data.from || '')
+                }
                 onChange={(e) => {
                   const val = e.target.value
-                  const matched = emailServers.find(s => (s.from_email || s.outgoing_email_user) === val)
-                  onFieldsChange({
-                    from: val,
-                    email_server_id: matched ? matched.email_server_id : null
-                  })
+                  const matched = emailServers.find(s => String(s.email_server_id) === val || (s.from_email || s.outgoing_email_user) === val)
+                  if (matched) {
+                    onFieldsChange({
+                      from: matched.from_email || matched.outgoing_email_user,
+                      email_server_id: matched.email_server_id
+                    })
+                  } else {
+                    onFieldsChange({
+                      from: val,
+                      email_server_id: null
+                    })
+                  }
                 }}
                 style={{
                   width: '100%',
@@ -292,11 +311,16 @@ export default function EmailNodeSection({
                 {emailServers.map(s => {
                   const emailVal = s.from_email || s.outgoing_email_user
                   return (
-                    <option key={`opt-srv-${s.connection_id || 'c'}-${s.email_server_id}`} value={emailVal}>
+                    <option key={`opt-srv-${s.connection_id || 'c'}-${s.email_server_id}`} value={String(s.email_server_id)}>
                       {emailVal} ({s.server_name || 'SMTP'} - #{s.email_server_id})
                     </option>
                   )
                 })}
+                {data.from && !emailServers.some(s => String(s.email_server_id) === String(data.email_server_id) || (s.from_email || s.outgoing_email_user) === data.from) && (
+                  <option value={data.email_server_id ? String(data.email_server_id) : data.from}>
+                    {data.from} {data.email_server_id ? `(SMTP - #${data.email_server_id})` : ''}
+                  </option>
+                )}
               </select>
             </div>
           </div>

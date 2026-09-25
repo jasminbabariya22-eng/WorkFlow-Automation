@@ -559,36 +559,106 @@ def inspect_workflow_for_client_app(
             (BPMNDefinition.spec_id == id_or_code) | (BPMNDefinition.name == id_or_code)
         ).order_by(BPMNDefinition.id.desc()).first()
 
+    workflow_obj = None
+    version_obj = None
     if not bpmn_def:
+        workflow_obj, version_obj = _find_workflow_and_version(db=db, id_or_code=id_or_code)
+
+    if not bpmn_def and not workflow_obj:
         return error_response(message=f"Workflow '{id_or_code}' not found in registry.", status_code=404)
 
-    # Parse nodes and analyze graph
     nodes = []
     edges = []
-    if bpmn_def.json_content:
-        try:
-            graph = json.loads(bpmn_def.json_content) if isinstance(bpmn_def.json_content, str) else bpmn_def.json_content
-            nodes = graph.get("nodes", [])
-            edges = graph.get("edges", [])
-        except Exception as e:
-            logger.warning(f"Error parsing json_content in inspect_workflow: {e}")
+    raw_graph = {}
+    
+    wf_id = None
+    wf_code = None
+    wf_name = None
+    wf_desc = ""
+    wf_status = "DRAFT"
+    wf_is_active = True
+    wf_version = 1
+    wf_tags = None
+    conn_id = None
+    entity_type = ""
+
+    if bpmn_def:
+        wf_id = bpmn_def.id
+        wf_code = bpmn_def.spec_id
+        wf_name = bpmn_def.name
+        wf_desc = bpmn_def.description or ""
+        wf_status = bpmn_def.status
+        wf_is_active = bpmn_def.is_active
+        wf_version = bpmn_def.version
+        wf_tags = bpmn_def.tags
+        conn_id = bpmn_def.connection_id
+        
+        if bpmn_def.json_content:
+            try:
+                raw_graph = json.loads(bpmn_def.json_content) if isinstance(bpmn_def.json_content, str) else bpmn_def.json_content
+                nodes = raw_graph.get("nodes", [])
+                edges = raw_graph.get("edges", [])
+            except Exception as e:
+                logger.warning(f"Error parsing json_content in inspect_workflow: {e}")
+    elif workflow_obj and version_obj:
+        wf_id = workflow_obj.workflow_id
+        wf_code = workflow_obj.workflow_key
+        wf_name = workflow_obj.name
+        wf_desc = workflow_obj.description or ""
+        wf_status = version_obj.status or workflow_obj.status
+        wf_is_active = (workflow_obj.is_deleted == 0 or workflow_obj.is_deleted is None)
+        wf_version = version_obj.version_number
+        conn_id = workflow_obj.connection_id
+        entity_type = workflow_obj.entity_type or ""
+
+        studio_data = WorkflowStudioService._serialize_studio_response(workflow_obj, version_obj)
+        for n in (studio_data.nodes or []):
+            cfg = n.config or {}
+            nodes.append({
+                "id": n.id,
+                "type": n.type,
+                "name": n.name,
+                "position": {"x": n.position_x, "y": n.position_y},
+                "data": cfg,
+                "config": cfg
+            })
+        for e in (studio_data.edges or []):
+            edges.append({
+                "id": e.id,
+                "source": e.source,
+                "target": e.target,
+                "label": e.label or "",
+                "condition": e.condition,
+                "data": e.config or {},
+                "config": e.config or {}
+            })
+        raw_graph = {"nodes": nodes, "edges": edges}
 
     approval_roles = set()
     allowed_actions = set()
     target_tables = set()
     has_email = False
     has_timer = False
+    has_approval_gate = False
+    has_db_actions = False
+    has_api_calls = False
+
+    formatted_nodes = []
+    email_templates = []
 
     for n in nodes:
         ntype = str(n.get("type", "")).lower()
-        data = n.get("data", {})
-        config = n.get("config", {})
+        data = n.get("data", {}) if isinstance(n.get("data"), dict) else {}
+        config = n.get("config", {}) if isinstance(n.get("config"), dict) else {}
+        sub_type = data.get("subType") or data.get("actionType") or config.get("subType") or config.get("actionType") or ""
+        task_code = data.get("taskCode") or config.get("taskCode") or data.get("code") or config.get("code")
 
-        if ntype in ["approval", "usertask", "approval_node"]:
-            role = data.get("role") or data.get("role_code") or data.get("approver_role") or config.get("role_code")
+        if ntype in ["approval", "usertask", "approval_node"] or "approval" in ntype:
+            has_approval_gate = True
+            role = data.get("role") or data.get("role_code") or data.get("approver_role") or config.get("role_code") or config.get("role")
             if role:
                 approval_roles.add(str(role))
-            acts = data.get("actions") or config.get("actions") or ["APPROVE", "REJECT"]
+            acts = data.get("actions") or config.get("actions") or data.get("derivedActions") or ["APPROVE", "REJECT"]
             if isinstance(acts, list):
                 for a in acts:
                     allowed_actions.add(str(a).upper())
@@ -596,26 +666,75 @@ def inspect_workflow_for_client_app(
                 for a in acts.split(","):
                     allowed_actions.add(a.strip().upper())
 
-        elif ntype in ["communication", "notification", "email"]:
+        elif ntype in ["communication", "notification", "email"] or str(sub_type).upper() == "EMAIL":
             has_email = True
-        elif ntype in ["timer", "delay", "wait"]:
+            email_info = {
+                "node_id": n.get("id"),
+                "node_name": data.get("name") or data.get("label") or n.get("name"),
+                "task_code": task_code,
+                "to": data.get("to") or config.get("to") or "",
+                "cc": data.get("cc") or config.get("cc") or "",
+                "bcc": data.get("bcc") or config.get("bcc") or "",
+                "from": data.get("from") or config.get("from") or "",
+                "subject": data.get("subject") or config.get("subject") or "",
+                "body": data.get("body") or config.get("body") or "",
+                "email_server_id": data.get("email_server_id") or config.get("email_server_id")
+            }
+            email_templates.append(email_info)
+
+        elif ntype in ["timer", "delay", "wait"] or "timer" in ntype:
             has_timer = True
-        elif ntype in ["database", "action", "crud", "db_action"]:
-            tbl = data.get("table") or data.get("table_name") or config.get("table")
+
+        elif ntype in ["database", "action", "crud", "db_action"] or "database" in ntype:
+            has_db_actions = True
+            tbl = data.get("table") or data.get("table_name") or config.get("table") or config.get("table_name")
             if tbl:
                 target_tables.add(str(tbl))
+        elif ntype in ["webhook", "api", "api_call"] or sub_type == "API" or "url" in config or "endpoint" in config:
+            has_api_calls = True
 
+        # Comprehensive node payload preserving ALL user-filled configurations
+        formatted_node = {
+            "id": n.get("id"),
+            "type": n.get("type"),
+            "name": data.get("name") or data.get("label") or n.get("name") or n.get("label") or "",
+            "label": data.get("label") or data.get("name") or n.get("label") or n.get("name") or "",
+            "sub_type": sub_type,
+            "task_code": task_code,
+            "position": n.get("position", {"x": 0, "y": 0}),
+            "measured": n.get("measured"),
+            "data": data,
+            "config": config if config else data
+        }
+        formatted_nodes.append(formatted_node)
+
+    formatted_edges = []
     for e in edges:
-        lbl = e.get("label") or (e.get("data", {}).get("label") if isinstance(e.get("data"), dict) else None)
+        e_data = e.get("data", {}) if isinstance(e.get("data"), dict) else {}
+        lbl = e.get("label") or e_data.get("label") or ""
+        act = e_data.get("action") or e.get("action") or ""
+        cond = e.get("condition") or e_data.get("condition")
         if lbl and str(lbl).upper() in ["APPROVE", "REJECT", "SUBMIT", "RESUBMIT", "CANCEL"]:
             allowed_actions.add(str(lbl).upper())
+
+        formatted_edges.append({
+            "id": e.get("id"),
+            "source": e.get("source"),
+            "target": e.get("target"),
+            "type": e.get("type", "workflow"),
+            "label": lbl,
+            "action": act,
+            "condition": cond,
+            "data": e_data,
+            "config": e.get("config") or e_data
+        })
 
     if not allowed_actions:
         allowed_actions = {"APPROVE", "REJECT"}
 
     conn_info = None
-    if bpmn_def.connection_id:
-        db_conn = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == bpmn_def.connection_id).first()
+    if conn_id:
+        db_conn = db.query(DatabaseConnection).filter(DatabaseConnection.connection_id == conn_id).first()
         if db_conn:
             conn_info = {
                 "connection_id": db_conn.connection_id,
@@ -627,8 +746,8 @@ def inspect_workflow_for_client_app(
 
     active_bindings = []
     bindings_query = db.query(WorkflowModuleBinding).filter(
-        (WorkflowModuleBinding.workflow_id == bpmn_def.id) | 
-        (WorkflowModuleBinding.module_key == bpmn_def.spec_id)
+        (WorkflowModuleBinding.workflow_id == wf_id) | 
+        (WorkflowModuleBinding.module_key == wf_code)
     ).all()
     for b in bindings_query:
         active_bindings.append({
@@ -641,28 +760,36 @@ def inspect_workflow_for_client_app(
         })
 
     return success_response(data={
-        "workflow_id": bpmn_def.id,
-        "workflow_code": bpmn_def.spec_id,
-        "name": bpmn_def.name,
-        "description": bpmn_def.description or "",
-        "status": bpmn_def.status,
-        "is_active": bpmn_def.is_active,
-        "version": bpmn_def.version,
-        "tags": bpmn_def.tags,
+        "workflow_id": wf_id,
+        "workflow_code": wf_code,
+        "name": wf_name,
+        "description": wf_desc,
+        "status": wf_status,
+        "is_active": wf_is_active,
+        "version": wf_version,
+        "tags": wf_tags,
+        "entity_type": entity_type,
         "connection": conn_info,
+        "nodes": formatted_nodes,
+        "edges": formatted_edges,
+        "email_templates": email_templates,
         "statistics": {
-            "total_nodes": len(nodes),
-            "total_edges": len(edges),
+            "total_nodes": len(formatted_nodes),
+            "total_edges": len(formatted_edges),
             "has_email_notification": has_email,
-            "has_timer_escalation": has_timer
+            "has_timer_escalation": has_timer,
+            "has_approval_gate": has_approval_gate,
+            "has_database_actions": has_db_actions,
+            "has_api_calls": has_api_calls
         },
         "inspection": {
             "approval_roles": sorted(list(approval_roles)),
             "allowed_actions": sorted(list(allowed_actions)),
             "target_tables_detected": sorted(list(target_tables)),
-            "can_bind_to_client_app": bpmn_def.status in ["Published", "Active", "PUBLISHED", "ACTIVE"] or len(nodes) > 0
+            "can_bind_to_client_app": wf_status in ["Published", "Active", "PUBLISHED", "ACTIVE"] or len(formatted_nodes) > 0
         },
-        "active_client_bindings": active_bindings
+        "active_client_bindings": active_bindings,
+        "raw_graph": raw_graph
     })
 
 

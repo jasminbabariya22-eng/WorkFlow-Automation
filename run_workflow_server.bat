@@ -96,7 +96,7 @@ REM ---------------------------------------------------------
 REM 5. LAUNCH SERVICES IN PARALLEL
 REM ---------------------------------------------------------
 echo Starting Backend API Server on 0.0.0.0:8000...
-start "Workflow Engine Backend" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+start "Workflow Engine Backend" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
 timeout /t 2 /nobreak >nul
 

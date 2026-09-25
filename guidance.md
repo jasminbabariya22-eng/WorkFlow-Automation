@@ -50,7 +50,11 @@ Every request to `POST /api/v1/workflow-hub` uses this JSON schema:
 
 | Field | Type | Required? | Description |
 |:---|:---:|:---:|:---|
-| `spec_id` | `string` | **Yes** | Unique identifier/key of the workflow (e.g. `"emp_leave_request"`, `"workflow_1"`, `"wfh_request_wf"`). |
+| `spec_id` | `string` | **Yes** | Unique identifier/key of the workflow (e.g. `"email_notification"`, `"emp_leave_request"`). |
+| `TO` | `array` / `string` | No | Direct recipient email(s) (e.g. `["jasminbabariya7@gmail.com"]` or `"user@company.com"`). |
+| `CC` | `array` / `string` | No | CC recipient email(s) (e.g. `["jasminbabariya04@gmail.com"]`). |
+| `BCC` | `array` / `string` | No | BCC recipient email(s). |
+| `parameter` | `object` | No | Key-value parameters dictionary containing workflow inputs, subject, body, and payload data. |
 | `operation` | `string` | No (default: `"SUBMIT"`) | Operation to execute: `SCHEMA`, `SUBMIT`, `GET_TASKS`, `ACTION`, `FETCH_RECORDS`, `HISTORY`, `DISPATCH_EMAILS`, `CATALOG`. |
 | `record_id` | `integer` | Conditional | Primary key ID of the business record (Required for `ACTION` and `HISTORY`). |
 | `action` | `string` | No (default: `"APPROVE"`) | Action code to execute during an `ACTION` operation (`"APPROVE"`, `"REJECT"`, etc.). |

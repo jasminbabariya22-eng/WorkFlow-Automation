@@ -69,14 +69,6 @@ def health():
         "version": "2.0.0"
     }
 
-# --- Prometheus Metrics Exporter (Observability Stage 12) ---
-try:
-    from prometheus_client import make_asgi_app
-    metrics_app = make_asgi_app()
-    app.mount("/metrics", metrics_app)
-except Exception as e:
-    logger.warning(f"Prometheus metrics instrumentation skipped: {e}")
-
 # --- Pure Workflow APIs ---
 app.include_router(workflow_definitions_router)
 app.include_router(workflow_tasks_router)

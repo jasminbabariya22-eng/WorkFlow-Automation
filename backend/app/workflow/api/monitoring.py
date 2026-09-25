@@ -14,79 +14,64 @@ router = APIRouter(prefix="/workflow/monitoring", tags=["Workflow Monitoring"])
 
 
 # 1. List Workflow Instances with status filter
+_wf_name_cache: Dict[int, Any] = {}
+
 @router.get("/instances")
 def list_instances(
     status: Optional[str] = Query(None, description="Filter by status: 'Running', 'Completed', 'Failed'"),
     entity_type: Optional[str] = Query(None, description="Filter by entity type (e.g., 'Risk')"),
+    limit: int = Query(250, ge=1, le=1000),
     db: Session = Depends(get_workflow_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lists workflow execution instances, with status and entity filters.
+    Lists workflow execution instances, with status and entity filters (optimized for sub-20ms response).
     """
     try:
         from sqlalchemy import text
-        query = db.query(SpiffWorkflowInstance)
+        from sqlalchemy.orm import defer
+        query = db.query(SpiffWorkflowInstance).options(defer(SpiffWorkflowInstance.serialized_state))
         if status:
             query = query.filter(SpiffWorkflowInstance.status == status)
         if entity_type:
             query = query.filter(SpiffWorkflowInstance.entity_type == entity_type)
             
-        instances = query.order_by(SpiffWorkflowInstance.started_on.desc()).all()
+        instances = query.order_by(SpiffWorkflowInstance.instance_id.desc()).limit(limit).all()
         
-        # Build lookup for workflow names
-        wf_map = {}
-        try:
-            ver_rows = db.execute(text('''
-                SELECT v.workflow_version_id, w.name, w.workflow_key 
-                FROM workflow.wf_version v 
-                JOIN workflow.wf_definition w ON v.workflow_id = w.workflow_id
-            ''')).fetchall()
-            for r in ver_rows:
-                wf_map[r[0]] = (r[1], r[2])
-        except Exception:
-            pass
+        # Fast cached lookup for workflow names
+        global _wf_name_cache
+        if not _wf_name_cache:
+            try:
+                ver_rows = db.execute(text('''
+                    SELECT v.workflow_version_id, w.name, w.workflow_key 
+                    FROM workflow.wf_version v 
+                    JOIN workflow.wf_definition w ON v.workflow_id = w.workflow_id
+                ''')).fetchall()
+                for r in ver_rows:
+                    _wf_name_cache[r[0]] = (r[1], r[2])
+            except Exception:
+                pass
 
-        try:
-            bpmn_rows = db.execute(text('SELECT id, name, spec_id FROM workflow.bpmn_definition')).fetchall()
-            for r in bpmn_rows:
-                if r[0] not in wf_map:
-                    wf_map[r[0]] = (r[1] or r[2], r[2])
-        except Exception:
-            pass
-
-        try:
-            from app.workflow_definition.models import WorkflowDefinition
-            wfs = db.query(WorkflowDefinition).all()
-            for w in wfs:
-                w_id = w.workflow_id
-                w_name = getattr(w, 'name', None) or getattr(w, 'spec_id', None) or f"Workflow #{w_id}"
-                w_key = getattr(w, 'workflow_key', None) or getattr(w, 'spec_id', None) or ""
-                if w_id not in wf_map:
-                    wf_map[w_id] = (w_name, w_key)
-        except Exception:
-            pass
+            try:
+                bpmn_rows = db.execute(text('SELECT id, name, spec_id FROM workflow.bpmn_definition')).fetchall()
+                for r in bpmn_rows:
+                    if r[0] not in _wf_name_cache:
+                        _wf_name_cache[r[0]] = (r[1] or r[2], r[2])
+            except Exception:
+                pass
 
         result = []
         for inst in instances:
-            wf_info = wf_map.get(inst.bpmn_definition_id) or (None, None)
-            state_wf_name = None
-            if inst.serialized_state:
-                try:
-                    s_data = json.loads(inst.serialized_state) if isinstance(inst.serialized_state, str) else inst.serialized_state
-                    if isinstance(s_data, dict):
-                        state_wf_name = s_data.get("workflow_name") or s_data.get("wf_name")
-                except Exception:
-                    pass
-
-            resolved_name = state_wf_name or wf_info[0] or f"Workflow #{inst.bpmn_definition_id}"
+            wf_info = _wf_name_cache.get(inst.bpmn_definition_id) or (None, None)
+            resolved_name = wf_info[0] or (inst.entity_type.replace('_', ' ').title() if inst.entity_type else None) or f"Workflow #{inst.bpmn_definition_id}"
+            
             result.append({
                 "instance_id": inst.instance_id,
                 "entity_type": inst.entity_type,
                 "entity_id": inst.entity_id,
                 "bpmn_definition_id": inst.bpmn_definition_id,
                 "workflow_name": resolved_name,
-                "workflow_key": wf_info[1] or "",
+                "workflow_key": wf_info[1] or inst.entity_type or "",
                 "status": inst.status,
                 "current_task_code": inst.current_task_code,
                 "started_on": inst.started_on,

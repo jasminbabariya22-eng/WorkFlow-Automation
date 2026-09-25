@@ -57,6 +57,15 @@ class UniversalWorkflowGatewayRequest(BaseModel):
     action: Optional[str] = Field("APPROVE", description="Action code to execute: APPROVE, REJECT, etc.")
     data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional extra payload data")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
+    to: Optional[Any] = None
+    cc: Optional[Any] = None
+    bcc: Optional[Any] = None
+    to_email: Optional[Any] = None
+    cc_email: Optional[Any] = None
+    from_email: Optional[Any] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    html_body: Optional[str] = None
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     user_email: Optional[str] = None
@@ -72,6 +81,15 @@ class HubSubmitRequest(BaseModel):
     parameter: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Key-value parameters dictionary containing workflow inputs, subject, and plain text or HTML body")
     data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional extra entity fields and initial workflow variables")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Alias for parameter dictionary")
+    to: Optional[Any] = None
+    cc: Optional[Any] = None
+    bcc: Optional[Any] = None
+    to_email: Optional[Any] = None
+    cc_email: Optional[Any] = None
+    from_email: Optional[Any] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    html_body: Optional[str] = None
     variables: Optional[Dict[str, Any]] = None
     user_id: Optional[int] = None
     user_name: Optional[str] = None
@@ -348,12 +366,17 @@ def universal_single_workflow_gateway(
         )
 
     # 7. SUBMIT (DEFAULT)
-    params = payload.parameter or payload.parameters or payload.variables or {}
+    raw_dict = dict(payload.parameter or payload.parameters or payload.variables or {})
+    for fld in ("to", "cc", "bcc", "to_email", "cc_email", "from_email", "subject", "body", "html_body"):
+        val = getattr(payload, fld, None)
+        if val is not None and fld not in raw_dict:
+            raw_dict[fld] = val
+
     submit_req = HubSubmitRequest(
-        data={**params, **(payload.data or {})},
-        parameter=payload.parameter or params,
-        parameters=payload.parameters or params,
-        variables={**params, **(payload.variables or {})},
+        data={**raw_dict, **(payload.data or {})},
+        parameter=raw_dict,
+        parameters=raw_dict,
+        variables={**raw_dict, **(payload.variables or {})},
         user_id=payload.user_id,
         user_name=payload.user_name,
         user_email=payload.user_email
@@ -611,6 +634,11 @@ def submit_workflow_hub_record(
         else:
             dynamic_variables[vk] = str(vv)
 
+    if dynamic_variables.get("final_to"):
+        record_dict["to"] = dynamic_variables.get("final_to")
+    if dynamic_variables.get("final_cc"):
+        record_dict["cc"] = dynamic_variables.get("final_cc")
+
     response_payload = {
         "spec_id": spec_id,
         "record_id": new_record_id,
@@ -632,6 +660,24 @@ def submit_workflow_hub_record(
             "current_node": current_task
         }
     }
+
+    if dynamic_variables.get("email_job_id") or dynamic_variables.get("email_to") or dynamic_variables.get("final_to"):
+        response_payload["email_notification"] = {
+            "workflow_node_emails": {
+                "to": dynamic_variables.get("workflow_node_to", []),
+                "cc": dynamic_variables.get("workflow_node_cc", [])
+            },
+            "request_emails": {
+                "to": dynamic_variables.get("request_to", []),
+                "cc": dynamic_variables.get("request_cc", [])
+            },
+            "final_recipients": {
+                "to": dynamic_variables.get("final_to", []),
+                "cc": dynamic_variables.get("final_cc", [])
+            },
+            "email_job_id": dynamic_variables.get("email_job_id"),
+            "send_status": dynamic_variables.get("send_status") or "Sent"
+        }
 
     return success_response(
         message=f"Workflow request #{new_record_id} submitted successfully.",

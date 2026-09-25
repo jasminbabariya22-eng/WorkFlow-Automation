@@ -190,26 +190,28 @@ def update_workflow_definition(
         if not definition:
             raise HTTPException(status_code=404, detail="Workflow definition not found")
 
-        # Allow editing Draft, Inactive, or non-active versions in-place
-        if definition.is_active and definition.status == "Active":
-            if payload.json_content or payload.xml_content:
-                raise HTTPException(status_code=400, detail="Active workflows cannot have graph structure modified. Please deactivate first.")
-
         if payload.name:
             definition.name = payload.name
-        if payload.description:
+        if payload.description is not None:
             definition.description = payload.description
         if payload.json_content:
             definition.json_content = payload.json_content
             try:
-                graph = json.loads(payload.json_content)
+                graph = json.loads(payload.json_content) if isinstance(payload.json_content, str) else payload.json_content
                 definition.xml_content = WorkflowGraphCompiler.compile_graph_to_bpmn(definition.spec_id, graph)
             except Exception as compile_err:
-                print(f"Compilation warning: {compile_err}")
+                logger.warning(f"Compilation warning: {compile_err}")
+            
+            # Sync to Studio Version and GenericWorkflow
+            try:
+                from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
+                StudioExecutionAdapter._sync_bpmn_definition_to_version(db, definition)
+            except Exception as sync_err:
+                logger.debug(f"Studio version sync notice: {sync_err}")
         elif payload.xml_content:
             definition.xml_content = payload.xml_content
 
-        if payload.tags:
+        if payload.tags is not None:
             definition.tags = payload.tags
         if "connection_id" in payload.__fields_set__ or payload.connection_id is not None or hasattr(payload, "connection_id"):
             definition.connection_id = payload.connection_id

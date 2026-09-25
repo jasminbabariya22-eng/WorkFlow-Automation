@@ -599,7 +599,13 @@ export const workflowStorage = {
   getInstances: async () => {
     let instances = []
     try {
-      const res = await fetch('/workflow/monitoring/instances', { signal: AbortSignal.timeout(3000) })
+      const token = localStorage.getItem('token')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const res = await fetch('/workflow/monitoring/instances', { 
+        headers,
+        signal: AbortSignal.timeout(10000) 
+      })
       if (res.ok) {
         const json = await res.json()
         if (Array.isArray(json.data)) {
