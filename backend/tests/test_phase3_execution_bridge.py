@@ -6,7 +6,10 @@ from app.main import app
 from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
 from app.workflow.workflow_session import WorkflowSessionLocal
 from app.workflow.persistence.models import SpiffWorkflowInstance, SpiffHumanTask
-from app.models.email_job_mst import EmailJobMst
+try:
+    from app.models.email_job_mst import EmailJobMst
+except (ImportError, ModuleNotFoundError):
+    EmailJobMst = None
 
 client = TestClient(app)
 

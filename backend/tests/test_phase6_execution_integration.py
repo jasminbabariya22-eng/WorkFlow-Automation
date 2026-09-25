@@ -5,7 +5,10 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.workflow.workflow_session import WorkflowSessionLocal
 from app.workflow.persistence.models import SpiffWorkflowInstance, SpiffHumanTask, BPMNDefinition
-from app.models.email_job_mst import EmailJobMst
+try:
+    from app.models.email_job_mst import EmailJobMst
+except (ImportError, ModuleNotFoundError):
+    EmailJobMst = None
 from app.core.database import SessionLocal as MainSessionLocal
 
 client = TestClient(app)

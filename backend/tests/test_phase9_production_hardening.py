@@ -20,10 +20,10 @@ from app.workflow.persistence.models import (
     SpiffActivityHistory,
     WorkflowEntityConfig
 )
-from app.models.email_job_mst import EmailJobMst
-from app.models.workflow_visibility import WorkflowVisibility
-from app.models.user import User
-from app.models.role import UserRole
+try:
+    from app.models.email_job_mst import EmailJobMst
+except (ImportError, ModuleNotFoundError):
+    EmailJobMst = None
 from app.workflow.runtime.compiler import WorkflowGraphCompiler
 from app.workflow_studio.runtime.adapter import StudioExecutionAdapter
 from app.workflow.services.workflow_service import WorkflowService
