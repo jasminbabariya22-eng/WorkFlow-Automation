@@ -33,7 +33,7 @@ jobs:
             $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 15
             Write-Host "✅ Health Response: OK"
             Write-Host ($response | ConvertTo-Json)
-            Write-Host "🎉 Enterprise Platform Live at https://192.168.1.191"
+            Write-Host "🎉 Enterprise Platform Live at https://192.168.1.192"
           } catch {
             Write-Host "⚠️ Healthcheck warning: $_"
             Write-Host "Checking active Docker containers:"
