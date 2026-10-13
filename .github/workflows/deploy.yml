@@ -1,41 +1,108 @@
-name: Deploy to Server (192.168.1.191)
+name: Deploy to Production (Self-Hosted Windows)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "deployment", "main" ]
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    name: "Deploy Workflow Docker Stack"
+    name: Deploy Docker Stack on Self-Hosted Runner
     runs-on: [self-hosted, Windows]
+    timeout-minutes: 20
 
     steps:
-      - name: "1. Checkout Code"
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: "2. Deploy Docker Stack"
-        shell: cmd
-        run: |
-          echo ==================================================
-          echo Starting Docker Deployment on Server...
-          echo ==================================================
-          docker compose down --remove-orphans
-          docker compose up -d --build --remove-orphans
-
-      - name: "3. Verify Deployment Health"
+      - name: Verify Environment Prerequisites
         shell: powershell
         run: |
-          Write-Host "Waiting for containers to initialize..."
-          Start-Sleep -Seconds 20
-          
+          Write-Host "=========================================================="
+          Write-Host "1. Verifying Deployment Host Prerequisites"
+          Write-Host "=========================================================="
+
+          # 1. Check Docker Engine
           try {
-            $response = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 15
-            Write-Host "✅ Health Response: OK"
-            Write-Host ($response | ConvertTo-Json)
-            Write-Host "🎉 Enterprise Platform Live at https://192.168.1.192"
+            docker info | Out-Null
+            Write-Host "Docker Desktop / Engine is running."
           } catch {
-            Write-Host "⚠️ Healthcheck warning: $_"
-            Write-Host "Checking active Docker containers:"
-            docker ps
+            Write-Error "CRITICAL: Docker Desktop is not running on this host!"
+            exit 1
           }
+
+          # 2. Check / Generate SSL Certificates
+          if (-not (Test-Path "backend\certs\fullchain.pem")) {
+            Write-Host "Generating SSL certificates for 192.168.1.183 / localhost..."
+            if (Test-Path "backend\.venv\Scripts\python.exe") {
+              & "backend\.venv\Scripts\python.exe" "backend\generate_ssl_certs.py"
+            } else {
+              python "backend\generate_ssl_certs.py"
+            }
+          } else {
+            Write-Host "SSL Certificates verified."
+          }
+
+      - name: Build and Deploy Containers
+        shell: powershell
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "2. Building & Updating Docker Containers (In-Place)"
+          Write-Host "=========================================================="
+
+          # Build images first without stopping current containers
+          docker compose build
+
+          # Update containers seamlessly without downtime (preserves persistent volumes)
+          docker compose up -d --remove-orphans
+
+          Write-Host "Containers updated. Waiting for initialization..."
+
+      - name: Validate Container Health Checks
+        shell: powershell
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "3. Verifying Production Service Health Status"
+          Write-Host "=========================================================="
+
+          $maxRetries = 15
+          $retryCount = 0
+          $isHealthy = $false
+
+          while ($retryCount -lt $maxRetries) {
+            Start-Sleep -Seconds 4
+            $retryCount++
+            Write-Host "[$retryCount/$maxRetries] Testing http://localhost:8000/health..."
+
+            try {
+              $resp = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 5
+              if ($resp.status -eq "healthy") {
+                Write-Host "Backend API is Healthy!"
+                $isHealthy = $true
+                break
+              }
+            } catch {
+              Write-Host "Waiting for service to become responsive..."
+            }
+          }
+
+          if (-not $isHealthy) {
+            Write-Error "DEPLOYMENT FAILED: Backend health check did not report healthy within timeout."
+            Write-Host "Recent backend container logs:"
+            docker logs --tail 50 workflow-backend
+            exit 1
+          }
+
+          Write-Host "=========================================================="
+          Write-Host "DEPLOYMENT SUCCESSFUL!"
+          Write-Host "=========================================================="
+          Write-Host " - Web UI (HTTPS):   https://192.168.1.183"
+          Write-Host " - Web UI (HTTP):    http://192.168.1.183"
+          Write-Host " - API Swagger Docs: http://192.168.1.183:8000/docs"
+          Write-Host " - Observability:    http://192.168.1.183:3001"
+          docker compose ps

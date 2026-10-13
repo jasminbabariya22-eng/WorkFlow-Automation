@@ -20,9 +20,9 @@ if not exist "backend\certs\fullchain.pem" (
 
 echo ===============================================================================
 echo  SERVICES STARTING WITH HTTPS / SSL:
-echo  - Workflow Studio UI (HTTPS):   https://192.168.1.191:5173  (or https://localhost:5173)
-echo  - Backend API (HTTPS):          https://192.168.1.191:8000  (or https://localhost:8000)
-echo  - API Swagger Docs (HTTPS):     https://192.168.1.191:8000/docs
+echo  - Workflow Studio UI (HTTPS):   https://192.168.1.183:5173  (or https://localhost:5173)
+echo  - Backend API (HTTPS):          https://192.168.1.183:8000  (or https://localhost:8000)
+echo  - API Swagger Docs (HTTPS):     https://192.168.1.183:8000/docs
 echo ===============================================================================
 echo.
 
@@ -34,6 +34,6 @@ timeout /t 2 /nobreak >nul
 start "Workflow Studio UI (SSL)" cmd /k "cd /d "%~dp0frontend" && npm run dev -- --host 0.0.0.0 --port 5173"
 
 echo [SUCCESS] Both Backend and Frontend Studio Dashboard are running securely with HTTPS!
-echo Open your browser at: https://192.168.1.191:5173
+echo Open your browser at: https://192.168.1.183:5173
 echo.
 pause
