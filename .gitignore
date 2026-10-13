@@ -40,6 +40,16 @@ htmlcov/
 !.env.development.example
 !.env.production.example
 
+# Certificates & Private Keys
+*.pem
+*.key
+*.pfx
+*.cer
+*.crt
+Certificate/
+backend/certs/*
+!backend/certs/.gitkeep
+
 # IDE & OS
 .vscode/*
 !.vscode/extensions.json

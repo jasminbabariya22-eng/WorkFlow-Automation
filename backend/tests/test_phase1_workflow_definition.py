@@ -18,6 +18,17 @@ def get_error_message(response) -> str:
     return response.text
 
 
+def get_initial_version_id(wf_id: int) -> int:
+    """Helper to extract initial version ID regardless of envelope format."""
+    res = client.get(f"/workflows/{wf_id}/versions").json()
+    if isinstance(res, list) and len(res) > 0:
+        return res[0]["workflow_version_id"]
+    if isinstance(res, dict) and "data" in res and "versions" in res["data"]:
+        return res["data"]["versions"][0].get("version_id") or res["data"]["versions"][0].get("workflow_version_id")
+    raise ValueError(f"Could not extract version_id from response: {res}")
+
+
+
 def test_01_create_workflow():
     """Test 1 — Verify a workflow can be created in DRAFT."""
     wf_key = f"proc_approval_{int(time.time())}"
@@ -71,8 +82,7 @@ def test_03_create_nodes():
     wf_id = wf_res.json()["workflow_id"]
 
     # Get initial version ID
-    v_list = client.get(f"/workflows/{wf_id}/versions").json()
-    v_id = v_list[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     # 1. START node
     start_res = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={
@@ -145,7 +155,7 @@ def test_04_create_connections():
         "name": "Connection Test Workflow"
     })
     wf_id = wf_res.json()["workflow_id"]
-    v_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     # Create 3 nodes
     n1 = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={
@@ -189,7 +199,7 @@ def test_05_validate_valid_workflow():
         "name": "Valid Test Flow"
     })
     wf_id = wf_res.json()["workflow_id"]
-    v_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     n_start = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={
         "node_key": "start", "node_type": "START", "name": "Start"
@@ -227,7 +237,7 @@ def test_06_reject_invalid_workflow():
         "name": "Invalid Test Flow"
     })
     wf_id = wf_res.json()["workflow_id"]
-    v_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     # Case A: No START node (Only an approval node)
     client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={
@@ -261,7 +271,7 @@ def test_07_publish_valid_workflow():
         "name": "Publish Test Flow"
     })
     wf_id = wf_res.json()["workflow_id"]
-    v_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     n1 = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={
         "node_key": "start", "node_type": "START", "name": "Start"
@@ -291,7 +301,7 @@ def test_08_published_version_immutability():
     wf_key = f"immutable_flow_{int(time.time())}"
     wf_res = client.post("/workflows", json={"workflow_key": wf_key, "name": "Immutable Flow"})
     wf_id = wf_res.json()["workflow_id"]
-    v_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v_id = get_initial_version_id(wf_id)
 
     n1 = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={"node_key": "start", "node_type": "START", "name": "Start"}).json()["node_id"]
     n2 = client.post(f"/workflows/{wf_id}/versions/{v_id}/nodes", json={"node_key": "end", "node_type": "END", "name": "End"}).json()["node_id"]
@@ -326,7 +336,7 @@ def test_09_version_evolution():
     wf_key = f"evolution_flow_{int(time.time())}"
     wf_res = client.post("/workflows", json={"workflow_key": wf_key, "name": "Evolution Flow"})
     wf_id = wf_res.json()["workflow_id"]
-    v1_id = client.get(f"/workflows/{wf_id}/versions").json()[0]["workflow_version_id"]
+    v1_id = get_initial_version_id(wf_id)
 
     # Version 1 graph: Start -> FH Approval -> End
     n_start = client.post(f"/workflows/{wf_id}/versions/{v1_id}/nodes", json={"node_key": "start", "node_type": "START", "name": "Start"}).json()["node_id"]

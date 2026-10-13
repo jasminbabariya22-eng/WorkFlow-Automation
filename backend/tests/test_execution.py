@@ -8,12 +8,34 @@ from app.workflow.persistence.models import BPMNDefinition
 client = TestClient(app)
 
 def test_execute_workflow():
-    # 1. Create a fresh workflow draft using the creation API (which generates valid starter BPMN XML)
+    # 1. Create a fresh workflow draft using the creation API with valid starter BPMN XML
     spec_id = f"exec_test_{int(time.time())}"
+    bpmn_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_{spec_id}"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="{spec_id}" isExecutable="true">
+    <bpmn:startEvent id="StartEvent" name="Start">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent" targetRef="UserTask_1" />
+    <bpmn:userTask id="UserTask_1" name="Pending Review" camunda:candidateGroups="admin">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="UserTask_1" targetRef="EndEvent_1" />
+    <bpmn:endEvent id="EndEvent_1" name="End">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>"""
+
     create_res = client.post("/workflow/definitions", json={
         "spec_id": spec_id,
         "name": "Automated Runner Test Spec",
-        "description": "Workflow for verifying execution engine"
+        "description": "Workflow for verifying execution engine",
+        "xml_content": bpmn_xml
     })
     assert create_res.status_code == 200, f"Failed to create draft: {create_res.text}"
     wf_id = create_res.json()["data"]["id"]

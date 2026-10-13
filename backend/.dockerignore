@@ -1,3 +1,4 @@
+# Python & Virtual Environments
 __pycache__/
 *.pyc
 *.pyo
@@ -8,10 +9,33 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Git & IDE Artifacts
 .git/
 .gitignore
-logs/*.log
-*.db-journal
 .DS_Store
 .idea/
 .vscode/
+
+# Secrets & Environment Files
+.env
+.env.*
+!.env.example
+
+# Certificates & Private Keys
+*.pem
+*.key
+*.pfx
+*.cer
+*.crt
+certs/
+
+# Database Artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs & Tests
+logs/*.log
+tests/
