@@ -41,13 +41,26 @@ jobs:
           # 2. Check / Generate SSL Certificates
           if (-not (Test-Path "backend\certs\fullchain.pem")) {
             Write-Host "Generating SSL certificates for 192.168.1.183 / localhost..."
-            if (Test-Path "backend\.venv\Scripts\python.exe") {
-              & "backend\.venv\Scripts\python.exe" "backend\generate_ssl_certs.py"
-            } else {
+            try {
+              python -m pip install --quiet cryptography python-dotenv
               python "backend\generate_ssl_certs.py"
+            } catch {
+              Write-Host "Notice: SSL certificate generation output: $_"
             }
-          } else {
-            Write-Host "SSL Certificates verified."
+          }
+
+          # 3. Check for Production .env File
+          if (-not (Test-Path ".env")) {
+            if (Test-Path "C:\actions-runner\.env") {
+              Copy-Item "C:\actions-runner\.env" ".env" -Force
+              Write-Host "Copied production .env from C:\actions-runner\.env"
+            } elseif (Test-Path "C:\Windows\System32\actions-runner\.env") {
+              Copy-Item "C:\Windows\System32\actions-runner\.env" ".env" -Force
+              Write-Host "Copied production .env from runner folder."
+            } elseif (Test-Path "backend\.env.example") {
+              Write-Host "Initializing .env from template..."
+              Copy-Item "backend\.env.example" ".env"
+            }
           }
 
       - name: Build and Deploy Containers
