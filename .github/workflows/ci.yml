@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - development
+      - main
   pull_request:
     branches:
       - development
@@ -55,9 +56,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Backend Test Suite
+      - name: Run Python Dependency Security Audit
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pip install pip-audit
+          python -m pip_audit -r requirements.txt
+        continue-on-error: true
+
+      - name: Run Backend Test Suite with Coverage
+        run: |
+          python -m pytest tests/ -v --tb=short --cov=app --cov-report=term-missing --cov-report=xml
 
   frontend-ci:
     name: Frontend CI (Node 22)
@@ -80,6 +87,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Run Frontend Dependency Security Audit
+        run: npm audit
+        continue-on-error: true
+
       - name: Run frontend linter (oxlint)
         run: npm run lint
 
@@ -97,5 +108,21 @@ jobs:
       - name: Build Backend Docker Image (Validation only)
         run: docker build -t workflow-backend:ci ./backend
 
+      - name: Scan Backend Docker Image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'workflow-backend:ci'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
       - name: Build Frontend Docker Image (Validation only)
         run: docker build -t workflow-frontend:ci ./frontend
+
+      - name: Scan Frontend Docker Image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'workflow-frontend:ci'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
