@@ -593,7 +593,25 @@ class WorkflowStudioService:
         Returns candidate roles dynamically loaded from the Client Database.
         """
         from app.core.database import ClientDatabaseAdapter
-        return ClientDatabaseAdapter.get_roles()
+        raw_roles = ClientDatabaseAdapter.get_roles()
+        if raw_roles:
+            return [
+                {
+                    "id": str(r.get("id", "")),
+                    "role_code": str(r.get("role_code") or r.get("id", "")),
+                    "role_name": str(r.get("role_name") or r.get("name", "")),
+                    "name": str(r.get("name") or r.get("role_name", ""))
+                }
+                for r in raw_roles
+            ]
+
+        return [
+            {"id": "ADMIN", "role_code": "ADMIN", "role_name": "Administrator", "name": "Administrator"},
+            {"id": "FUNCTION_HEAD", "role_code": "FUNCTION_HEAD", "role_name": "Function Head", "name": "Function Head"},
+            {"id": "RISK_MANAGER", "role_code": "RISK_MANAGER", "role_name": "Risk Manager", "name": "Risk Manager"},
+            {"id": "REVIEWER", "role_code": "REVIEWER", "role_name": "Reviewer", "name": "Reviewer"},
+            {"id": "APPROVER", "role_code": "APPROVER", "role_name": "Approver", "name": "Approver"}
+        ]
 
     @classmethod
     def get_available_actions(cls) -> List[Dict[str, Any]]:
@@ -630,5 +648,11 @@ class WorkflowStudioService:
         except Exception as e:
             logger.warning(f"WorkflowStudioService: Error discovering actions: {e}")
 
-        return []
+        # Default standard workflow actions
+        return [
+            {"id": "APPROVE", "action_code": "APPROVE", "name": "Approve", "description": "Approve task and advance workflow"},
+            {"id": "REJECT", "action_code": "REJECT", "name": "Reject", "description": "Reject task and follow rejection path"},
+            {"id": "SUBMIT", "action_code": "SUBMIT", "name": "Submit", "description": "Submit form or request"},
+            {"id": "FORCE_APPROVE", "action_code": "FORCE_APPROVE", "name": "Force Approve", "description": "Administrative override approval"}
+        ]
 

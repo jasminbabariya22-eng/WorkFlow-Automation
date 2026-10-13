@@ -362,6 +362,13 @@ class ClientDatabaseAdapter:
         if schema and isinstance(schema, str):
             return schema.strip()
         
+        try:
+            eng = DynamicEnginePool.get_engine(connection_id)
+            if eng and eng.dialect.name == "sqlite":
+                return None
+        except Exception:
+            pass
+
         parsed_conn_id = None
         if isinstance(connection_id, int):
             parsed_conn_id = connection_id
