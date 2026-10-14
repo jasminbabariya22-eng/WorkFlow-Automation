@@ -32,7 +32,9 @@ def _get_local_ip() -> str:
     except Exception:
         return "127.0.0.1"
 
-def generate_self_signed_cert(output_dir: str = "certs", valid_days: int = 730):
+def generate_self_signed_cert(output_dir: str = None, valid_days: int = 730):
+    if not output_dir or output_dir == "certs":
+        output_dir = str(Path(__file__).parent / "certs")
     os.makedirs(output_dir, exist_ok=True)
     key_path = os.path.join(output_dir, "privkey.pem")
     cert_path = os.path.join(output_dir, "fullchain.pem")

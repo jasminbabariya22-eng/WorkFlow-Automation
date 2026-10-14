@@ -23,10 +23,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Verify Environment Prerequisites
+      - name: Verify Environment Prerequisites & SSL
         run: |
           Write-Host "=========================================================="
-          Write-Host "1. Verifying Deployment Host Prerequisites"
+          Write-Host "1. Verifying Deployment Host Prerequisites & SSL"
           Write-Host "=========================================================="
 
           # 1. Check Docker Engine
@@ -49,24 +49,60 @@ jobs:
             }
           }
 
-          # 3. Check for Production .env File
-          if (-not (Test-Path ".env")) {
-            if (Test-Path "C:\actions-runner\.env") {
-              Copy-Item "C:\actions-runner\.env" ".env" -Force
-              Write-Host "Copied production .env from C:\actions-runner\.env"
-            } elseif (Test-Path "C:\Windows\System32\actions-runner\.env") {
-              Copy-Item "C:\Windows\System32\actions-runner\.env" ".env" -Force
-              Write-Host "Copied production .env from runner folder."
-            } elseif (Test-Path "backend\.env.example") {
-              Write-Host "Initializing .env from template..."
-              Copy-Item "backend\.env.example" ".env"
-            }
+          if (Test-Path "backend\certs\fullchain.pem") {
+            Write-Host "SSL certificates verified in backend\certs."
+          } else {
+            Write-Warning "backend\certs\fullchain.pem not found yet; attempting fallback generation..."
+            python -m pip install cryptography python-dotenv
+            python "backend\generate_ssl_certs.py"
+          }
+
+      - name: Configure Production Environment Variables
+        env:
+          SECRET_WORKFLOW_DATABASE_URL: ${{ secrets.WORKFLOW_DATABASE_URL }}
+          SECRET_SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          SECRET_FERNET_KEY: ${{ secrets.FERNET_KEY }}
+          SECRET_MAIN_URL: ${{ secrets.MAIN_URL }}
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "2. Configuring Production Environment Variables"
+          Write-Host "=========================================================="
+
+          if ($env:SECRET_WORKFLOW_DATABASE_URL) {
+            Write-Host "Provisioning .env from GitHub Secrets..."
+            $envLines = @(
+              "WORKFLOW_DATABASE_URL=$($env:SECRET_WORKFLOW_DATABASE_URL)",
+              "WORKFLOW_DB_SCHEMA=workflow",
+              "SECRET_KEY=$($env:SECRET_SECRET_KEY)",
+              "ALGORITHM=HS256",
+              "ACCESS_TOKEN_EXPIRE_MINUTES=60",
+              "FERNET_KEY=$($env:SECRET_FERNET_KEY)",
+              "MAIN_URL=$($env:SECRET_MAIN_URL)"
+            )
+            $envLines | Set-Content -Path ".env" -Encoding ASCII
+          } elseif (Test-Path "..\..\..\.env") {
+            Copy-Item "..\..\..\.env" ".env" -Force
+            Write-Host "Copied production .env from runner root folder."
+          } elseif (Test-Path "C:\actions-runner\.env") {
+            Copy-Item "C:\actions-runner\.env" ".env" -Force
+            Write-Host "Copied production .env from C:\actions-runner\.env"
+          } elseif (Test-Path "C:\Windows\System32\actions-runner\.env") {
+            Copy-Item "C:\Windows\System32\actions-runner\.env" ".env" -Force
+            Write-Host "Copied production .env from C:\Windows\System32\actions-runner\.env"
+          } elseif (Test-Path "backend\.env.example") {
+            Write-Host "Initializing .env from template..."
+            Copy-Item "backend\.env.example" ".env"
+          }
+
+          if (Test-Path ".env") {
+            Copy-Item ".env" "backend\.env" -Force
+            Write-Host "Environment file is ready."
           }
 
       - name: Build and Deploy Containers
         run: |
           Write-Host "=========================================================="
-          Write-Host "2. Building & Updating Docker Containers (In-Place)"
+          Write-Host "3. Building & Updating Docker Containers (In-Place)"
           Write-Host "=========================================================="
 
           # Build images first without stopping current containers
@@ -80,7 +116,7 @@ jobs:
       - name: Validate Container Health Checks
         run: |
           Write-Host "=========================================================="
-          Write-Host "3. Verifying Production Service Health Status"
+          Write-Host "4. Verifying Production Service Health Status"
           Write-Host "=========================================================="
 
           $maxRetries = 15
@@ -119,3 +155,16 @@ jobs:
           Write-Host " - API Swagger Docs: http://192.168.1.183:8000/docs"
           Write-Host " - Observability:    http://192.168.1.183:3001"
           docker compose ps
+
+      - name: Diagnostic Logs on Failure
+        if: failure()
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "DIAGNOSTIC LOGS (DEPLOYMENT FAILURE)"
+          Write-Host "=========================================================="
+          Write-Host "--- Docker Containers ---"
+          docker compose ps -a
+          Write-Host "--- Backend Logs ---"
+          docker compose logs --tail=60 backend
+          Write-Host "--- Frontend Logs ---"
+          docker compose logs --tail=60 frontend
