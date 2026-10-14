@@ -2,23 +2,30 @@ name: Deploy to Server (192.168.1.183)
 
 on:
   workflow_dispatch:
+    inputs:
+      target_commit:
+        description: "Exact Git commit SHA or branch to deploy (must belong to main and have passing CI)"
+        required: false
+        default: "main"
   workflow_run:
-    workflows: ["CI/CD DevSecOps Quality Gate"]
+    workflows: ["Continuous Integration"]
     branches:
       - main
     types:
       - completed
 
 concurrency:
-  group: deploy-production-${{ github.ref }}
+  group: deploy-production
   cancel-in-progress: false
 
 jobs:
   deploy:
     name: Deploy Docker Stack on Self-Hosted Runner
     runs-on: [self-hosted, Windows]
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
-    timeout-minutes: 20
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      github.event_name == 'workflow_dispatch'
+    timeout-minutes: 25
     defaults:
       run:
         shell: powershell
@@ -27,146 +34,160 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.inputs.target_commit || github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
-      - name: Verify Environment Prerequisites
+      - name: Verify Commit Lineage, CI Status, and Freshness
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           Write-Host "=========================================================="
-          Write-Host "1. Verifying Deployment Host Prerequisites"
+          Write-Host "1. Verifying Commit Lineage, CI Status, and Freshness"
           Write-Host "=========================================================="
 
-          # Verify Docker Engine is active
-          try {
-            docker info | Out-Null
-            Write-Host "Docker Desktop / Engine is running."
-          } catch {
-            Write-Error "CRITICAL: Docker Desktop is not running on this host!"
-            exit 1
+          # Fetch latest origin/main refs
+          git fetch origin main --quiet
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to fetch origin main refs."
+            exit $LASTEXITCODE
           }
 
-      - name: Configure Production Environment Variables
-        env:
-          SECRET_WORKFLOW_DATABASE_URL: ${{ secrets.WORKFLOW_DATABASE_URL }}
-          SECRET_SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          SECRET_FERNET_KEY: ${{ secrets.FERNET_KEY }}
-          SECRET_MAIN_URL: ${{ secrets.MAIN_URL }}
-          SECRET_GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-        run: |
-          Write-Host "=========================================================="
-          Write-Host "2. Configuring Production Environment Variables"
-          Write-Host "=========================================================="
+          $currentCommit = (git rev-parse HEAD).Trim()
+          $latestMainCommit = (git rev-parse origin/main).Trim()
 
-          if ($env:SECRET_WORKFLOW_DATABASE_URL) {
-            if (-not $env:SECRET_GRAFANA_ADMIN_PASSWORD) {
-              Write-Error "CRITICAL: GRAFANA_ADMIN_PASSWORD secret is missing or empty. A configured password is required."
+          Write-Host "Deployment target commit: $currentCommit"
+          Write-Host "Latest HEAD of main:      $latestMainCommit"
+
+          # 1. Lineage Check: Commit MUST be an ancestor of or present on main
+          $mergeBase = (git merge-base $currentCommit origin/main).Trim()
+          if ($mergeBase -ne $currentCommit) {
+            Write-Error "SAFETY VIOLATION: Commit $currentCommit is not an ancestor of or present on the production 'main' branch!"
+            exit 1
+          }
+          Write-Host "  - [PASS] Commit lineage verified on 'main'."
+
+          # 2. Anti-Stale Protection for Automatic Deployment
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            if ($currentCommit -ne $latestMainCommit) {
+              Write-Error "STALE COMMIT DETECTED: Automatic deployment rejected because a newer commit ($latestMainCommit) has already reached main."
               exit 1
             }
-
-            Write-Host "Provisioning .env from GitHub Secrets..."
-            $envLines = @(
-              "WORKFLOW_DATABASE_URL=$($env:SECRET_WORKFLOW_DATABASE_URL)",
-              "WORKFLOW_DB_SCHEMA=workflow",
-              "SECRET_KEY=$($env:SECRET_SECRET_KEY)",
-              "ALGORITHM=HS256",
-              "ACCESS_TOKEN_EXPIRE_MINUTES=60",
-              "FERNET_KEY=$($env:SECRET_FERNET_KEY)",
-              "MAIN_URL=$($env:SECRET_MAIN_URL)",
-              "GRAFANA_ADMIN_USER=admin",
-              "GRAFANA_ADMIN_PASSWORD=$($env:SECRET_GRAFANA_ADMIN_PASSWORD)"
-            )
-            $envLines | Set-Content -Path ".env" -Encoding ASCII
-          } elseif (Test-Path "..\..\..\.env") {
-            Copy-Item "..\..\..\.env" ".env" -Force
-            Write-Host "Copied production .env from runner root folder."
-          } elseif (Test-Path "C:\actions-runner\.env") {
-            Copy-Item "C:\actions-runner\.env" ".env" -Force
-            Write-Host "Copied production .env from C:\actions-runner\.env"
-          } elseif (Test-Path "C:\Windows\System32\actions-runner\.env") {
-            Copy-Item "C:\Windows\System32\actions-runner\.env" ".env" -Force
-            Write-Host "Copied production .env from C:\Windows\System32\actions-runner\.env"
-          } elseif (Test-Path "backend\.env.example") {
-            Write-Host "Initializing .env from template..."
-            Copy-Item "backend\.env.example" ".env"
+            Write-Host "  - [PASS] Commit freshness verified (current HEAD of main)."
           }
 
-          if (Test-Path ".env") {
-            Copy-Item ".env" "backend\.env" -Force
-            Write-Host "Environment files ready at .env and backend\.env."
-          } else {
-            Write-Error "CRITICAL: .env file could not be provisioned!"
-            exit 1
+          # 3. Verified CI Status Check for Manual Deployment (workflow_dispatch)
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            Write-Host "Verifying CI status for commit $currentCommit via GitHub API..."
+            $repo = "${{ github.repository }}"
+            $headers = @{
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Accept"        = "application/vnd.github+json"
+            }
+            $uri = "https://api.github.com/repos/$repo/actions/runs?head_sha=$currentCommit"
+
+            try {
+              $runsResponse = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+              $ciRuns = $runsResponse.workflow_runs | Where-Object { $_.name -eq "Continuous Integration" -and $_.status -eq "completed" -and $_.conclusion -eq "success" }
+
+              if (-not $ciRuns -or $ciRuns.Count -eq 0) {
+                Write-Error "MANUAL DEPLOYMENT REJECTED: No successful 'Continuous Integration' run was found on record for commit $currentCommit!"
+                exit 1
+              }
+              Write-Host "  - [PASS] Verified successful CI run ($($ciRuns[0].id)) for commit $currentCommit."
+            } catch {
+              Write-Error "Failed to query GitHub CI status API: $_"
+              exit 1
+            }
           }
 
-      - name: Generate and Verify SSL Certificates
+      - name: Validate Production Secrets and Provision Environment
+        env:
+          WORKFLOW_DATABASE_URL: ${{ secrets.WORKFLOW_DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          FERNET_KEY: ${{ secrets.FERNET_KEY }}
+          MAIN_URL: ${{ secrets.MAIN_URL }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          WORKFLOW_DB_SCHEMA: "workflow"
+          ALGORITHM: "HS256"
+          ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+          GRAFANA_ADMIN_USER: "admin"
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "2. Validating Production Secrets & Provisioning Environment"
+          Write-Host "=========================================================="
+
+          # Install validator dependencies
+          python -m pip install --quiet cryptography python-dotenv
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install Python cryptography dependency."
+            exit $LASTEXITCODE
+          }
+
+          # Execute strict validator with atomic file generation
+          python backend/validate_env_secrets.py --write
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "CRITICAL: Production secret validation failed! Deployment aborted."
+            exit $LASTEXITCODE
+          }
+
+      - name: Generate and Validate SSL Certificates
         run: |
           Write-Host "=========================================================="
           Write-Host "3. Generating & Validating SSL Certificates with SAN"
           Write-Host "=========================================================="
 
-          # Install required cryptographic tooling
-          python -m pip install --quiet cryptography python-dotenv
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to install cryptography dependency."
-            exit $LASTEXITCODE
-          }
-
           # Generate certificate using the configured MAIN_URL
-          python "backend\generate_ssl_certs.py"
+          python backend/generate_ssl_certs.py
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to execute generate_ssl_certs.py."
             exit $LASTEXITCODE
           }
 
-          # Confirm generated certificate SAN covers the configured MAIN_URL host
-          python -c @"
-          import os, sys
-          from urllib.parse import urlparse
-          from cryptography import x509
-          from dotenv import load_dotenv
-
-          load_dotenv('backend/.env')
-          main_url = os.getenv('MAIN_URL', 'https://127.0.0.1')
-          expected_host = urlparse(main_url).hostname or '127.0.0.1'
-
-          cert_path = 'backend/certs/fullchain.pem'
-          if not os.path.exists(cert_path):
-              print(f'ERROR: Certificate file not found: {cert_path}', file=sys.stderr)
-              sys.exit(1)
-
-          with open(cert_path, 'rb') as f:
-              cert = x509.load_pem_x509_certificate(f.read())
-
-          san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-          san_names = [str(n.value) for n in san_ext.value]
-
-          print(f'Configured Target Host: {expected_host}')
-          print(f'Certificate SANs: {san_names}')
-
-          if expected_host not in san_names:
-              print(f'ERROR: Generated certificate SAN does not cover {expected_host}!', file=sys.stderr)
-              sys.exit(1)
-
-          print('SSL Certificate SAN validation SUCCESSFUL.')
-          "@
+          # Verify certificate and private key consistency, expiration, and SAN coverage
+          python backend/generate_ssl_certs.py --verify
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Certificate SAN validation failed!"
+            Write-Error "SSL certificate verification failed!"
             exit $LASTEXITCODE
           }
 
-      - name: Build and Deploy Containers
+      - name: Build and Deploy Containers with Safety Tagging
         run: |
           Write-Host "=========================================================="
-          Write-Host "4. Building & Updating Docker Containers (In-Place)"
+          Write-Host "4. Building & Deploying Docker Containers"
           Write-Host "=========================================================="
 
-          # Build images and check exit code
+          # 1. Pre-flight: Verify Docker Engine is active
+          docker info 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "CRITICAL: Docker Desktop / Engine is not running on this host!"
+            exit $LASTEXITCODE
+          }
+
+          # 2. Pre-flight: Validate Compose configuration syntax
+          docker compose config --quiet
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "CRITICAL: docker-compose.yml configuration is invalid!"
+            exit $LASTEXITCODE
+          }
+
+          # 3. Rollback Safety: Tag existing container images as previous
+          try {
+            $prevBackend = (docker inspect --format '{{.Image}}' workflow-backend 2>$null)
+            $prevFrontend = (docker inspect --format '{{.Image}}' workflow-frontend 2>$null)
+            if ($prevBackend) { docker tag $prevBackend workflow-backend:previous 2>$null }
+            if ($prevFrontend) { docker tag $prevFrontend workflow-frontend:previous 2>$null }
+          } catch {
+            Write-Host "Notice: No previous container images to tag for rollback."
+          }
+
+          # 4. Build images in-place
           docker compose build
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Docker compose build failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
           }
 
-          # Update containers seamlessly without downtime (preserves persistent volumes)
+          # 5. Start/recreate containers seamlessly
           docker compose up -d --remove-orphans
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Docker compose up failed with exit code $LASTEXITCODE"
@@ -175,65 +196,77 @@ jobs:
 
           Write-Host "Containers updated. Waiting for initialization..."
 
-      - name: Validate Container Health Checks
+      - name: Validate Container and Service Health
         run: |
           Write-Host "=========================================================="
-          Write-Host "5. Verifying Production Service Health Status"
+          Write-Host "5. Verifying Container, API, and Web Health"
           Write-Host "=========================================================="
 
           $maxRetries = 20
           $retryCount = 0
           $isHealthy = $false
 
+          # Trust self-signed certificates during localhost health checks
+          [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+
           while ($retryCount -lt $maxRetries) {
             Start-Sleep -Seconds 4
             $retryCount++
-            Write-Host "[$retryCount/$maxRetries] Testing backend & frontend health..."
+            Write-Host "[$retryCount/$maxRetries] Testing container health..."
 
-            $backendHealthy = $false
-            $frontendHealthy = $false
+            $backendHttpOk = $false
+            $frontendHttpOk = $false
+            $frontendHttpsOk = $false
+            $containerStateOk = $false
 
-            # Check Backend API
+            # 1. Container Running State
+            try {
+              $beState = (docker inspect --format '{{.State.Status}}' workflow-backend 2>$null).Trim()
+              $feState = (docker inspect --format '{{.State.Status}}' workflow-frontend 2>$null).Trim()
+              if ($beState -eq "running" -and $feState -eq "running") {
+                $containerStateOk = $true
+              }
+            } catch {}
+
+            # 2. Backend HTTP Health (:8000/health)
             try {
               $resp = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 5
               if ($resp.status -eq "healthy") {
-                $backendHealthy = $true
+                $backendHttpOk = $true
               }
-            } catch {
-              Write-Host "  Backend waiting..."
-            }
+            } catch {}
 
-            # Check Frontend Web Server / Nginx
+            # 3. Frontend HTTP Web Server (:80/)
             try {
               $feResp = Invoke-WebRequest -Uri "http://localhost:80/" -Method Get -UseBasicParsing -TimeoutSec 5
               if ($feResp.StatusCode -eq 200) {
-                $frontendHealthy = $true
+                $frontendHttpOk = $true
               }
-            } catch {
-              try {
-                $feState = (docker inspect --format '{{json .State.Health.Status}}' workflow-frontend 2>$null) | ConvertFrom-Json
-                if ($feState -eq "healthy") {
-                  $frontendHealthy = $true
-                }
-              } catch {
-                Write-Host "  Frontend waiting..."
-              }
-            }
+            } catch {}
 
-            if ($backendHealthy -and $frontendHealthy) {
-              Write-Host "Both Backend API and Frontend Web Server are Healthy!"
+            # 4. Frontend HTTPS Endpoint (:443/)
+            try {
+              $httpsResp = Invoke-WebRequest -Uri "https://localhost:443/" -Method Get -UseBasicParsing -TimeoutSec 5
+              if ($httpsResp.StatusCode -eq 200) {
+                $frontendHttpsOk = $true
+              }
+            } catch {}
+
+            if ($containerStateOk -and $backendHttpOk -and $frontendHttpOk -and $frontendHttpsOk) {
+              Write-Host "All Health Checks PASSED (Containers, Backend API, Frontend HTTP, and Frontend HTTPS)!"
               $isHealthy = $true
               break
             }
           }
 
           if (-not $isHealthy) {
-            Write-Error "DEPLOYMENT FAILED: Both backend and frontend services did not report healthy within timeout."
+            Write-Error "DEPLOYMENT FAILED: One or more health checks did not succeed within timeout."
+            Write-Host "Diagnostics: Containers Running: $containerStateOk | Backend HTTP: $backendHttpOk | Frontend HTTP: $frontendHttpOk | Frontend HTTPS: $frontendHttpsOk"
             exit 1
           }
 
           Write-Host "=========================================================="
-          Write-Host "DEPLOYMENT SUCCESSFUL!"
+          Write-Host "DEPLOYMENT VERIFIED AND SUCCESSFUL!"
           Write-Host "=========================================================="
           Write-Host " - Web UI (HTTPS):   https://192.168.1.183"
           Write-Host " - Web UI (HTTP):    http://192.168.1.183"
@@ -241,15 +274,14 @@ jobs:
           Write-Host " - Observability:    http://192.168.1.183:3001"
           docker compose ps
 
-      - name: Diagnostic Logs on Failure
+      - name: Diagnostic Logs and Recovery on Failure
         if: failure()
         run: |
           Write-Host "=========================================================="
           Write-Host "DIAGNOSTIC LOGS (DEPLOYMENT FAILURE)"
           Write-Host "=========================================================="
-          Write-Host "--- Docker Containers ---"
           docker compose ps -a
-          Write-Host "--- Backend Logs ---"
+          Write-Host "--- Backend Container Logs ---"
           docker compose logs --tail=60 backend
-          Write-Host "--- Frontend Logs ---"
+          Write-Host "--- Frontend Container Logs ---"
           docker compose logs --tail=60 frontend

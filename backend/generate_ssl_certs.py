@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 import ipaddress
 import socket
@@ -40,8 +41,13 @@ def generate_self_signed_cert(output_dir: str = None, valid_days: int = 730):
     cert_path = os.path.join(output_dir, "fullchain.pem")
 
     # Extract target host/IP from MAIN_URL in .env
-    main_url = os.getenv("MAIN_URL", "https://127.0.0.1")
-    parsed_host = urlparse(main_url).hostname or "127.0.0.1"
+    main_url = os.getenv("MAIN_URL")
+    if not main_url:
+        raise ValueError("MAIN_URL environment variable is required to generate SSL certificates. Silent fallback to 127.0.0.1 is disabled.")
+    parsed_host = urlparse(main_url).hostname
+    if not parsed_host:
+        raise ValueError(f"Could not parse a valid hostname or IP from MAIN_URL: '{main_url}'")
+
     local_lan_ip = _get_local_ip()
 
     # Collect all unique candidate hosts / IPs
@@ -93,14 +99,15 @@ def generate_self_signed_cert(output_dir: str = None, valid_days: int = 730):
         except ValueError:
             san_list.append(x509.DNSName(host))
 
+    now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1))
-        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=valid_days))
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=valid_days))
         .add_extension(x509.SubjectAlternativeName(san_list), critical=False)
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
@@ -113,7 +120,67 @@ def generate_self_signed_cert(output_dir: str = None, valid_days: int = 730):
     print(f"      - Common Name: {parsed_host}")
     print(f"      - Private Key: {key_path}")
     print(f"      - Certificate: {cert_path}")
+
+    # Immediately verify generated certificate
+    verify_ssl_certificate(output_dir=output_dir, expected_host=parsed_host)
     return key_path, cert_path
 
+def verify_ssl_certificate(output_dir: str = None, expected_host: str = None) -> bool:
+    """
+    Validates certificate and private key consistency, validity dates, and SAN coverage.
+    """
+    if not output_dir or output_dir == "certs":
+        output_dir = str(Path(__file__).parent / "certs")
+    key_path = os.path.join(output_dir, "privkey.pem")
+    cert_path = os.path.join(output_dir, "fullchain.pem")
+
+    if not os.path.exists(key_path):
+        raise FileNotFoundError(f"SSL Private key not found: {key_path}")
+    if not os.path.exists(cert_path):
+        raise FileNotFoundError(f"SSL Certificate not found: {cert_path}")
+
+    with open(key_path, "rb") as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
+    with open(cert_path, "rb") as f:
+        cert = x509.load_pem_x509_certificate(f.read())
+
+    # 1. Key consistency check (public numbers must match)
+    if cert.public_key().public_numbers() != key.public_key().public_numbers():
+        raise ValueError("SSL Verification Error: Certificate public key does not match private key!")
+
+    # 2. Expiration check
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
+        raise ValueError(f"SSL Verification Error: Certificate is expired or not yet valid (valid: {cert.not_valid_before_utc} to {cert.not_valid_after_utc})")
+
+    # 3. Subject Alternative Name (SAN) coverage
+    if expected_host is None:
+        main_url = os.getenv("MAIN_URL", "")
+        if main_url:
+            expected_host = urlparse(main_url).hostname
+
+    if expected_host:
+        san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+        san_names = [str(n.value) for n in san_ext.value]
+        if expected_host not in san_names:
+            raise ValueError(f"SSL Verification Error: Certificate SANs {san_names} do not cover expected host '{expected_host}'!")
+        print(f"[SSL Verification] Certificate covers expected host '{expected_host}'.")
+
+    print("[SSL Verification] Certificate & Key consistency, validity dates, and SANs verified.")
+    return True
+
 if __name__ == "__main__":
-    generate_self_signed_cert()
+    if "--verify" in sys.argv:
+        try:
+            verify_ssl_certificate()
+            sys.exit(0)
+        except Exception as e:
+            print(f"[SSL Error] {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            generate_self_signed_cert()
+            sys.exit(0)
+        except Exception as e:
+            print(f"[SSL Error] {e}", file=sys.stderr)
+            sys.exit(1)
