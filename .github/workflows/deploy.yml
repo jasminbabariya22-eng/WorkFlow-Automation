@@ -1,10 +1,13 @@
-name: Deploy to Production (Self-Hosted Windows)
+name: Deploy to Server (192.168.1.183)
 
 on:
   workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ["CI/CD DevSecOps Quality Gate"]
     branches:
       - main
+    types:
+      - completed
 
 concurrency:
   group: deploy-production-${{ github.ref }}
@@ -14,47 +17,31 @@ jobs:
   deploy:
     name: Deploy Docker Stack on Self-Hosted Runner
     runs-on: [self-hosted, Windows]
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     timeout-minutes: 20
     defaults:
       run:
-        shell: powershell -ExecutionPolicy Bypass -Command {0}
+        shell: powershell
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Verify Environment Prerequisites & SSL
+      - name: Verify Environment Prerequisites
         run: |
           Write-Host "=========================================================="
-          Write-Host "1. Verifying Deployment Host Prerequisites & SSL"
+          Write-Host "1. Verifying Deployment Host Prerequisites"
           Write-Host "=========================================================="
 
-          # 1. Check Docker Engine
+          # Verify Docker Engine is active
           try {
             docker info | Out-Null
             Write-Host "Docker Desktop / Engine is running."
           } catch {
             Write-Error "CRITICAL: Docker Desktop is not running on this host!"
             exit 1
-          }
-
-          # 2. Check / Generate SSL Certificates
-          if (-not (Test-Path "backend\certs\fullchain.pem")) {
-            Write-Host "Generating SSL certificates for 192.168.1.183 / localhost..."
-            try {
-              python -m pip install --quiet cryptography python-dotenv
-              python "backend\generate_ssl_certs.py"
-            } catch {
-              Write-Host "Notice: SSL certificate generation output: $_"
-            }
-          }
-
-          if (Test-Path "backend\certs\fullchain.pem") {
-            Write-Host "SSL certificates verified in backend\certs."
-          } else {
-            Write-Warning "backend\certs\fullchain.pem not found yet; attempting fallback generation..."
-            python -m pip install cryptography python-dotenv
-            python "backend\generate_ssl_certs.py"
           }
 
       - name: Configure Production Environment Variables
@@ -69,9 +56,12 @@ jobs:
           Write-Host "2. Configuring Production Environment Variables"
           Write-Host "=========================================================="
 
-          $grafanaPass = if ($env:SECRET_GRAFANA_ADMIN_PASSWORD) { $env:SECRET_GRAFANA_ADMIN_PASSWORD } else { "Admin@123" }
-
           if ($env:SECRET_WORKFLOW_DATABASE_URL) {
+            if (-not $env:SECRET_GRAFANA_ADMIN_PASSWORD) {
+              Write-Error "CRITICAL: GRAFANA_ADMIN_PASSWORD secret is missing or empty. A configured password is required."
+              exit 1
+            }
+
             Write-Host "Provisioning .env from GitHub Secrets..."
             $envLines = @(
               "WORKFLOW_DATABASE_URL=$($env:SECRET_WORKFLOW_DATABASE_URL)",
@@ -82,7 +72,7 @@ jobs:
               "FERNET_KEY=$($env:SECRET_FERNET_KEY)",
               "MAIN_URL=$($env:SECRET_MAIN_URL)",
               "GRAFANA_ADMIN_USER=admin",
-              "GRAFANA_ADMIN_PASSWORD=$grafanaPass"
+              "GRAFANA_ADMIN_PASSWORD=$($env:SECRET_GRAFANA_ADMIN_PASSWORD)"
             )
             $envLines | Set-Content -Path ".env" -Encoding ASCII
           } elseif (Test-Path "..\..\..\.env") {
@@ -101,54 +91,144 @@ jobs:
 
           if (Test-Path ".env") {
             Copy-Item ".env" "backend\.env" -Force
-            Write-Host "Environment file is ready."
+            Write-Host "Environment files ready at .env and backend\.env."
+          } else {
+            Write-Error "CRITICAL: .env file could not be provisioned!"
+            exit 1
+          }
+
+      - name: Generate and Verify SSL Certificates
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "3. Generating & Validating SSL Certificates with SAN"
+          Write-Host "=========================================================="
+
+          # Install required cryptographic tooling
+          python -m pip install --quiet cryptography python-dotenv
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install cryptography dependency."
+            exit $LASTEXITCODE
+          }
+
+          # Generate certificate using the configured MAIN_URL
+          python "backend\generate_ssl_certs.py"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to execute generate_ssl_certs.py."
+            exit $LASTEXITCODE
+          }
+
+          # Confirm generated certificate SAN covers the configured MAIN_URL host
+          python -c @"
+          import os, sys
+          from urllib.parse import urlparse
+          from cryptography import x509
+          from dotenv import load_dotenv
+
+          load_dotenv('backend/.env')
+          main_url = os.getenv('MAIN_URL', 'https://127.0.0.1')
+          expected_host = urlparse(main_url).hostname or '127.0.0.1'
+
+          cert_path = 'backend/certs/fullchain.pem'
+          if not os.path.exists(cert_path):
+              print(f'ERROR: Certificate file not found: {cert_path}', file=sys.stderr)
+              sys.exit(1)
+
+          with open(cert_path, 'rb') as f:
+              cert = x509.load_pem_x509_certificate(f.read())
+
+          san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+          san_names = [str(n.value) for n in san_ext.value]
+
+          print(f'Configured Target Host: {expected_host}')
+          print(f'Certificate SANs: {san_names}')
+
+          if expected_host not in san_names:
+              print(f'ERROR: Generated certificate SAN does not cover {expected_host}!', file=sys.stderr)
+              sys.exit(1)
+
+          print('SSL Certificate SAN validation SUCCESSFUL.')
+          "@
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Certificate SAN validation failed!"
+            exit $LASTEXITCODE
           }
 
       - name: Build and Deploy Containers
         run: |
           Write-Host "=========================================================="
-          Write-Host "3. Building & Updating Docker Containers (In-Place)"
+          Write-Host "4. Building & Updating Docker Containers (In-Place)"
           Write-Host "=========================================================="
 
-          # Build images first without stopping current containers
+          # Build images and check exit code
           docker compose build
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Docker compose build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
           # Update containers seamlessly without downtime (preserves persistent volumes)
           docker compose up -d --remove-orphans
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Docker compose up failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
           Write-Host "Containers updated. Waiting for initialization..."
 
       - name: Validate Container Health Checks
         run: |
           Write-Host "=========================================================="
-          Write-Host "4. Verifying Production Service Health Status"
+          Write-Host "5. Verifying Production Service Health Status"
           Write-Host "=========================================================="
 
-          $maxRetries = 15
+          $maxRetries = 20
           $retryCount = 0
           $isHealthy = $false
 
           while ($retryCount -lt $maxRetries) {
             Start-Sleep -Seconds 4
             $retryCount++
-            Write-Host "[$retryCount/$maxRetries] Testing http://localhost:8000/health..."
+            Write-Host "[$retryCount/$maxRetries] Testing backend & frontend health..."
 
+            $backendHealthy = $false
+            $frontendHealthy = $false
+
+            # Check Backend API
             try {
               $resp = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -TimeoutSec 5
               if ($resp.status -eq "healthy") {
-                Write-Host "Backend API is Healthy!"
-                $isHealthy = $true
-                break
+                $backendHealthy = $true
               }
             } catch {
-              Write-Host "Waiting for service to become responsive..."
+              Write-Host "  Backend waiting..."
+            }
+
+            # Check Frontend Web Server / Nginx
+            try {
+              $feResp = Invoke-WebRequest -Uri "http://localhost:80/" -Method Get -UseBasicParsing -TimeoutSec 5
+              if ($feResp.StatusCode -eq 200) {
+                $frontendHealthy = $true
+              }
+            } catch {
+              try {
+                $feState = (docker inspect --format '{{json .State.Health.Status}}' workflow-frontend 2>$null) | ConvertFrom-Json
+                if ($feState -eq "healthy") {
+                  $frontendHealthy = $true
+                }
+              } catch {
+                Write-Host "  Frontend waiting..."
+              }
+            }
+
+            if ($backendHealthy -and $frontendHealthy) {
+              Write-Host "Both Backend API and Frontend Web Server are Healthy!"
+              $isHealthy = $true
+              break
             }
           }
 
           if (-not $isHealthy) {
-            Write-Error "DEPLOYMENT FAILED: Backend health check did not report healthy within timeout."
-            Write-Host "Recent backend container logs:"
-            docker logs --tail 50 workflow-backend
+            Write-Error "DEPLOYMENT FAILED: Both backend and frontend services did not report healthy within timeout."
             exit 1
           }
 
