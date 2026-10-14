@@ -63,10 +63,13 @@ jobs:
           SECRET_SECRET_KEY: ${{ secrets.SECRET_KEY }}
           SECRET_FERNET_KEY: ${{ secrets.FERNET_KEY }}
           SECRET_MAIN_URL: ${{ secrets.MAIN_URL }}
+          SECRET_GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         run: |
           Write-Host "=========================================================="
           Write-Host "2. Configuring Production Environment Variables"
           Write-Host "=========================================================="
+
+          $grafanaPass = if ($env:SECRET_GRAFANA_ADMIN_PASSWORD) { $env:SECRET_GRAFANA_ADMIN_PASSWORD } else { "Admin@123" }
 
           if ($env:SECRET_WORKFLOW_DATABASE_URL) {
             Write-Host "Provisioning .env from GitHub Secrets..."
@@ -77,7 +80,9 @@ jobs:
               "ALGORITHM=HS256",
               "ACCESS_TOKEN_EXPIRE_MINUTES=60",
               "FERNET_KEY=$($env:SECRET_FERNET_KEY)",
-              "MAIN_URL=$($env:SECRET_MAIN_URL)"
+              "MAIN_URL=$($env:SECRET_MAIN_URL)",
+              "GRAFANA_ADMIN_USER=admin",
+              "GRAFANA_ADMIN_PASSWORD=$grafanaPass"
             )
             $envLines | Set-Content -Path ".env" -Encoding ASCII
           } elseif (Test-Path "..\..\..\.env") {
