@@ -6,16 +6,33 @@ The platform enables organizations to visually design, validate, publish, execut
 
 ---
 
+## 📚 Complete Technical Documentation
+
+A comprehensive, developer-oriented documentation suite is available in the [`docs/`](./docs/README.md) directory:
+
+- 📖 **[Documentation Home & Index](./docs/README.md)**
+- 🏛️ **[Architecture & Overview](./docs/01-overview/)**: [Project Overview](./docs/01-overview/project-overview.md) | [System Architecture](./docs/01-overview/system-architecture.md) | [Technology Stack](./docs/01-overview/technology-stack.md)
+- ⚙️ **[Backend Platform](./docs/02-backend/)**: [Backend Architecture](./docs/02-backend/backend-architecture.md) | [Complete API Reference](./docs/02-backend/api-reference.md) | [Authentication & Security](./docs/02-backend/authentication-security.md) | [Error Handling & Logging](./docs/02-backend/error-handling-logging.md)
+- 🔄 **[Workflow Engine](./docs/03-workflow-engine/)**: [Engine Architecture](./docs/03-workflow-engine/engine-architecture.md) | [Workflow Lifecycle](./docs/03-workflow-engine/workflow-lifecycle.md) | [BPMN Compiler](./docs/03-workflow-engine/bpmn-compiler.md) | [Runtime Execution](./docs/03-workflow-engine/runtime-execution.md) | [Activities & Nodes](./docs/03-workflow-engine/activities-and-nodes.md) | [Human Tasks](./docs/03-workflow-engine/human-tasks-and-approvals.md) | [Versioning](./docs/03-workflow-engine/workflow-versioning.md)
+- 🎨 **[Frontend Studio](./docs/04-frontend/)**: [Frontend Architecture](./docs/04-frontend/frontend-architecture.md) | [Workflow Designer](./docs/04-frontend/workflow-designer.md) | [Node Configuration](./docs/04-frontend/node-configuration.md) | [Monitoring UI](./docs/04-frontend/execution-and-monitoring-ui.md) | [API Integration](./docs/04-frontend/frontend-api-integration.md)
+- 🗄️ **[Database Architecture](./docs/05-database/)**: [Dual-Database Architecture](./docs/05-database/database-architecture.md) | [Workflow Schema](./docs/05-database/workflow-schema.md) | [Client DB Integration](./docs/05-database/client-database-integration.md) | [Persistence & Transactions](./docs/05-database/persistence-and-transactions.md)
+- 🔌 **[Integrations](./docs/06-integrations/)**: [Client Gateway](./docs/06-integrations/client-application-gateway.md) | [REST API Nodes](./docs/06-integrations/rest-api-nodes.md) | [Email Services](./docs/06-integrations/email-and-notifications.md) | [WebSocket Events](./docs/06-integrations/websocket-events.md)
+- 🚀 **[Operations & Deployment](./docs/07-operations/)**: [Local Setup Guide](./docs/07-operations/local-development-setup.md) | [Docker Deployment](./docs/07-operations/docker-deployment.md) | [CI/CD Pipelines](./docs/07-operations/ci-cd-pipeline.md) | [Monitoring & Alerting](./docs/07-operations/monitoring-and-alerting.md) | [Troubleshooting](./docs/07-operations/troubleshooting.md)
+- 🛡️ **[Quality & Governance](./docs/08-quality-and-maintenance/)**: [Testing Strategy](./docs/08-quality-and-maintenance/testing-strategy.md) | [Security Review](./docs/08-quality-and-maintenance/security-review.md) | [Contribution Guide](./docs/08-quality-and-maintenance/contribution-guide.md)
+- 📊 **[System Diagrams](./docs/diagrams/)**: [System Context](./docs/diagrams/system-context.md) | [Execution Sequence](./docs/diagrams/workflow-execution-sequence.md) | [Deployment Architecture](./docs/diagrams/deployment-architecture.md)
+
+---
+
 ## 🌟 Core Architectural Principles
 
 1. **100% UI + Client Database Driven**: Workflow routing, decision branches, human task assignments, email templates, and database operations are fully configured via the UI and stored as versioned graphs.
 2. **Zero Domain-Specific Hardcoding**: The Python backend serves strictly as a generic graph traversal engine. No hardcoded tables, column names, status codes, or business logic exist in backend code.
 3. **Dual Database Architecture**:
-   - **Client Database (PostgreSQL / MySQL / SQLite)**: The single source of truth for business data (e.g. `leave_requests`, `risk_register`, `mst_users`, `mst_department`, `mst_user_role`).
-   - **Workflow Database**: Stores workflow specifications, versions, node configurations, active instances, task state machines, execution logs, and audit trails.
+   - **Client Database (PostgreSQL / MySQL / MSSQL / SQLite / Oracle)**: The single source of truth for organization business data.
+   - **Workflow Database (PostgreSQL / SQLite)**: Stores workflow specifications, versions, node configurations, active instances, task state machines, execution logs, and audit trails.
 4. **Automated Database CRUD & Schema Discovery**: Generic `CREATE_RECORD` (`INSERT`), `READ_RECORD` (`SELECT`), `UPDATE_RECORD` (`UPDATE`), and `DELETE_RECORD` (`DELETE`) execution nodes automatically introspect client database schemas and execute parameterized SQL safely with primary key resolution and conflict handling.
-5. **REST API & Webhook Integration**: Built-in `API Call` node orchestrates external services (HTTP `GET`, `POST`, `PUT`, `PATCH`, `DELETE`) with dynamic template body interpolation and response variable capture.
-6. **Real-Time Client Application Gateway**: Complete WebSocket and REST endpoints for client applications (e.g. Employee Portals, Admin Dashboards) to trigger workflows, fetch pending tasks, submit decisions, and receive instant updates.
+5. **REST API & Webhook Integration**: Built-in `API_CALL` node orchestrates external services (HTTP `GET`, `POST`, `PUT`, `PATCH`, `DELETE`) with dynamic template body interpolation and response variable capture.
+6. **Real-Time Client Application Gateway**: WebSocket (`/ws/workflow`) and REST endpoints (`/client/*`, `/api/v1/workflow-hub`) for external client applications to trigger workflows, fetch pending tasks, submit decisions, and receive instant updates.
 7. **Complete Audit Trail**: Immutable logging of every state transition, actor, decision outcome, and execution timestamp in `workflow_history`.
 
 ---
@@ -31,24 +48,24 @@ flowchart TD
     end
 
     subgraph BackendEngine["Generic Backend Engine (FastAPI)"]
-        API_Gateway["Client Gateway & WebSockets\n(/api/v1/client/...)"]
+        API_Gateway["Client Gateway & WebSockets\n(/client/..., /ws/workflow)"]
         API_Studio["Workflow Studio APIs\n(/workflow-studio/...)"]
-        API_Meta["Metadata & Schema Introspection\n(Live Tables, Columns, Roles, Users)"]
+        API_Hub["Universal Workflow Hub\n(/api/v1/workflow-hub)"]
         Engine_Adapter["Studio Execution Adapter\n(Graph Traversal & Action Handlers)"]
         Engine_Spiff["SpiffWorkflow Core\n(Task State Machine & Persistence)"]
     end
 
     subgraph Databases["Dual Database Layer"]
         DB_Workflow[("Workflow DB\n• Definitions & Versioning\n• Execution Instances\n• Pending Human Tasks\n• Immutable Audit History")]
-        DB_Client[("Client DB (PostgreSQL / MySQL)\n• Business Entities (e.g. leave_requests)\n• Master Users & Roles (mst_users)\n• Departments (mst_department)")]
+        DB_Client[("Client DB (PostgreSQL / MySQL / MSSQL)\n• Business Entities (e.g. leave_requests)\n• Master Users & Roles (mst_users)\n• Departments (mst_department)")]
     end
 
     Client_App <-->|REST & WebSocket| API_Gateway
+    Client_App <-->|Universal Hub| API_Hub
     UI_Designer <-->|REST API| API_Studio
-    UI_Designer <-->|Schema Discovery| API_Meta
     API_Gateway --> Engine_Adapter
+    API_Hub --> Engine_Adapter
     API_Studio --> DB_Workflow
-    API_Meta --> DB_Client
     Engine_Adapter --> Engine_Spiff
     Engine_Adapter <--> DB_Workflow
     Engine_Adapter <-->|Generic Parameterized SQL| DB_Client
@@ -60,167 +77,112 @@ flowchart TD
 
 | Node Type | Category | Key Features & Capabilities |
 | :--- | :--- | :--- |
-| **`START`** | Trigger / Boundary | Workflow entry point triggered via Client App API (`/api/v1/client/trigger`), webhook, or manual submission. |
-| **`USER_TASK`** | Execution | Human review gate assigned dynamically to a **Role**, **User**, or **Department** loaded from live metadata. Supports custom decision buttons (e.g. `Approve`, `Reject`, `Request Changes`). |
-| **`APPROVAL`** | Execution | Multi-tier approval gate with hierarchical routing, rejection handling, and escalation policies. |
-| **`CREATE_RECORD`** | Database Action | Automated insert (`INSERT INTO ... RETURNING *`) with **Option B Full Schema Grid**, type-aware presets (`NOW()`, `CURRENT_DATE`, `True`/`False`), FK constraints, and duplicate conflict rules (`ON CONFLICT DO NOTHING / DO UPDATE`). |
+| **`START`** | Trigger / Boundary | Workflow entry point triggered via Client Gateway (`/client/submit`), Universal Hub, or manual submission. |
+| **`USER_TASK`** | Human Interaction | Human review gate assigned dynamically to a **Role**, **User**, or **Department** loaded from live metadata. |
+| **`APPROVAL`** | Human Interaction | Approval gate with decision outcomes (`APPROVE`, `REJECT`, `REQUEST_CHANGES`) and audit logging. |
+| **`CREATE_RECORD`** | Database Action | Automated insert (`INSERT INTO ...`) with type-aware presets (`NOW()`, `CURRENT_DATE`), and conflict rules (`DO NOTHING / DO UPDATE`). |
 | **`UPDATE_RECORD`** | Database Action | Automated field modification (`UPDATE ... SET ... WHERE id = :entity_id`) targeting client DB records upon approvals. |
 | **`READ_RECORD`** | Database Action | Dynamic query (`SELECT ... FROM ... WHERE ...`) retrieving entity fields into runtime memory for downstream conditions or emails. |
 | **`DELETE_RECORD`** | Database Action | Parameterized record deletion with filter safeguards. |
-| **`API_CALL`** | Integration | Outbound REST HTTP call (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) with dynamic headers, JSON template payload, and `api_response` variable storage. |
-| **`CONDITION`** | Control-Flow | Dynamic rule evaluation supporting numeric (`>`), boolean (`== true`), string (`== "ACTIVE"`), and multi-condition expressions without arbitrary code execution. |
+| **`API_CALL`** | Integration | Outbound REST HTTP call (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) with dynamic headers and JSON variable interpolation. |
+| **`CONDITION`** | Control-Flow | Dynamic rule evaluation supporting numeric (`>`), boolean (`== true`), and string comparisons without arbitrary code execution. |
 | **`SWITCH`** | Control-Flow | Multi-way branching based on discrete field values (e.g. `HIGH`, `MEDIUM`, `LOW`). |
-| **`COMMUNICATION`** | Execution | Rich templated email dispatcher with interactive HTML preview, dynamic variable chips (`{{entity_id}}`, `{{user_name}}`), and CC/BCC routing. |
-| **`END`** | Boundary | Terminal state completing workflow execution (`COMPLETED`, `APPROVED`, `REJECTED`). |
+| **`COMMUNICATION`** | Notification | Dynamic email dispatcher using client DB SMTP credentials with interactive HTML preview and `{{variable}}` chips. |
+| **`END`** | Boundary | Terminal state completing workflow execution (`COMPLETED`, `REJECTED`). |
 
 ---
 
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
-* **Python 3.9+**
-* **Node.js 18+** & `npm`
-* **PostgreSQL** (or compatible database) running with the Client Database
+- **Python 3.11** (or 3.9+)
+- **Node.js 22 LTS** (or 18+) & `npm`
+- **PostgreSQL 15+** (or SQLite for local evaluation)
 
 ---
 
-### 1. Backend Setup & Startup
+### 1. Local Automated Startup (Windows)
 
-```powershell
-# Navigate to backend directory
+The platform includes automated launchers that verify dependencies, auto-detect network IPs, and start backend and frontend services:
+
+- **HTTP Local Development**: Run `.\run_workflow_server.bat`
+- **HTTPS / SSL Secure Development**: Run `.\run_workflow_server_ssl.bat`
+
+---
+
+### 2. Manual Cross-Platform Startup
+
+#### Backend Setup & Startup
+```bash
 cd backend
 
-# Activate virtual environment (Windows PowerShell)
-.\.venv\Scripts\Activate
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate       # Linux/macOS
+# .\.venv\Scripts\activate      # Windows
 
-# Install dependencies (if first time)
+# Install dependencies
 pip install -r requirements.txt
 
-# Option A: Start for Local Development (HTTP - Localhost only)
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# Create .env from template and configure secrets
+cp .env.example .env
 
-# Option B: Start for Server / LAN Network Deployment (HTTP - Port 8000)
+# Start FastAPI Uvicorn server
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Option C: Start for Production / Secure Server Deployment (HTTPS / SSL Enabled)
-# (Auto-generates certificates in backend/certs if not present)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile certs/privkey.pem --ssl-certfile certs/fullchain.pem --reload
 ```
 
-* **Local Backend API Base (HTTP):** `http://127.0.0.1:8000`
-* **Secure Server API Base (HTTPS / SSL):** `https://<SERVER_IP>:8000` (e.g. `https://192.168.1.191:8000`)
-* **Interactive API Documentation (Swagger UI):** `https://<SERVER_IP>:8000/docs`
-* **Universal Gateway Endpoint (HTTPS):** `POST https://<SERVER_IP>:8000/api/v1/workflow-hub`
+- **Backend API Base**: `http://localhost:8000`
+- **Interactive Swagger Documentation**: `http://localhost:8000/docs`
+- **Health Check Endpoint**: `http://localhost:8000/health`
+- **Universal Hub Gateway**: `POST http://localhost:8000/api/v1/workflow-hub`
 
----
-
-### 2. Workflow Studio Frontend Setup
-
-```powershell
-# In a separate terminal, navigate to frontend directory
+#### Frontend Setup & Startup
+```bash
 cd frontend
 
 # Install frontend dependencies
 npm install
 
-# Option A: Start Vite dev server for Localhost
-npm run dev
-
-# Option B: Start Vite dev server for Server / Network Access
-npm run dev -- --host 0.0.0.0
+# Start Vite development server
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
-* **Local Workflow Studio Designer:** `http://localhost:5173`
-* **Network Workflow Studio Designer:** `http://<SERVER_IP>:5173`
+- **Workflow Studio Designer**: `http://localhost:5173`
+- **Monitoring Dashboard**: `http://localhost:5173/?view=monitoring`
 
 ---
 
-### 3. Client Application Portal (Demo App)
+## 🧪 Testing & Validation
 
-```powershell
-# In a separate terminal, navigate to ClientApp directory
-cd ClientApp
-
-# Install dependencies
-npm install
-
-# Start Client App dev server
-npm run dev
-```
-
-* **Client App Portal:** `http://localhost:5174`
-
----
-
-## 🧪 Testing & Simulation Tools
-
-### 1. In-Designer Interactive Test Runner (`▷ Test Flow`)
-From the Workflow Designer toolbar, click **`▷ Test Flow`**:
-* **Step-by-Step Simulation**: Step through the entire graph node by node with live branch highlighting.
-* **Database State Inspector**: Inspect before/after state of Client DB business entities.
-* **SQL Execution Trace**: View all executed SQL queries, HTTP request/response payloads, and millisecond execution times.
-
-### 2. Direct Query / API Tester
-* In **Record Nodes**: Scroll down to the **Live SQL Preview** panel and click **`▶ Test Query`** to execute the query against the connected database in real-time.
-* In **API Call Nodes**: Execute live requests against public or private webhook endpoints.
-
-### 3. Automated Backend Test Suites
-Run comprehensive end-to-end integration and acceptance tests:
-```powershell
+### Backend Pytest Suite
+```bash
 cd backend
-.\.venv\Scripts\python.exe test_step9.py
-.\.venv\Scripts\python.exe test_client_gateway.py
-.\.venv\Scripts\python.exe test_executor.py
+python -m pytest tests/ -v --tb=short
+```
+
+### Frontend Linter & Build Validation
+```bash
+cd frontend
+npm run lint    # Oxlint static code analysis
+npm run build   # Production Vite bundle compilation
+```
+
+### Docker Compose Stack
+```bash
+# Production stack build and launch
+docker compose up -d --build --remove-orphans
+
+# Check container health status
+docker compose ps
 ```
 
 ---
 
-## 🔗 Client Application Integration (SDK)
+## ⚠️ Important Implementation Limitations
 
-Workflows can be bound to any external frontend or microservice in three simple steps:
-
-### 1. Trigger Workflow
-```javascript
-const response = await fetch('http://127.0.0.1:8000/api/v1/client/trigger', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    workflow_code: 'LEAVE_APPROVAL_FLOW',
-    entity_id: 42,
-    variables: { employee_id: 5, days: 3, reason: 'Annual Leave' }
-  })
-});
-const { instance_id } = await response.json();
-```
-
-### 2. Fetch Pending Tasks for Logged-In User
-```javascript
-const res = await fetch(`http://127.0.0.1:8000/api/v1/client/tasks?user_id=3&role_id=2`);
-const pendingTasks = await res.json();
-```
-
-### 3. Complete Task / Submit Approval
-```javascript
-await fetch('http://127.0.0.1:8000/api/v1/client/complete-task', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    task_id: 'task-102',
-    action: 'APPROVE',
-    user_id: 3,
-    comment: 'Approved as requested'
-  })
-});
-```
-
----
-
-## 🔒 Security & Performance Features
-
-* **Parameterized SQL**: All database operations use strictly parameterized SQLAlchemy constructs to eliminate SQL injection vulnerabilities.
-* **Safe Condition Evaluation**: Condition expressions use an AST-based tokenizer to prevent arbitrary Python code execution.
-* **Zero Secrets in Code**: Database connection strings and tokens are managed exclusively through environment configurations.
-* **In-Memory Metadata Caching**: Table schemas, column definitions, and master roles are cached for sub-millisecond response times in the visual designer.
+1. **Authentication Dev Fallback**: `get_current_user` in `backend/app/core/dependencies.py` currently falls back to a default mock admin user when no token is supplied, facilitating standalone local testing. For hardened public deployments, strict 401 rejection should be enabled.
+2. **In-Flight Workflow Migration**: Instances running when a new workflow version is published will complete execution under their initial version graph; live state migration between versions is not currently supported.
+3. **No Distributed 2-Phase Commit**: Distributed XA transactions across the workflow DB and client DB are not used. Failed client operations roll back immediately, and errors are recorded in the workflow activity history.
 
 ---
 
