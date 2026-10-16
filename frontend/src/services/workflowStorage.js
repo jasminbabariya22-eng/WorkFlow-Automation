@@ -661,10 +661,14 @@ export const workflowStorage = {
   // 14. Get instance trace details (Fast parallel Settled)
   getInstanceDetails: async (instanceId) => {
     try {
+      const token = localStorage.getItem('token')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
       const [varSettled, logSettled, histSettled] = await Promise.allSettled([
-        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { signal: AbortSignal.timeout(3000) }),
-        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { signal: AbortSignal.timeout(3000) }),
-        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { signal: AbortSignal.timeout(3000) })
+        fetch(`/workflow/monitoring/instances/${instanceId}/variables`, { headers, signal: AbortSignal.timeout(10000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/logs`, { headers, signal: AbortSignal.timeout(10000) }),
+        fetch(`/workflow/monitoring/instances/${instanceId}/history`, { headers, signal: AbortSignal.timeout(10000) })
       ])
 
       let variables = {}

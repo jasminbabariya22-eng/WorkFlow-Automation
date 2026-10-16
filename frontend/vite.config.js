@@ -15,8 +15,9 @@ export default defineConfig(({ mode }) => {
   const useSSL = env.VITE_USE_SSL !== 'false' && certsExist
 
   // Dynamic backend URLs based on SSL state
-  const backendProtocol = useSSL ? 'https' : 'http'
-  const wsProtocol = useSSL ? 'wss' : 'ws'
+  // Backend on port 8000 runs HTTPS whenever certs exist; decouple from frontend UI SSL toggle
+  const backendProtocol = env.VITE_BACKEND_PROTOCOL || (certsExist ? 'https' : 'http')
+  const wsProtocol = backendProtocol === 'https' ? 'wss' : 'ws'
   const backendHost = env.VITE_BACKEND_HOST || '127.0.0.1:8000'
   const backendTarget = `${backendProtocol}://${backendHost}`
   const wsTarget = `${wsProtocol}://${backendHost}`

@@ -131,6 +131,36 @@ def get_instance_details(
         return error_response(message=str(e), status_code=400)
 
 
+def _sanitize_monitoring_variables(data: Any, depth: int = 0) -> Any:
+    """
+    Sanitizes process variables for monitoring UI to prevent browser freezing
+    and multi-second network transfers from large base64 attachments or duplicates.
+    """
+    if depth > 4:
+        return str(data)[:200]
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            # Exclude redundant duplicate dictionaries that clone the entire variable scope
+            if k in ("parameter", "parameters") and isinstance(v, dict):
+                continue
+            if k == "variables" and isinstance(v, dict) and depth > 0:
+                continue
+            cleaned[k] = _sanitize_monitoring_variables(v, depth + 1)
+        return cleaned
+    elif isinstance(data, list):
+        if len(data) > 50:
+            return [_sanitize_monitoring_variables(item, depth + 1) for item in data[:50]] + [f"... [{len(data) - 50} more items]"]
+        return [_sanitize_monitoring_variables(item, depth + 1) for item in data]
+    elif isinstance(data, str):
+        if len(data) > 2000:
+            if data.startswith("data:") or len(data) > 20000:
+                return f"[Large Binary / Base64 Payload: {len(data)/1024/1024:.2f} MB]"
+            return data[:2000] + f"... [Truncated, total {len(data)} chars]"
+        return data
+    return data
+
+
 # 3. Get Process Variables of a specific instance
 @router.get("/instances/{id}/variables")
 def get_instance_variables(
@@ -152,6 +182,10 @@ def get_instance_variables(
                     # 1. Studio execution dictionary format
                     if isinstance(state_data.get("variables"), dict):
                         variables.update(state_data["variables"])
+                    elif isinstance(state_data.get("final_vars"), dict):
+                        variables.update(state_data["final_vars"])
+                    elif isinstance(state_data.get("initial_data"), dict):
+                        variables.update(state_data["initial_data"])
 
                     # 2. SpiffWorkflow task states format
                     tasks = state_data.get("tasks", {})
@@ -170,7 +204,7 @@ def get_instance_variables(
             except Exception as parse_ex:
                 variables = {"error": f"Failed to parse workflow variables: {parse_ex}"}
                 
-        return success_response(data=variables)
+        return success_response(data=_sanitize_monitoring_variables(variables))
     except Exception as e:
         return error_response(message=str(e), status_code=400)
 
