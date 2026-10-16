@@ -21,7 +21,7 @@ sequenceDiagram
     participant DB as Workflow Database
     participant WS as WebSocket Gateway
 
-    Note over Adapter: Automated steps complete; engine hits APPROVAL node
+    Note over Adapter: Automated steps complete and engine reaches APPROVAL node
     Adapter->>DB: Insert SpiffHumanTask (status='READY', role_code='MANAGER')
     Adapter->>DB: Update SpiffWorkflowInstance (status='WAITING')
     Adapter->>WS: Broadcast TASK_READY event

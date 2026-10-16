@@ -25,7 +25,7 @@ sequenceDiagram
     else HTTP 4xx / 5xx Error or Timeout
         External-->>APINode: Error Response / Connection Timeout
         APINode-->>Engine: Raise Step Failure Exception
-        Note over Engine: Instance marked FAILED; error logged in activity history
+        Note over Engine: Instance marked FAILED and error logged in activity history
     end
 ```
 

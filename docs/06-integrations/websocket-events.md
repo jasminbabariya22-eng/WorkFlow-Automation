@@ -23,7 +23,7 @@ sequenceDiagram
         WS-->>Client: Reply plain text "pong"
     end
 
-    Note over Engine: Workflow advances; state transition occurs
+    Note over Engine: Workflow advances and state transition occurs
     Engine->>Mgr: broadcast_event("TASK_READY", task_data, target_user_id)
     Mgr->>Client: Send JSON Frame: {"type": "TASK_READY", "data": {...}, "timestamp": "..."}
     Client->>Client: UI updates pending task badge and table row

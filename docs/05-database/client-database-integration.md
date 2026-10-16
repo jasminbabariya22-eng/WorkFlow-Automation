@@ -10,7 +10,7 @@ Instead, the platform interacts with client databases through dynamic schema int
 flowchart LR
     StudioUI["Studio UI / Designer"] -->|Request Schema| IntrospectionAPI["Introspection API\n(/workflow-studio/connections/*)"]
     IntrospectionAPI --> DynamicPool["DynamicEnginePool"]
-    DynamicPool -->|Decrypt Password (Fernet)| ClientDB[("Client Database\n(PostgreSQL, MySQL, MSSQL)")]
+    DynamicPool -->|"Decrypt Password (Fernet)"| ClientDB[("Client Database\n(PostgreSQL, MySQL, MSSQL)")]
     ClientDB -->|Live Schema Data| DynamicPool
     DynamicPool -->|Tables, Columns, Types, PKs| IntrospectionAPI
     IntrospectionAPI -->|JSON Schema Grid| StudioUI

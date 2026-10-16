@@ -20,8 +20,8 @@ flowchart TB
         ClientTables["• Business Entities (e.g. leave_requests, risk_register)\n• Master Users (mst_users)\n• Master Roles (mst_user_role)\n• Master Departments (mst_department)\n• SMTP Server Configs (email_server)"]
     end
 
-    WfEngine <-->|Read / Write Process State\n(WorkflowSessionLocal)| WorkflowStorage
-    WfEngine <-->|Parameterized CRUD & Schema Discovery\n(DynamicEnginePool)| ClientStorage
+    WfEngine <-->|"Read / Write Process State\n(WorkflowSessionLocal)"| WorkflowStorage
+    WfEngine <-->|"Parameterized CRUD & Schema Discovery\n(DynamicEnginePool)"| ClientStorage
 ```
 
 ---
