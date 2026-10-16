@@ -48,10 +48,10 @@ echo                        DEPLOYMENT SUCCESSFUL!
 echo ===============================================================================
 echo [STATUS] Application is running securely with SSL (HTTPS)
 echo.
-echo  - Workflow Studio UI (HTTPS):    https://192.168.1.191  (or https://localhost)
-echo  - Workflow Studio UI (HTTP):     http://192.168.1.191   (or http://localhost)
-echo  - Backend API Swagger Docs:      http://192.168.1.191:8000/docs
-echo  - Grafana Observability Portal:  http://192.168.1.191:3001
+echo  - Workflow Studio UI (HTTPS):    https://192.168.1.183  (or https://localhost)
+echo  - Workflow Studio UI (HTTP):     http://192.168.1.183   (or http://localhost)
+echo  - Backend API Swagger Docs:      http://192.168.1.183:8000/docs
+echo  - Grafana Observability Portal:  http://192.168.1.183:3001
 echo.
 echo  To view live logs:    docker compose logs -f
 echo  To rollback / stop:   docker_rollback.bat

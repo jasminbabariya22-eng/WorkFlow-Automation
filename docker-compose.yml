@@ -6,17 +6,18 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: ${DOCKER_HUB_USERNAME:-jasminbabariya22}/workflow-backend:${IMAGE_TAG:-latest}
     container_name: workflow-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - WORKFLOW_DATABASE_URL=${WORKFLOW_DATABASE_URL:-postgresql+psycopg2://postgres:Alethe%40123@192.168.1.171:5432/workflow_erm}
+      - WORKFLOW_DATABASE_URL=${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set in environment or .env file}
       - WORKFLOW_DB_SCHEMA=${WORKFLOW_DB_SCHEMA:-workflow}
-      - SECRET_KEY=${SECRET_KEY:-0eeedb8821a0a275fc8afb816145a44cee60bfc7f55f51b1f091cca47596cdb0}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set in environment or .env file}
       - ALGORITHM=${ALGORITHM:-HS256}
-      - FERNET_KEY=${FERNET_KEY:-ia3rsWe2JkwStfuoRIOdDtsghWrDuFY02l5tR-XyCIc=}
-      - MAIN_URL=${MAIN_URL:-https://192.168.1.191}
+      - FERNET_KEY=${FERNET_KEY:?FERNET_KEY must be set in environment or .env file}
+      - MAIN_URL=${MAIN_URL:-https://127.0.0.1}
     volumes:
       - backend_logs:/app/logs
       - backend_data:/app/data
@@ -36,6 +37,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    image: ${DOCKER_HUB_USERNAME:-jasminbabariya22}/workflow-frontend:${IMAGE_TAG:-latest}
     container_name: workflow-frontend
     restart: unless-stopped
     ports:
@@ -95,8 +97,8 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in environment or .env file}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning

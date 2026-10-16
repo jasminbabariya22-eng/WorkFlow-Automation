@@ -185,7 +185,13 @@ def execute_studio_workflow(
     action = payload.get("action")
     user_id = payload.get("user_id") or (current_user.get("user_id") if current_user else None)
     remarks = payload.get("remarks")
-    variables = payload.get("variables", {})
+    variables = dict(payload.get("variables") or {})
+    if current_user:
+        u_role = current_user.get("role") or current_user.get("role_code")
+        if u_role and "user_role" not in variables:
+            variables["user_role"] = u_role
+    if payload.get("user_role") and "user_role" not in variables:
+        variables["user_role"] = payload.get("user_role")
 
     if action:
         # Resume existing instance with action
@@ -228,7 +234,13 @@ def execute_studio_action(
     action = payload.get("action", "APPROVE")
     user_id = payload.get("user_id") or (current_user.get("user_id") if current_user else None)
     remarks = payload.get("remarks")
-    variables = payload.get("variables", {})
+    variables = dict(payload.get("variables") or {})
+    if current_user:
+        u_role = current_user.get("role") or current_user.get("role_code")
+        if u_role and "user_role" not in variables:
+            variables["user_role"] = u_role
+    if payload.get("user_role") and "user_role" not in variables:
+        variables["user_role"] = payload.get("user_role")
 
     return StudioExecutionAdapter.execute_action(
         entity_type=entity_type,

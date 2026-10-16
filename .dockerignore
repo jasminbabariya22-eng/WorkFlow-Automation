@@ -12,3 +12,32 @@ logs/
 *.sh
 SS/
 ClientApp/
+
+# Secrets & Environment Files
+.env
+.env.*
+!.env.example
+
+# Certificates & Private Keys
+*.pem
+*.key
+*.pfx
+*.cer
+*.crt
+Certificate/
+backend/certs/
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Python & Test Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
