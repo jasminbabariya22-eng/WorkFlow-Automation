@@ -119,7 +119,7 @@ if table_name not in ALLOWED_TABLES:
 # 2. Server injects mandatory identity predicate from verified token
 filters = list(payload.filters or [])
 if not current_user.get("is_admin"):
-    filters.append({"field": "employee_id", "operator": "=", "value": current_user["id"]})
+    filters.append({"field": "employee_id", "operator": "=", "value": current_user["user_id"]})
 ```
 
 ---

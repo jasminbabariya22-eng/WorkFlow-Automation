@@ -14,8 +14,9 @@ sequenceDiagram
     participant Mgr as WorkflowConnectionManager (Singleton)
     participant Engine as StudioExecutionAdapter / Job Worker
 
-    Client->>WS: Connect: ws://localhost:8000/ws/workflow?user_id=3
-    WS->>Mgr: connect(websocket, user_id="3")
+    Client->>WS: Connect: ws://localhost:8000/ws/workflow (with Auth Token)
+    WS->>WS: Authenticate Token & Derive user_id
+    WS->>Mgr: connect(websocket, user_id=authenticated_user_id)
     Mgr-->>Client: WebSocket Connected (Handshake complete)
 
     loop Heartbeat Keepalive
