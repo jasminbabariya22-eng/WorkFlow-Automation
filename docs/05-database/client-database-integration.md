@@ -2,9 +2,9 @@
 
 ## 1. Integration Mission & Zero-Hardcoding Principle
 
-A central architectural requirement of WorkFlow-Automation is **Zero Domain-Specific Hardcoding**. The backend Python codebase contains no hardcoded table definitions, business column names, or status identifiers for client domain entities.
+A central architectural requirement of WorkFlow-Automation is **Zero Domain-Specific Hardcoding for Domain CRUD**. For business domain record operations (querying, inserting, updating, and state synchronization of client entities), the backend contains no hardcoded table definitions, business column names, or domain status identifiers.
 
-Instead, the platform interacts with client databases through dynamic schema introspection, dynamic connection pooling, and runtime SQL parameterization implemented in `backend/app/core/database.py`.
+Instead, the platform interacts with client databases through dynamic schema introspection, dynamic connection pooling, and runtime SQL parameterization implemented in `backend/app/core/database.py`. Helper inspection services (such as master role discovery) use configurable candidate table sets without binding business entity CRUD to fixed tables.
 
 ```mermaid
 flowchart LR

@@ -44,10 +44,19 @@ erDiagram
 
     spiff_workflow_instance {
         int instance_id PK
-        int bpmn_definition_id FK
+        int bpmn_definition_id "untyped integer (no FK)"
         string status
     }
 ```
+
+### Instance-to-Version Mapping & Creation Paths
+
+The `spiff_workflow_instance.bpmn_definition_id` column is an untyped integer without a declared database foreign key constraint. What gets stored depends on the specific workflow creation path:
+- **Studio Execution Adapter (`StudioExecutionAdapter`)**: Stores `WorkflowVersion.workflow_version_id`. For these flows, execution pins directly to the published version's node/edge graph.
+- **BPMN XML Execution Paths**: Store `BPMNDefinition.id` (referencing BPMN XML definitions in `bpmn_definitions`).
+- **Generic / Legacy Execution Paths**: Store `WorkflowDefinition.workflow_id` (referencing `wf_definition`).
+
+Consequently, instances are pinned to `WorkflowVersion.workflow_version_id` specifically when instantiated via the Studio adapter, rather than universally across all engine creation paths.
 
 ---
 
@@ -86,7 +95,7 @@ When an external client application or trigger initiates a workflow:
 3. New instances are bound exclusively to the resolved published version.
 
 ### In-Flight Instance Isolation
-Instances already running when a new version is published continue executing against their original `workflow_version_id`. The engine traverses the nodes and connections associated with the version stamped on the instance at creation time.
+For Studio-created instances, jobs already running when a new version is published continue executing against their original `workflow_version_id`. The engine traverses the nodes and connections associated with the version stamped on the instance at creation time. Other execution paths execute against their respective definition records without migrating running instances.
 
 ---
 

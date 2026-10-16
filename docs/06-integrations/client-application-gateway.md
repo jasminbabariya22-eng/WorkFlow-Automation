@@ -89,18 +89,37 @@ flowchart LR
 ---
 
 ### D. Generic Client Database Query (`POST /client/query`)
-Allows client frontends to safely retrieve or filter records without writing custom backend endpoints:
+Allows client frontends to retrieve or filter records without writing custom backend endpoints.
+
+> [!IMPORTANT]
+> **Server-Enforced Scope & Access Control**: Access control must never rely on untrusted client-supplied `table_name` or filters. The gateway restricts execution to an explicit allowlist of authorized client tables and injects a mandatory server-owned row-scope predicate tied directly to `current_user` (e.g., scoping `employee_id = current_user["user_id"]`) to guarantee row-level isolation.
+
 ```json
 {
   "table_name": "leave_requests",
+  "connection_id": 1,
   "operation": "SELECT",
   "columns": ["id", "employee_id", "leave_type", "status", "created_at"],
   "filters": [
-    { "field": "employee_id", "operator": "=", "value": 105 }
+    { "field": "status", "operator": "=", "value": "PENDING" }
   ],
   "order_by": "created_at",
-  "order_direction": "DESC"
+  "order_direction": "DESC",
+  "limit": 50,
+  "offset": 0
 }
+```
+
+*Server-Side Enforcement Pattern:*
+```python
+# 1. Restrict to registered/authorized tables only
+if table_name not in ALLOWED_TABLES:
+    raise HTTPException(status_code=403, detail="Access to table is not permitted")
+
+# 2. Server injects mandatory identity predicate from verified token
+filters = list(payload.filters or [])
+if not current_user.get("is_admin"):
+    filters.append({"field": "employee_id", "operator": "=", "value": current_user["id"]})
 ```
 
 ---

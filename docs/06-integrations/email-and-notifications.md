@@ -60,8 +60,11 @@ When an email must be dispatched:
 
 The email dispatcher merges runtime context variables into the template body:
 
-### Variable Chip Syntax:
-Any variable available in the workflow execution context can be interpolated using `{{variable_name}}`:
+### Variable Chip Syntax & Context Interpolation:
+Any variable available in the workflow execution context can be interpolated using `{{variable_name}}` or `{variable_name}`.
+
+For HTML email bodies, the template interpolation engine HTML-escapes each substituted runtime value (via `html.escape()`) before embedding it into the document, protecting against HTML and script injection from user-provided data while preserving the template's own trusted markup tags intact:
+
 ```html
 <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0;">
   <h2 style="color: #4f46e5;">Leave Request Update</h2>

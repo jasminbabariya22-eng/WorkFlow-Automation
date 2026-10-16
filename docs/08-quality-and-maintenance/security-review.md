@@ -49,19 +49,22 @@ This document provides a code-informed security review of the **WorkFlow-Automat
 
 ---
 
-### Finding SEC-02: SQL Injection Defense (Implemented Control)
+### Finding SEC-02: SQL Injection Defense (Implemented Control for Structured Actions)
 - **Location**: `backend/app/core/database.py` and `backend/app/workflow_studio/runtime/actions.py`
-- **Status**: **VERIFIED SECURE**
-- **Severity**: Informational (Control Implemented)
+- **Status**: **VERIFIED SECURE (STRUCTURED ACTIONS ONLY)**
+- **Severity**: Informational (Structured DB Nodes) / Medium Operational Risk (Raw SQL Nodes)
 - **Evidence**:
-  All database CRUD nodes use SQLAlchemy `text()` constructs with named parameter bindings:
+  All structured database CRUD nodes (`READ_RECORD`, `CREATE_RECORD`, `UPDATE_RECORD`, `DELETE_RECORD`) use SQLAlchemy `text()` constructs with named parameter bindings:
   ```python
   conn.execute(
       text(f"SELECT * FROM {clean_table} WHERE {clean_col} = :bind_val"),
       {"bind_val": filter_value}
   )
   ```
-  Values supplied by users or upstream context memory are never concatenated into raw SQL strings. Table and column identifiers are validated against live schema introspection before query execution.
+  Values supplied by users or upstream context memory are bound as query parameters rather than concatenated into SQL strings, and table and column identifiers are validated against live schema introspection before query execution.
+  
+  **Explicit Exception — `RAW_SQL` / `EXECUTE_SQL` Action**:
+  The engine includes dedicated `RAW_SQL` and `EXECUTE_SQL` action handlers that execute caller-supplied SQL statements directly against client database connections. These raw SQL actions represent an explicit exception to the automated validation and parameterization guarantees; workflow authors utilizing `RAW_SQL` or `EXECUTE_SQL` nodes are responsible for manual query sanitization, and execution should be restricted to trusted administrative workflows.
 
 ---
 

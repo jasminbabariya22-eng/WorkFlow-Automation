@@ -40,7 +40,7 @@ This document provides a comprehensive reference for all registered FastAPI REST
 | `GET` | `/client/history/{module_code}/{record_id}` | Retrieves chronological workflow state history for a business record. | Yes |
 | `GET` | `/client/modules` | Lists all configured client module bindings. | Yes |
 
-#### Request Example: `POST /client/query`
+### Request Example: `POST /client/query`
 ```json
 {
   "table_name": "leave_requests",
@@ -57,7 +57,7 @@ This document provides a comprehensive reference for all registered FastAPI REST
 }
 ```
 
-#### Request Example: `POST /client/action/LEAVE`
+### Request Example: `POST /client/action/LEAVE`
 ```json
 {
   "record_id": 42,

@@ -137,14 +137,21 @@ def _sanitize_monitoring_variables(data: Any, depth: int = 0) -> Any:
     and multi-second network transfers from large base64 attachments or duplicates.
     """
     if depth > 4:
-        return str(data)[:200]
+        if isinstance(data, dict):
+            return "[Object (depth limit)]"
+        elif isinstance(data, list):
+            return "[Array (depth limit)]"
+        elif isinstance(data, str):
+            return data[:200] + "..." if len(data) > 200 else data
+        return data
+
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
-            # Exclude redundant duplicate dictionaries that clone the entire variable scope
-            if k in ("parameter", "parameters") and isinstance(v, dict):
+            # Exclude redundant duplicate dictionaries that clone the entire variable scope at nested levels
+            if depth > 0 and k in ("parameter", "parameters") and isinstance(v, dict):
                 continue
-            if k == "variables" and isinstance(v, dict) and depth > 0:
+            if depth > 0 and k == "variables" and isinstance(v, dict):
                 continue
             cleaned[k] = _sanitize_monitoring_variables(v, depth + 1)
         return cleaned

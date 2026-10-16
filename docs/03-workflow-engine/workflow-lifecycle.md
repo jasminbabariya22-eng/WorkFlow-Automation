@@ -54,8 +54,7 @@ stateDiagram-v2
         TaskIndexed --> ActionSubmitted: Client Submits Decision
     }
     
-    WAITING --> RUNNING: Action Approved / Resubmitted (execute_action)
-    WAITING --> REJECTED: Action Rejected (Flow reaches End_Rejected)
+    WAITING --> RUNNING: Decision Submitted (execute_action)
     
     RUNNING --> COMPLETED: Flow reaches End / Approved Terminal Node
     RUNNING --> REJECTED: Flow reaches End_Rejected Node

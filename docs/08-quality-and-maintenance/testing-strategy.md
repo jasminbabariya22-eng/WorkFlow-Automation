@@ -56,7 +56,7 @@ Located in `backend/tests/`, the test suite runs with Pytest and Pytest-Cov:
 
 Configured in `backend/tests/conftest.py`:
 - **In-Memory / Local SQLite**: Tests override `WORKFLOW_DATABASE_URL` with `sqlite:///main_test.db` to prevent touching production databases.
-- **Fixture `test_client`**: Creates an isolated HTTP client using `httpx.Client(app=app)`.
+- **Fixture `client`**: Provides an isolated test client using FastAPI's `TestClient` constructed with `fastapi_app` (from `from fastapi.testclient import TestClient` and `from app.main import app as fastapi_app`).
 - **Database Fixture `db_session`**: Creates clean tables via `Base.metadata.create_all()` before each test and tears them down after execution.
 
 ### Executing the Test Suite:

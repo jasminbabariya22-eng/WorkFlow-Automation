@@ -96,7 +96,7 @@ flowchart TD
 
 ### Prerequisites
 - **Python 3.11** (or 3.9+)
-- **Node.js 22 LTS** (or 18+) & `npm`
+- **Node.js 20.19+ or 22.12+** (Vite 8 minimum supported) & `npm`
 - **PostgreSQL 15+** (or SQLite for local evaluation)
 
 ---

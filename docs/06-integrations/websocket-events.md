@@ -31,15 +31,16 @@ sequenceDiagram
 
 ---
 
-## 2. Endpoint Specification
+## 2. Endpoint Specification & Secure Connection Flow
 
 - **URL**: `ws://<HOST>:8000/ws/workflow` (or `wss://` when TLS is enabled).
-- **Query Parameters**:
-  - `user_id` (string, optional): Client user identifier used to route user-specific notifications.
+- **Authentication & Identity Derivation**:
+  - Clients pass an authentication token (e.g., ticket parameter or session authorization).
+  - Rather than trusting an unverified client-supplied `user_id` query parameter, the server validates authentication first and extracts `user_id` from the authenticated user context.
 - **Connection Lifecycle**:
-  - **Connect**: Client initiates WebSocket handshake. Server accepts and stores connection in `active_connections` and `user_connections[user_id]`.
+  - **Authenticate & Connect**: The server validates the user's credentials before calling `ws_manager.connect(websocket, user_id=authenticated_user_id)`. The socket is then registered in `active_connections` and mapped under `user_connections[user_id]` using the verified identity for targeted notification routing.
   - **Keepalive**: Client sends string `"ping"` every 30 seconds; server replies `"pong"`.
-  - **Disconnect**: On socket disconnect or send failure, server removes the connection handle to prevent memory leaks.
+  - **Disconnect**: On socket disconnect or send failure, server cleans up the connection handle to prevent memory leaks.
 
 ---
 

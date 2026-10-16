@@ -91,8 +91,8 @@ When the user clicks **Save**:
      }
    }
    ```
-2. Sends payload to `PUT /workflow-studio/canvas/workflows/{id}` via `workflowStorage.saveCanvasWorkflow()`.
-3. The backend stores the layout in `wf_node` and `wf_connection` tables, synchronizing the BPMN definition XML in `bpmn_definition`.
+2. Sends payload to `PUT /workflow/definitions/{id}` with `json_content` via `workflowStorage.saveWorkflow()`.
+3. The backend stores the definition and serialized JSON canvas representation in `bpmn_definition.json_content`.
 
 ---
 

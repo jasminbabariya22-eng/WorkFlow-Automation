@@ -160,7 +160,24 @@ Indexes active and completed human approval gates.
 
 ---
 
-### H. `workflow_history` (`WorkflowHistory`)
+### H. `workflow_activity_history` (`SpiffActivityHistory`)
+Fine-grained chronological execution trace of individual workflow activities/steps.
+
+| Column Name | Data Type | Modifiers | Description |
+| :--- | :--- | :--- | :--- |
+| `activity_history_id` | `INTEGER` | PK, Autoincrement | Unique trace record identifier. |
+| `instance_id` | `INTEGER` | Not Null, Index | Bound execution instance reference (`spiff_workflow_instance`). |
+| `activity_id` | `VARCHAR(100)` | Not Null | Activity/node identifier from graph. |
+| `activity_name` | `VARCHAR(200)` | Nullable | Human-readable node label. |
+| `activity_type` | `VARCHAR(50)` | Not Null | Activity category (`SERVICE_TASK`, `USER_TASK`, `GATEWAY`, etc.). |
+| `status` | `VARCHAR(20)` | Not Null | Step outcome (`COMPLETED`, `FAILED`, `WAITING`). |
+| `variables` | `TEXT` | Default `'{}'`, Not Null | JSON snapshot of node execution variable context. |
+| `error_message` | `TEXT` | Nullable | Exception details or failure reason if step failed. |
+| `timestamp` | `TIMESTAMP` | Default `NOW()`, Not Null | Activity execution completion timestamp. |
+
+---
+
+### I. `workflow_history` (`WorkflowHistory`)
 Immutable audit log of state transitions.
 
 | Column Name | Data Type | Modifiers | Description |

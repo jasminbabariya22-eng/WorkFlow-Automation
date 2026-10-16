@@ -41,8 +41,7 @@ sequenceDiagram
 2. **Workflow DB Failure After Client DB Commit**:
    In the rare event that a client database update succeeds but the subsequent workflow state commit fails (e.g., sudden workflow database crash):
    - The business record in the client database will remain modified.
-   - The workflow instance state will not have advanced to the next node.
-   - **Remediation**: The platform exposes the activity history trace so administrators can inspect the failure and use the in-app test runner or jobs restart API (`POST /workflow/jobs/{id}/restart`) to resume the step.
+   - **Remediation**: Administrators must inspect the activity history trace and reconcile any already-committed client writes before restarting. Because `POST /workflow/jobs/{id}/restart` restarts execution from the `START` node and may repeat earlier `CREATE_RECORD` nodes, restart must only be invoked after confirming the restarted path is idempotent or applying appropriate manual compensation to prevent duplicate domain records.
 
 ---
 

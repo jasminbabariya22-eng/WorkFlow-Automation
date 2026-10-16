@@ -43,7 +43,7 @@ Clicking **`[View Trace]`** opens a multi-tabbed drawer for the selected instanc
 
 ### A. Execution Variables Tab
 - Displays runtime memory context passed through the workflow.
-- Renders sanitized JSON without freezing the DOM. Large base64 files and payloads exceeding 2,000 characters are safely represented with badge tokens (e.g. `[Large Binary / Base64 Payload: 1.25 MB]`).
+- Renders sanitized JSON without freezing the DOM: non-`data:` strings between 2,000 and 20,000 characters are cut to 2,000 characters and receive a `[Truncated, total X chars]` suffix, while `data:` URIs and strings exceeding 20,000 characters are represented by payload badges (e.g. `[Large Binary / Base64 Payload: 1.25 MB]`).
 - Includes initial input parameters, resolved database columns, API responses, and final calculation outputs.
 
 ### B. Activity Execution Logs Tab

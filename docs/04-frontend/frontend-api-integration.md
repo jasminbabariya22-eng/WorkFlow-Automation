@@ -15,47 +15,48 @@ The service client provides type-safe abstractions for:
 ## 2. Request Handling & Authentication
 
 ### Token Injection Pattern
-Every outgoing HTTP request constructed in `workflowStorage.js` automatically inspects `localStorage` for an active JWT token and attaches the standard `Authorization` header:
+In `workflowStorage.js`, only monitoring instance queries (`getInstances` and `getInstanceDetails`) inspect `localStorage` for an active JWT token and attach the standard `Authorization` header:
 
 ```javascript
-const getAuthHeaders = () => {
-  const headers = { 'Content-Type': 'application/json' };
-  const token = localStorage.getItem('token');
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return headers;
-};
+const token = localStorage.getItem('token');
+const headers = { 'Content-Type': 'application/json' };
+if (token) headers['Authorization'] = `Bearer ${token}`;
 ```
 
+Other requests across the service—including workflow definitions, database connections, schema introspection, telemetry, and metrics—do not send an `Authorization` header.
+
 ### Timeout & Resiliency
-Longer-running introspection and monitoring endpoints employ standard `AbortSignal.timeout(10000)` (10-second timeout) to ensure network latency or large telemetry transfers do not permanently hang UI components.
+Longer-running introspection and monitoring endpoints employ standard `AbortSignal.timeout(...)` (e.g., 5-second to 12-second timeouts) to ensure network latency or large telemetry transfers do not permanently hang UI components.
 
 ---
 
 ## 3. Key Service Methods
 
-### A. Workflow & Canvas Lifecycle
-- `workflowStorage.getWorkflows()`: Calls `GET /workflow-studio/canvas/workflows`.
-- `workflowStorage.getCanvasWorkflow(id)`: Calls `GET /workflow-studio/canvas/workflows/{id}` to load nodes and edges for the Designer canvas.
-- `workflowStorage.saveCanvasWorkflow(id, payload)`: Calls `PUT /workflow-studio/canvas/workflows/{id}` to commit node positions and configurations.
-- `workflowStorage.validateCanvasWorkflow(id)`: Calls `POST /workflow-studio/canvas/workflows/{id}/validate`.
-- `workflowStorage.publishCanvasWorkflow(id)`: Calls `POST /workflow-studio/canvas/workflows/{id}/publish`.
+### A. Workflow Lifecycle
+- `workflowStorage.getWorkflows()`: Calls `GET /workflow/definitions` to retrieve stored workflow definitions.
+- `workflowStorage.getWorkflowById(id)`: Calls `GET /workflow/definitions/{id}` to load a definition with its `json_content` (nodes and edges) and BPMN XML.
+- `workflowStorage.createWorkflow(draft)`: Calls `POST /workflow/definitions` to initialize a new workflow specification.
+- `workflowStorage.saveWorkflow(id, updates)`: Calls `PUT /workflow/definitions/{id}` with serialized `json_content` and metadata.
+- `workflowStorage.duplicateWorkflow(id)`: Calls `POST /workflow/definitions/{id}/duplicate`.
+- `workflowStorage.publishWorkflow(id)`: Calls `POST /workflow/definitions/{id}/publish`.
+- `workflowStorage.deleteWorkflow(id)`: Calls `DELETE /workflow/definitions/{id}`.
 
 ### B. Database Connections & Introspection
 - `workflowStorage.getDbConnections()`: Calls `GET /workflow-studio/connections`.
-- `workflowStorage.testDbConnection(config)`: Calls `POST /workflow-studio/connections/test` with connection parameters.
-- `workflowStorage.getTables(connId)`: Calls `GET /workflow-studio/connections/{connId}/tables`.
-- `workflowStorage.getColumns(connId, tableName)`: Calls `GET /workflow-studio/connections/{connId}/tables/{tableName}/columns`.
-- `workflowStorage.getMasterRoles(connId)`: Calls `GET /workflow-studio/connections/{connId}/roles`.
+- `workflowStorage.testDatabaseConnection(payload)`: Calls `POST /workflow-studio/connections/test` with connection credentials.
+- `workflowStorage.getConnectionTables(connectionId, schema)`: Calls `GET /workflow-studio/connections/{connectionId}/tables`.
+- `workflowStorage.getMetadataTableColumns(tableName, connectionId)`: Calls `GET /workflow-studio/metadata/tables/{tableName}/columns`.
+- `workflowStorage.getMetadataRoles(connectionId)`: Calls `GET /workflow-studio/metadata/roles`.
 
 ### C. Monitoring & Telemetry
-- `workflowStorage.getInstances(limit, offset)`: Calls `GET /workflow/monitoring/instances`.
-- `workflowStorage.getInstanceDetails(instanceId)`: Executes parallel `Promise.allSettled()` fetching:
+- `workflowStorage.getInstances()`: Calls `GET /workflow/monitoring/instances` (takes no arguments; passes bearer token).
+- `workflowStorage.getInstanceDetails(instanceId)`: Executes parallel `Promise.allSettled()` fetching (with bearer token):
   - `GET /workflow/monitoring/instances/{instanceId}/variables`
   - `GET /workflow/monitoring/instances/{instanceId}/logs`
   - `GET /workflow/monitoring/instances/{instanceId}/history`
-- `workflowStorage.getTelemetry()`: Calls `GET /workflow/monitoring/telemetry`.
+- `workflowStorage.getLiveTelemetry(params)`: Calls `GET /workflow/monitoring/telemetry` with optional query filters.
+- `workflowStorage.getObservabilityMetrics()`: Calls `GET /workflow/monitoring/metrics`.
+- `workflowStorage.clearTelemetryBuffer()`: Calls `POST /workflow/monitoring/telemetry/clear`.
 
 ---
 
